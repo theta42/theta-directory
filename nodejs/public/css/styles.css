@@ -17,3 +17,8 @@ div.card-body{
 	padding-left: 1.5em;
 	padding-right: 1.5em;
 }
+
+
+.my-2 > a {
+	padding-right: .5em;
+}

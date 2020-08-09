@@ -156,10 +156,16 @@
 			currentUser = user;
 			renderProfile(user);
 			renderUserGroups(user);
+			$('#username').text(user.uid);
 		});
 
 	});
 </script>
+<style type="text/css">
+	.services-list i{
+		padding-right: .5em;
+	}
+</style>
 <div class="row" style="display:none">
 	<div class="col-md-4">
 		<div class="shadow-lg card mb-3 card-default">
@@ -174,7 +180,7 @@
 			</div>
 			<div class="card-body">
 
-				<button onclick="getInvite(this)" class="shadow">New Invite Token</button>
+				<button onclick="getInvite(this)" class="btn btn-outline-dark shadow">New Invite Token</button>
 				<div>
 					<b id="invite_token"></b>
 				</div>
@@ -192,7 +198,11 @@
 			<div class="card-header shadow actionMessage" style="display:none">
 			</div>
 			<div class="card-body">
-				<ul class="list-group text-dark">
+				<ul class="list-group text-dark services-list">
+					<li class="list-group-item text-dark">
+							<i class="fad fa-terminal"></i>
+							SSH <b id="username"></b>@718it.biz:22
+					</li>
 					<a href="https://emby.718it.biz/" target="_blank" class="text-dark">
 						<li class="list-group-item text-dark">
 								<i class="fad fa-film"></i>
@@ -205,16 +215,18 @@
 								Git server
 						</li>
 					</a>
+					<a href="https://rdp.vm42.us" target="_blank" class="text-dark">
+						<li class="list-group-item text-dark">
+								<i class="fad fa-desktop"></i>
+								Virtual Desk Top
+						</li>
+					</a>
 					<a href="https://pve.admin.vm42.us" target="_blank" class="text-dark">
 						<li class="list-group-item text-dark">
 								<i class="fad fa-server"></i>
 								Promox (contact wmanlty for access)
 						</li>
 					</a>
-					<li class="list-group-item text-dark">
-							<i class="fad fa-terminal"></i>
-							ssh:718it.biz
-					</li>
 				</ul>
 			</div>
 		</div>
