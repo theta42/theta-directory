@@ -51,8 +51,9 @@
 		Reset Password for {{uid}}
 	</h3>
 	<form action="user/{{uid}}/password" method="put" onsubmit="formAJAX(this)" class="form-group">
+		<div class="form-group">
 			<label class="control-label">Password</label>
-			<div class="input-group mb-3">
+			<div class="input-group mb-3 shadow">
 				<div class="input-group-prepend">
 					<span class="input-group-text" ><i class="fad fa-key"></i></span>
 				</div>
@@ -61,14 +62,14 @@
 		</div>
 		<div class="form-group">
 			<label class="control-label">Again</label>
-			<div class="input-group mb-3">
+			<div class="input-group mb-3 shadow">
 				<div class="input-group-prepend">
 					<span class="input-group-text" ><i class="fad fa-key"></i></span>
 				</div>
 				<input type="password" name="password" class="form-control" placeholder="hunter123!" validate="eq:userPassword" />
 			</div>
 		</div>
-		<button type="submit" class="btn btn-outline-dark">Change</button>
+		<button type="submit" class="btn btn-outline-secondary shadow">Change</button>
 	</form>
 
 </script>
@@ -155,24 +156,31 @@
 			currentUser = user;
 			renderProfile(user);
 			renderUserGroups(user);
+			$('#username').text(user.uid);
 		});
 
 	});
 </script>
+<style type="text/css">
+	.services-list i{
+		padding-right: .5em;
+	}
+</style>
 <div class="row" style="display:none">
 	<div class="col-md-4">
 		<div class="shadow-lg card mb-3 card-default">
-			<div class="card-header">
+			<div class="card-header shadow">
 				<i class="fas fa-user-plus"></i>
 				Invite User
 				<div class="float-right">
 					<i class="far fa-arrows-v"></i>
 				</div>
 			</div>
-			<div class="card-header actionMessage" style="display:none">
+			<div class="card-header shadow actionMessage" style="display:none">
 			</div>
 			<div class="card-body">
-				<button onclick="getInvite(this)">New Invite Token</button>
+
+				<button onclick="getInvite(this)" class="btn btn-outline-dark shadow">New Invite Token</button>
 				<div>
 					<b id="invite_token"></b>
 				</div>
@@ -180,17 +188,21 @@
 			</div>
 		</div>
 		<div class="shadow-lg card mb-3 card-default">
-			<div class="card-header">
+			<div class="card-header shadow">
 					<div class="float-right">
 						<i class="far fa-arrows-v"></i>
 					</div>
 					<i class="fad fa-th-list"></i>
 					Services
 			</div>
-			<div class="card-header actionMessage" style="display:none">
+			<div class="card-header shadow actionMessage" style="display:none">
 			</div>
 			<div class="card-body">
-				<ul class="list-group text-dark">
+				<ul class="list-group text-dark services-list">
+					<li class="list-group-item text-dark">
+							<i class="fad fa-terminal"></i>
+							SSH <b id="username"></b>@718it.biz:22
+					</li>
 					<a href="https://emby.718it.biz/" target="_blank" class="text-dark">
 						<li class="list-group-item text-dark">
 								<i class="fad fa-film"></i>
@@ -203,28 +215,30 @@
 								Git server
 						</li>
 					</a>
+					<a href="https://rdp.vm42.us" target="_blank" class="text-dark">
+						<li class="list-group-item text-dark">
+								<i class="fad fa-desktop"></i>
+								Virtual Desk Top
+						</li>
+					</a>
 					<a href="https://pve.admin.vm42.us" target="_blank" class="text-dark">
 						<li class="list-group-item text-dark">
 								<i class="fad fa-server"></i>
 								Promox (contact wmanlty for access)
 						</li>
 					</a>
-					<li class="list-group-item text-dark">
-							<i class="fad fa-terminal"></i>
-							ssh:718it.biz
-					</li>
 				</ul>
 			</div>
 		</div>
 		<div class="shadow-lg card">
-			<div class="card-header">
+			<div class="card-header shadow">
 				<i class="fad fa-undo-alt"></i>
 				Password Reset
 				<div class="float-right">
 					<i class="far fa-arrows-v"></i>
 				</div>
 			</div>
-			<div class="card-header actionMessage" style="display:none">
+			<div class="card-header shadow actionMessage" style="display:none">
 			</div>
 			<div id="passwordReset" class="card-body">
 
@@ -233,37 +247,37 @@
 	</div>
 	<div class="col-md-8">
 		<div id="userProfile" class="shadow-lg card card-default mb-8">
-			<div class="card-header">
+			<div class="card-header shadow">
 				<i class="fad fa-id-card"></i>
 				Profile
-				<div class="hover-effect float-right">
+				<div class="float-right">
 					<i class="far fa-arrows-v"></i>
 				</div>
 			</div>
-			<div class="card-header actionMessage" style="display:none">
+			<div class="card-header shadow actionMessage" style="display:none">
 			</div>
 			<div class="card-body">
 				<!-- User profile inserted by JS -->
 			</div>
-			<div class=card-footer>
-				<button type="button" onclick="editUser()" class="btn btn-warning btn-lg">
+			<div class="card-footer">
+				<button type="button" onclick="editUser()" class="btn btn-warning btn-lg shadow ">
 					<i class="fad fa-user-edit"></i>
 				</button>
-				<button type="button" onclick="app.user.remove({uid: currentUser.uid}, function(){app.util.actionMessage('username {{uid}} delete.', $(this), 'danger')})" class="btn btn-danger btn-lg float-right">
+				<button type="button" onclick="app.user.remove({uid: currentUser.uid}, function(){app.util.actionMessage('username {{uid}} delete.', $(this), 'danger')})" class="shadow btn btn-danger btn-lg float-right">
 					<i class="fad fa-user-slash"></i>
 				</button>
 			</div>
 		</div>
 
 		<div id="editProfile" class="shadow-lg card card-default mb-8" style="display:none">
-			<div class="card-header">
+			<div class="card-header shadow">
 				<i class="fad fa-id-card"></i>
 				Edit Profile
-				<div class="hover-effect float-right">
+				<div class="float-right">
 					<i class="far fa-arrows-v"></i>
 				</div>
 			</div>
-			<div class="card-header actionMessage" style="display:none">
+			<div class="card-header shadow actionMessage" style="display:none">
 			</div>
 			<div class="card-body">
 				<div id="tableAJAX">
@@ -274,14 +288,14 @@
 
 		<br />
 		<div class="shadow-lg card card-default mb-8">
-			<div class="card-header">
+			<div class="card-header shadow">
 				<i class="fad fa-id-card"></i>
 				My groups
-				<div class="hover-effect float-right">
+				<div class="float-right">
 					<i class="far fa-arrows-v"></i>
 				</div>
 			</div>
-			<div class="card-header actionMessage" style="display:none">
+			<div class="card-header shadow actionMessage" style="display:none">
 			</div>
 			<div class="card-body" style="padding-bottom:0">
 				<div class="table-responsive">

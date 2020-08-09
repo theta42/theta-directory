@@ -2,40 +2,40 @@
 	<input type="hidden" class="form-control" name="delete" value="false" />
 	<div class="form-group">
 		<label class="control-label">First name</label>
-		<input type="text" class="form-control" name="givenName" placeholder="John" validate=":3" />
+		<input type="text" class="form-control shadow" name="givenName" placeholder="John" validate=":3" />
 	</div>
 
 	<div class="form-group">
 		<label class="control-label">Last name</label>
-		<input type="text" class="form-control" name="sn" placeholder="smith" validate=":3" />
+		<input type="text" class="form-control shadow" name="sn" placeholder="smith" validate=":3" />
 	</div>
 
 	<div class="form-group">
 		<label class="control-label">Email</label>
-		<input type="text" class="form-control" name="mail" placeholder="jsmith@gmail.com" validate="email:3" />
+		<input type="text" class="form-control shadow" name="mail" placeholder="jsmith@gmail.com" validate="email:3" />
 	</div>
 
 	<div class="form-group">
 		<label class="control-label">SSH Public Key</label>
-		<input type="text" class="form-control" name="sshPublicKey" placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQ..." />
+		<input type="text" class="form-control shadow" name="sshPublicKey" placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQ..." />
 	</div>
 
 	<div class="form-group">
 		<label class="control-label">Mobile Phone</label>
-		<input type="text" class="form-control" name="mobile" placeholder="9175551234" validate=":9" />
+		<input type="text" class="form-control shadow" name="mobile" placeholder="9175551234" validate=":9" />
 	</div>
 
 	<div class="form-group">
 		<label class="control-label">Password</label>
-		<input type="password" class="form-control" name="userPassword" placeholder="Atleast 5 char. long" validate="password:5"/>
+		<input type="password" class="form-control shadow" name="userPassword" placeholder="Atleast 5 char. long" validate="password:5"/>
 	</div>
 	<div class="form-group">
 		<label class="control-label">Again</label>
-		<input type="password" class="form-control" name="passwordMatch" placeholder="Retype password" validate="eq:userPassword"/>
+		<input type="password" class="form-control shadow" name="passwordMatch" placeholder="Retype password" validate="eq:userPassword"/>
 	</div>
 	<div class="form-group">
 		<label class="control-label">User Description (Optional)</label>
-		<textarea class="form-control" name="description" placeholder="Admin group for gitea app"></textarea>
+		<textarea class="form-control shadow" name="description" placeholder="Admin group for gitea app"></textarea>
 	</div>
 	<button type="submit" class="btn btn-outline-dark">Add</button>
 </form>

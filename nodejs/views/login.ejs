@@ -15,10 +15,10 @@
 <div class="row">
 	<div class="card-deck">
 		<div class="shadow-lg card mb-3">
-			<div class="card-header">
+			<div class="card-header shadow">
 				Password Log in
 			</div>
-			<div class="card-header actionMessage" style="display:none">
+			<div class="card-header shadow actionMessage" style="display:none">
 			</div>
 			<div class="card-body">
 				<form action="auth/login" onsubmit="formAJAX(this)" evalAJAX="app.auth.setToken(data.token);window.location.href = app.util.getUrlParameter('redirect') || '/';">
@@ -26,7 +26,7 @@
 
 					<div class="form-group">
 						<label class="control-label">User name</label>
-						<div class="input-group mb-3">
+						<div class="input-group mb-3 shadow">
 						  <div class="input-group-prepend">
 						    <span class="input-group-text" ><i class="fad fa-user"></i></span>
 						  </div>
@@ -36,7 +36,7 @@
 
 					<div class="form-group">
 						<label class="control-label">Password</label>
-						<div class="input-group mb-3">
+						<div class="input-group mb-3 shadow">
 						  <div class="input-group-prepend">
 						    <span class="input-group-text" ><i class="fad fa-key"></i></span>
 						  </div>
@@ -49,10 +49,10 @@
 			</div>
 		</div>
 		<div class="shadow-lg card border-danger mb-3">
-			<div class="card-header">
+			<div class="card-header shadow">
 				Social Login
 			</div>
-			<div class="card-header actionMessage" style="display:none">
+			<div class="card-header shadow actionMessage" style="display:none">
 			</div>
 			<div class="card-body">
 				<h3>Coming soon!</h3>
@@ -66,10 +66,10 @@
 			</div>
 		</div>
 		<div class="shadow-lg card mb-3">
-			<div class="card-header">
+			<div class="card-header shadow">
 				Password Reset
 			</div>
-			<div class="card-header actionMessage" style="display:none">
+			<div class="card-header shadow actionMessage" style="display:none">
 			</div>
 			<div class="card-body">
 				<p>
@@ -83,7 +83,7 @@
 
 					<div class="form-group">
 						<label class="control-label">Email</label>
-						<div class="input-group mb-3">
+						<div class="input-group mb-3 shadow">
 						  <div class="input-group-prepend">
 						    <span class="input-group-text" ><i class="fad fa-at"></i></span>
 						  </div>
@@ -95,7 +95,6 @@
 				</form>
 			</div>
 		</div>
-	</div>
 	</div>
 </div>
 <%- include('bottom') %>

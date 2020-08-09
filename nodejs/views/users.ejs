@@ -1,6 +1,6 @@
 <%- include('top') %>
 <script id="rowTemplate" type="text/html">
-	<tr action="user/password/{{ username }}" method="put" evalAJAX="$form.trigger('reset')">
+	<tr class="" action="user/password/{{ username }}" method="put" evalAJAX="$form.trigger('reset')">
 		<td>
 			{{ uidNumber }}
 		</td>
@@ -68,30 +68,26 @@
 		</div>
 	</div>
 	<div class="col-md-8">
-		<div class="card shadow-lg">
+		<div class="card shadow">
 			<div class="card-header">
 				<i class="fad fa-th-list"></i>
 				User List
 			</div>
 			<div class="card-header actionMessage" style="display:none"></div>
-			<div class="card-body" style="padding-bottom:0">
-				<div class="table-responsive">
-					<table class="table">
-						<thead>
-							<th>id</th>
-							<th>uid</th>
-							<th>Name</th>
-							<th>eMail</th>
-							<th>Sudo</th>
-							<th>key</th>
-							<th></th>
-						</thead>
-						<tbody id="tableAJAX">
-							<!-- ajax loaded table -->
-						</tbody>
-					</table>
-				</div>
-			</div>
+			<table class="card-body table table-striped" style="margin-bottom:0">
+				<thead>
+					<th>ID</th>
+					<th>User Name</th>
+					<th>Name</th>
+					<th>eMail</th>
+					<th>Sudo</th>
+					<th>Key</th>
+					<th></th>
+				</thead>
+				<tbody id="tableAJAX">
+					<!-- ajax loaded table -->
+				</tbody>
+			</table>
 		</div>
 	</div>
 </div>

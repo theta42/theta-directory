@@ -20,7 +20,7 @@
 				return;
 			}
 
-			$( '<b>' ).html( ' - ' + error_message ).appendTo( $input.parents('.form-group').children( 'label' ) );
+			$( '<b style="color:#dc3545" class="jvalidate-error">' ).html( ' - ' + error_message ).appendTo( $input.parents('.form-group').children( 'label' ) );
 			$input.addClass("is-invalid");
 			failedCount++;
 			return false;
@@ -35,7 +35,7 @@
 			value = $input.val(), //link to input value
 			rule = attr[0];
 
-		$input.parents('.form-group').children( 'label' ).children( 'b' ).remove(); //removes old error
+		$input.parents('.form-group').children( 'label' ).children( '.jvalidate-error' ).remove(); //removes old error
 		$input.removeClass( "is-invalid" ); //removes is-invalid class
 
 		//checks if field is required, and length 

@@ -52,6 +52,7 @@ router.post('/resetpassword/:token', async function(req, res, next){
 		if(token.is_valid && 86400000+Number(token.created_on) > (new Date).getTime()){
 			let user = await User.get(token.created_by);
 			await user.setPassword(req.body);
+			token.update({is_valid: false});
 			return res.json({
 				message: 'Password has been changed.'
 			});

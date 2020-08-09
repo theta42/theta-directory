@@ -1,7 +1,7 @@
 <%- include('top') %>
 <script id="rowTemplate" type="text/html">
 	<p>
-	<div class="card shadow-lg">
+	<div class="card shadow">
 		<div class="card-header">
 			<i class="fad fa-users-class"></i>
 			Group: {{ cn }}
@@ -13,7 +13,7 @@
 			<p>
 				<ul class="list-group">
 				{{ #member }}
-					<li class="list-group-item">
+					<li class="list-group-item shadow">
 						<i class="fad fa-user"></i> {{ uid }}
 						<button type="button" action="group/{{groupCN}}/{{uid}}" method="delete" onclick="formAJAX(this)" evalAJAX="tableAJAX(data.message)" class="btn btn-sm btn-danger float-right">
 							<i class="fad fa-user-slash"></i>
@@ -26,7 +26,7 @@
 			<button class="btn btn-secondary dropdown-toggle" type="button" id="dropdownMenuButton" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
 				<i class="fad fa-user-plus"></i>
 			</button>
-			<div class="dropdown-menu" aria-labelledby="dropdownMenuButton">
+			<div class="dropdown-menu shadow-lg" aria-labelledby="dropdownMenuButton">
 			{{ #toAdd }}{{#.}}
 				<a class="dropdown-item" action="group/{{groupCN}}/{{uid}}" method="put" onclick="formAJAX(this)" evalAJAX="tableAJAX(data.message)">
 					<i class="fad fa-user"></i> {{uid}}
@@ -103,12 +103,12 @@
 				<form action="group/" method="post" onsubmit="formAJAX(this)" evalAJAX="tableAJAX('')">
 					<div class="form-group">
 						<label class="control-label">Name</label>
-						<input type="text" class="form-control" name="name" placeholder="app_gitea_admin" validate=":3" />
+						<input type="text" class="form-control shadow" name="name" placeholder="app_gitea_admin" validate=":3" />
 					</div>
 
 					<div class="form-group">
 						<label class="control-label">Description</label>
-						<textarea class="form-control" name="description" placeholder="Admin group for gitea app" validate=":3"></textarea>
+						<textarea class="form-control shadow" name="description" placeholder="Admin group for gitea app" validate=":3"></textarea>
 					</div>
 
 					<button type="submit" class="btn btn-outline-dark">Add</button>

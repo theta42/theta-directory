@@ -1,13 +1,24 @@
 
-.hover-effect {
-	transition: all .5s ease;
+*{
+	transition: all .4s ease;
 }
 
-.hover-effect:hover {
-	color: darkblue;
-	transition: all .5s ease;
+a:hover, button:hover, div.form-group:hover{
+	color: inherit;
+	transition: all .4s ease;
 	background-color: inherit;
-	-ms-transform: scale(1.1);
-	-webkit-transform: scale(1.1); 
-	transform: scale(1.1); /* Standard syntax */
+	-ms-transform: scale(1.05);
+	-webkit-transform: scale(1.05); 
+	transform: scale(1.05); /* Standard syntax */
+	z-index: 999999;
+}
+
+div.card-body{
+	padding-left: 1.5em;
+	padding-right: 1.5em;
+}
+
+
+.my-2 > a {
+	padding-right: .5em;
 }
