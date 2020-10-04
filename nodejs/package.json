@@ -12,12 +12,12 @@
     "start": "node ./bin/www"
   },
   "dependencies": {
-    "@sendgrid/mail": "^7.1.0",
-    "ejs": "^3.0.1",
+    "@sendgrid/mail": "^7.2.6",
+    "ejs": "^3.1.5",
     "express": "~4.16.1",
     "extend": "^3.0.2",
-    "ldapts": "^2.2.1",
-    "moment": "^2.25.3",
+    "ldapts": "^2.7.0",
+    "moment": "^2.29.0",
     "mustache": "^4.0.1",
     "nodemon": "^2.0.4",
     "redis": "^2.8.0",
