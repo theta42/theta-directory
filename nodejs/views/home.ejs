@@ -157,6 +157,8 @@
 			renderProfile(user);
 			renderUserGroups(user);
 			$('#username').text(user.uid);
+			$('form[action="user/{{uid}}"]').attr('action', 'user/'+user.uid)
+
 		});
 
 	});
@@ -263,9 +265,19 @@
 				<button type="button" onclick="editUser()" class="btn btn-warning btn-lg shadow ">
 					<i class="fad fa-user-edit"></i>
 				</button>
-				<button type="button" onclick="app.user.remove({uid: currentUser.uid}, function(){app.util.actionMessage('username {{uid}} delete.', $(this), 'danger')})" class="shadow btn btn-danger btn-lg float-right">
+
+				<form action="user/{{uid}}" method="delete" onsubmit="formAJAX(this)" evalAJAX="window.location.href = '/users'" class="float-right">
+					<button type="submit" class="btn btn-lg btn-danger">
+						<i class="fad fa-user-slash"></i>
+					</button>
+				</form>
+
+
+<!-- 				<button type="button" onclick="app.user.remove({uid: currentUser.uid}, function(){app.util.actionMessage('username {{uid}} delete.', $(this), 'danger')})" class="shadow btn btn-danger btn-lg float-right">
 					<i class="fad fa-user-slash"></i>
-				</button>
+				</button> -->
+
+
 			</div>
 		</div>
 

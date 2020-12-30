@@ -20,15 +20,17 @@
 			{{#sshPublicKey}}<i class="fad fa-check-square"></i>{{/sshPublicKey}}
 		</td>
 		<td>
-			<button type="button" onclick="app.user.remove({uid: '{{uid}}'}, function(){renderUsers('username {{uid}} delete.')})" class="btn btn-sm btn-danger">
-				<i class="fad fa-user-slash"></i>
-			</button>
+			<form action="user/{{uid}}" method="delete" onsubmit="formAJAX(this)" evalAJAX="renderUsers('Deleted {{uid}}', 'success')">
+				<button type="submit" class="btn btn-sm btn-danger">
+					<i class="fad fa-user-slash"></i>
+				</button>
+			</form>
 		</td>
 	</tr>
 </script>
 <script type="text/javascript">
 
-	function renderUsers(actionMessage){
+	function renderUsers(actionMessage, type){
 		var rowTemplate = $('#rowTemplate').html();
 		var $target = $('#tableAJAX');
 
@@ -44,14 +46,14 @@
 
 			$target.fadeIn('slow');
 
-			app.util.actionMessage(actionMessage || '', $target, 'info');
+			app.util.actionMessage(actionMessage || '', $target, type || 'info');
 
 		});
 	}
 
 	$(document).ready(function(){
 		renderUsers(); //populate the table
-		$('form[action="user/"]').attr('evalAJAX', 'renderUsers()')
+		$('form[action="user/"]').attr('evalAJAX', 'renderUsers("User added", "success")')
 	});
 </script>
 <div class="row" style="display:none">

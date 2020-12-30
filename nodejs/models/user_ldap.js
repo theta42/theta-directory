@@ -325,8 +325,6 @@ User.verifyEmail = async function(data){
 		let token = await InviteToken.get(data.token);
 		await token.update({mail: data.mail})
 
-		console.log(`email link ${data.url}/login/invite/${token.token}/${token.mail_token}`)
-
 		await Mail.sendTemplate(
 			data.mail,
 			'validate_link',
