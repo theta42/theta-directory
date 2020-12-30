@@ -3,7 +3,7 @@
 	transition: all .4s ease;
 }
 
-a:hover, button:hover, div.form-group:hover{
+a:hover, button:hover, div.form-group:hover, header nav a{
 	color: inherit;
 	transition: all .4s ease;
 	background-color: inherit;
@@ -21,4 +21,8 @@ div.card-body{
 
 .my-2 > a {
 	padding-right: .5em;
+}
+
+header nav svg{
+	margin-right: .4em
 }
