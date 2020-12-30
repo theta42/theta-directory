@@ -54,9 +54,11 @@ app.use(function(req, res, next) {
 // Error handler. This is where `next()` will go on error
 app.use(function(err, req, res, next) {
   console.error(err.status || res.status, err.name, req.method, req.url);
-  console.error(err.message);
-  console.error(err.stack);
-  console.error('=========================================');
+  if(['404'].includes(err.status || res.status)){
+    console.error(err.message);
+    console.error(err.stack);
+    console.error('=========================================');
+  }
 
   res.status(err.status || 500);
   res.json({name: err.name, message: err.message});
