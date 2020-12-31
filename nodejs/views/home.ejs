@@ -1,22 +1,39 @@
 <%- include('top') %>
 <script id="profileTemplate" type="text/html">
-	<h2><i>User Name:</i> <b>{{uid}}</b></h2>
-	<i>Name:</i> <b>{{givenName}} {{sn}}</b><br />
-	<i>Email:</i> <b>{{mail}} </b><br />
-	<i>Joined:</i> <b>{{createTimestamp}} </b>, <i>Edited:</i> <b>{{modifyTimestamp}} </b><br />
-	<i>Phone:</i> <b>{{mobile}} </b><br />
-	<i>LDAP DN:</i> <b>{{dn}} </b><br />
-	<i>Home Directory:</i> <b>{{homeDirectory}} </b><br />
-	<i>Login Shell:</i> <b>{{loginShell}} </b><br />
-	<i>SSH Public Key:</i> <b>{{sshPublicKey}}</b><br />
-	<i>Unix User ID:</i> <b>{{uidNumber}} </b><br />
-	<i>Unix Group ID:</i> <b>{{gidNumber}} </b><br />
-	<i>Description:</i><br>
-	<p>
-		{{description}}
-	</p>
-	<img id="profile_photo" >
+	<div class="card-body profile-body-{{uid}}">
+		<h2><i>User Name:</i> <b>{{uid}}</b></h2>
+		<i>Name:</i> <b>{{givenName}} {{sn}}</b><br />
+		<i>Email:</i> <b>{{mail}} </b><br />
+		<i>Phone:</i> <b>{{mobile}} </b><br />
+		<i>LDAP DN:</i> <b>{{dn}} </b><br />
+		<i>Home Directory:</i> <b>{{homeDirectory}} </b><br />
+		<i>Login Shell:</i> <b>{{loginShell}} </b><br />
+		<i>SSH Public Key:</i> <b>{{sshPublicKey}}</b><br />
+		<i>Unix User ID:</i> <b>{{uidNumber}} </b><br />
+		<i>Unix Group ID:</i> <b>{{gidNumber}} </b><br />
+		<i>Description:</i><br>
+		<p>
+			{{description}}
+		</p>
+		<!-- <img id="profile_photo" /> -->
+	</div>
+	<div class="card-footer profile-body-{{uid}}">
+		<div class="float-left">
+			<i>Joined:</i> <b>{{createTimestamp}} </b> <br/>
+			<i>Edited:</i> <b>{{modifyTimestamp}} </b>
+		</div>
+		<div class="float-right">
+			<button type="button" onclick="editUser()" class="btn btn-warning btn shadow ">
+				<i class="fad fa-user-edit"></i>
+			</button>
+			<button type="submit" class="btn btn btn-danger" action="user/{{uid}}" method="delete" onsubmit="formAJAX(this)" evalAJAX="window.location.href = '/users'">
+				<i class="fad fa-user-slash"></i>
+			</button>
+		</div>
+
+	</div>
 </script>
+
 
 <script id="groupRowTemplate" type="text/html">
 	<tr>
@@ -27,7 +44,7 @@
 
 <script id="userEditTemplate" type="text/html">
 	<h3>Editing {{uid}}</h3>
-	<form action="user/{{uid}}" method="put" onsubmit="formAJAX(this)" evalAJAX="editUserSeccess()">
+	<form action="user/{{uid}}" method="put" onsubmit="formAJAX(this)" evalAJAX="editUserSeccess(data.message)">
 		<div class="form-group">
 			<label class="control-label">SSH Public Key</label>
 			<input type="text" class="form-control" name="sshPublicKey" placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQ..." value="{{sshPublicKey}}" />
@@ -82,16 +99,20 @@
 		});
 	}
 
-	function renderProfile(user){
+	function renderProfile(user, message){
 		var profileTemplate = $('#profileTemplate').html();
 		var paswordResetTemplate = $('#paswordResetTemplate').html(); 
-		var $target = $('#userProfile div.card-body');
+		var $target = $('#userProfile div.actionMessage');
+
+		$('.profile-body-'+user.uid).remove();
+
+		app.util.actionMessage(message, $target, 'success')
 
 		// data.photo = unescape(encodeURIComponent(data.jpegPhoto));
 		user.createTimestamp = moment(user.createTimestamp, "YYYYMMDDHHmmssZ").fromNow();
 		user.modifyTimestamp = moment(user.modifyTimestamp, "YYYYMMDDHHmmssZ").fromNow();
 
-		$target.html(Mustache.render(profileTemplate, user));
+		$target.after(Mustache.render(profileTemplate, user));
 
 		$('#passwordReset').html(Mustache.render(paswordResetTemplate, user))
 	};
@@ -103,7 +124,7 @@
 
 			$target.html('')
 			if(error){
-				app.utils.actionMessage(data.message, $target, 'danger');
+				app.util.actionMessage(data.message, $target, 'danger');
 			}else{
 				for(var group of data.results){
 					$target.append(Mustache.render(groupRowTemplate, group));
@@ -137,15 +158,17 @@
 		});
 	}
 
-	function editUserSeccess(){
+	function editUserSeccess(message){
 		console.log('edit done')
 		$('#editProfile').slideUp();
-		determinUser(function(user){
-			currentUser = user;
-			app.auth.user = user;
-			renderProfile(user);
-			renderUserGroups(user);
-			$('#userProfile').slideDown();
+		app.auth.isLoggedIn(function(){
+			determinUser(function(user){
+				currentUser = user;
+				app.auth.user = user;
+				renderProfile(user, message);
+				renderUserGroups(user);
+				$('#userProfile').slideDown();
+			});
 		});
 	}
 
@@ -157,6 +180,8 @@
 			renderProfile(user);
 			renderUserGroups(user);
 			$('#username').text(user.uid);
+			$('form[action="user/{{uid}}"]').attr('action', 'user/'+user.uid)
+
 		});
 
 	});
@@ -218,7 +243,7 @@
 					<a href="https://rdp.vm42.us" target="_blank" class="text-dark">
 						<li class="list-group-item text-dark">
 								<i class="fad fa-desktop"></i>
-								Virtual Desk Top
+								Virtual Desktops
 						</li>
 					</a>
 					<a href="https://pve.admin.vm42.us" target="_blank" class="text-dark">
@@ -256,16 +281,7 @@
 			</div>
 			<div class="card-header shadow actionMessage" style="display:none">
 			</div>
-			<div class="card-body">
-				<!-- User profile inserted by JS -->
-			</div>
-			<div class="card-footer">
-				<button type="button" onclick="editUser()" class="btn btn-warning btn-lg shadow ">
-					<i class="fad fa-user-edit"></i>
-				</button>
-				<button type="button" onclick="app.user.remove({uid: currentUser.uid}, function(){app.util.actionMessage('username {{uid}} delete.', $(this), 'danger')})" class="shadow btn btn-danger btn-lg float-right">
-					<i class="fad fa-user-slash"></i>
-				</button>
+			<div class="profile-body">
 			</div>
 		</div>
 

@@ -2,13 +2,12 @@
 
 const router = require('express').Router();
 const {User} = require('../models/user_ldap');
-const {Group} = require('../models/group_ldap'); 
+const {Group} = require('../models/group_ldap');
+const permission = require('../utils/permission'); 
 
 router.get('/', async function(req, res, next){
 	try{
 		let member = req.query.member ? await User.get(req.query.member) : {}
-
-		console.log('member', member)
 
 		return res.json({
 			results:  await Group[req.query.detail ? "listDetail" : "list"](member.dn)
@@ -20,6 +19,9 @@ router.get('/', async function(req, res, next){
 
 router.post('/', async function(req, res, next){
 	try{
+
+		await permission.byGroup(req.user, ['app_sso_admin']);
+
 		req.body.owner = req.user.dn;
 		return res.json({
 			results: await Group.add(req.body),
@@ -40,39 +42,80 @@ router.get('/:name', async function(req, res, next){
 	}
 });
 
-router.put('/:name/:uid', async function(req, res, next){
+router.put('/owner/:group/:uid', async function(req, res, next){
 	try{
-		var group = await Group.get(req.params.name);
+
+		await permission.byGroup(req.user, ['app_sso_admin'], [req.params.group]);
+
+		var group = await Group.get(req.params.group);
+		var user = await User.get(req.params.uid);
+		return res.json({
+			results: group.addOwner(user),
+			message: `Added owner ${req.params.uid} to ${req.params.group} group.`
+		});
+	}catch(error){
+		next(error);
+	}
+});
+
+router.delete('/owner/:group/:uid', async function(req, res, next){
+	try{
+
+		await permission.byGroup(req.user, ['app_sso_admin'], [req.params.group]);
+
+		var group = await Group.get(req.params.group);
+		var user = await User.get(req.params.uid);
+		return res.json({
+			results: group.removeOwner(user),
+			message: `Removed Owner ${req.params.uid} from ${req.params.group} group.`
+		});
+	}catch(error){
+		next(error);
+	}
+});
+
+router.put('/:group/:uid', async function(req, res, next){
+	try{
+
+		await permission.byGroup(req.user, ['app_sso_admin'], [req.params.group]);
+
+		var group = await Group.get(req.params.group);
 		var user = await User.get(req.params.uid);
 		return res.json({
 			results: group.addMember(user),
-			message: `Added user ${req.params.uid} to ${req.params.name} group.`
+			message: `Added user ${req.params.uid} to ${req.params.group} group.`
 		});
 	}catch(error){
 		next(error);
 	}
 });
 
-router.delete('/:name/:uid', async function(req, res, next){
+router.delete('/:group/:uid', async function(req, res, next){
 	try{
-		var group = await Group.get(req.params.name);
+
+		await permission.byGroup(req.user, ['app_sso_admin'], [req.params.group]);
+
+		var group = await Group.get(req.params.group);
 		var user = await User.get(req.params.uid);
 		return res.json({
 			results: group.removeMember(user),
-			message: `Removed user ${req.params.uid} from ${req.params.name} group.`
+			message: `Removed user ${req.params.uid} from ${req.params.group} group.`
 		});
 	}catch(error){
 		next(error);
 	}
 });
 
-router.delete('/:name', async function(req, res, next){
+router.delete('/:group', async function(req, res, next){
 	try{
-		var group = await Group.get(req.params.name);
+
+		await permission.byGroup(req.user, ['app_sso_admin'], [req.params.group]);
+
+		var group = await Group.get(req.params.group);
 		return res.json({
 			removed: await group.remove(),
 			results: group,
-			message: `Group ${req.params.name} Deleted`
+			message: `Group ${req.params.group} Deleted`
 		});
 	}catch(error){
 		next(error);

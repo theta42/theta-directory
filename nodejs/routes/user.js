@@ -2,6 +2,7 @@
 
 const router = require('express').Router();
 const {User} = require('../models/user'); 
+const permission = require('../utils/permission');
 
 router.get('/', async function(req, res, next){
 	try{
@@ -15,6 +16,8 @@ router.get('/', async function(req, res, next){
 
 router.post('/', async function(req, res, next){
 	try{
+		await permission.byGroup(req.user, ['app_sso_admin'])
+		
 		req.body.created_by = req.user.uid
 
 		return res.json({results: await User.add(req.body)});
@@ -25,7 +28,14 @@ router.post('/', async function(req, res, next){
 
 router.delete('/:uid', async function(req, res, next){
 	try{
-		let user = await User.get(req.params.uid);
+		let user;
+
+		if(req.params.uid.toLowerCase() === req.user.uid.toLowerCase()){
+			user = req.user;	
+		}else{
+			user = await User.get(req.params.uid);
+			await permission.byGroup(req.user, ['app_sso_admin'])
+		}
 
 		return res.json({uid: req.params.uid, results: await user.remove()})
 	}catch(error){
@@ -35,9 +45,14 @@ router.delete('/:uid', async function(req, res, next){
 
 router.put('/:uid', async function(req, res, next){
 	try{
-		let user = await User.get(req.params.uid);
+		let user;
 
-		// console.log('update user', user);
+		if(req.params.uid.toLowerCase() === req.user.uid.toLowerCase()){
+			user = req.user;	
+		}else{
+			user = await User.get(req.params.uid);
+			await permission.byGroup(req.user, ['app_sso_admin'])
+		}
 
 		return res.json({
 			results: await user.update(req.body),
@@ -68,7 +83,15 @@ router.put('/password', async function(req, res, next){
 
 router.put('/:uid/password', async function(req, res, next){
 	try{
-		let user = await User.get(req.params.uid);
+		let user;
+
+		if(req.params.uid.toLowerCase() === req.user.uid.toLowerCase()){
+			user = req.user;	
+		}else{
+			user = await User.get(req.params.uid);
+			await permission.byGroup(req.user, ['app_sso_admin'])
+		}
+
 		return res.json({
 			results: await user.setPassword(req.body),
 			message: `User ${user.uid} password changed.`

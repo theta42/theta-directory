@@ -76,7 +76,7 @@ async function addLdapUser(client, data){
 	var group;
 
   try{
-	data.uid = `${data.givenName[0]}${data.sn}`;
+	data.uid = `${data.givenName[0]}${data.sn}`.toLowerCase();
 	data.cn = data.uid;
 	data.loginShell = '/bin/bash';
 	data.homeDirectory= `/home/${data.uid}`;
@@ -324,6 +324,7 @@ User.verifyEmail = async function(data){
 
 		let token = await InviteToken.get(data.token);
 		await token.update({mail: data.mail})
+
 		await Mail.sendTemplate(
 			data.mail,
 			'validate_link',

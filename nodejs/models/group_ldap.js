@@ -20,6 +20,7 @@ async function getGroups(client, member){
 
 		return groups.map(function(group){
 			if(!Array.isArray(group.member)) group.member = [group.member];
+			if(!Array.isArray(group.owner)) group.owner = [group.owner];
 			return group
 		});
 	}catch(error){
@@ -81,6 +82,41 @@ async function removeMember(client, group, user){
 	}
 }
 
+async function addOwner(client, group, user){
+	try{
+		await client.modify(group.dn, [
+			new Change({
+				operation: 'add',
+				modification: new Attribute({
+					type: 'owner',
+					values: [user.dn] 
+				})
+			}),
+		]); 
+	}catch(error){
+		// if(error = "TypeOrValueExistsError"){
+		// 	console.error('addMember error skipped', error)
+		// 	return ;
+		// }
+		throw error;
+	}
+}
+
+async function removeOwner(client, group, user){
+  try{
+	await client.modify(group.dn, [
+		new Change({
+			operation: 'delete',
+			modification: new Attribute({
+				type: 'owner',
+				values: [user.dn] 
+			})}),
+		]); 
+	}catch(error){
+		if(error = "TypeOrValueExistsError")return ;
+		throw error;
+	}
+}
 
 var Group = {};
 
@@ -133,6 +169,7 @@ Group.get = async function(data){
 		await client.unbind();
 
 		if(!Array.isArray(group.member)) group.member = [group.member];
+		if(!Array.isArray(group.owner)) group.owner = [group.owner];
 
 		if(group){
 			let obj = Object.create(this);
@@ -186,6 +223,37 @@ Group.removeMember = async function(user){
 		await client.bind(conf.bindDN, conf.bindPassword);
 
 		await removeMember(client, this, user);
+
+		await client.unbind();
+
+		return this;
+
+	}catch(error){
+		throw error;
+	}
+};
+
+
+Group.addOwner = async function(user){
+	try{
+		await client.bind(conf.bindDN, conf.bindPassword);
+
+		await addOwner(client, this, user);
+
+		await client.unbind();
+
+		return this;
+
+	}catch(error){
+		throw error;
+	}
+};
+
+Group.removeOwner = async function(user){
+	try{
+		await client.bind(conf.bindDN, conf.bindPassword);
+
+		await removeOwner(client, this, user);
 
 		await client.unbind();
 
