@@ -27,7 +27,7 @@
 
 <script id="userEditTemplate" type="text/html">
 	<h3>Editing {{uid}}</h3>
-	<form action="user/{{uid}}" method="put" onsubmit="formAJAX(this)" evalAJAX="editUserSeccess()">
+	<form action="user/{{uid}}" method="put" onsubmit="formAJAX(this)" evalAJAX="editUserSeccess(data.message)">
 		<div class="form-group">
 			<label class="control-label">SSH Public Key</label>
 			<input type="text" class="form-control" name="sshPublicKey" placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQ..." value="{{sshPublicKey}}" />
@@ -82,10 +82,12 @@
 		});
 	}
 
-	function renderProfile(user){
+	function renderProfile(user, message){
 		var profileTemplate = $('#profileTemplate').html();
 		var paswordResetTemplate = $('#paswordResetTemplate').html(); 
 		var $target = $('#userProfile div.card-body');
+
+		app.util.actionMessage(message, $target, 'success')
 
 		// data.photo = unescape(encodeURIComponent(data.jpegPhoto));
 		user.createTimestamp = moment(user.createTimestamp, "YYYYMMDDHHmmssZ").fromNow();
@@ -103,7 +105,7 @@
 
 			$target.html('')
 			if(error){
-				app.utils.actionMessage(data.message, $target, 'danger');
+				app.util.actionMessage(data.message, $target, 'danger');
 			}else{
 				for(var group of data.results){
 					$target.append(Mustache.render(groupRowTemplate, group));
@@ -137,15 +139,17 @@
 		});
 	}
 
-	function editUserSeccess(){
+	function editUserSeccess(message){
 		console.log('edit done')
-		$('#editProfile').slideUp();
-		determinUser(function(user){
-			currentUser = user;
-			app.auth.user = user;
-			renderProfile(user);
-			renderUserGroups(user);
-			$('#userProfile').slideDown();
+		$('#editProfile').slideUp();;
+		app.auth.isLoggedIn(function(){
+			determinUser(function(user){
+				currentUser = user;
+				app.auth.user = user;
+				renderProfile(user, message);
+				renderUserGroups(user);
+				$('#userProfile').slideDown();
+			});
 		});
 	}
 
