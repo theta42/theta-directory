@@ -254,7 +254,7 @@ app.util = (function(app){
 
 	function actionMessage(message, $target, type){
 		message = message || '';
-		$target = $target.closest('div.card').find('.actionMessage');
+		$target = $($target.closest('div.card').find('.actionMessage')[0]);
 		type = type || 'info';
 
 		if($target.html() === message) return;
