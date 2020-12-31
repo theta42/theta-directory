@@ -2,7 +2,8 @@
 
 const router = require('express').Router();
 const {User} = require('../models/user_ldap');
-const {Group} = require('../models/group_ldap'); 
+const {Group} = require('../models/group_ldap');
+const permission = require('../utils/permission'); 
 
 router.get('/', async function(req, res, next){
 	try{
@@ -18,6 +19,9 @@ router.get('/', async function(req, res, next){
 
 router.post('/', async function(req, res, next){
 	try{
+
+		await permission.byGroup(req.user, ['app_sso_admin']);
+
 		req.body.owner = req.user.dn;
 		return res.json({
 			results: await Group.add(req.body),
@@ -38,8 +42,44 @@ router.get('/:name', async function(req, res, next){
 	}
 });
 
+router.put('/owner/:name/:uid', async function(req, res, next){
+	try{
+
+		// await permission.byGroup(req.user, ['app_sso_admin']);
+
+		var group = await Group.get(req.params.name);
+		var user = await User.get(req.params.uid);
+		return res.json({
+			results: group.addOwner(user),
+			message: `Added owner ${req.params.uid} to ${req.params.name} group.`
+		});
+	}catch(error){
+		next(error);
+	}
+});
+
+router.delete('/owner/:name/:uid', async function(req, res, next){
+	try{
+
+		await permission.byGroup(req.user, ['app_sso_admin']);
+
+		var group = await Group.get(req.params.name);
+		var user = await User.get(req.params.uid);
+		return res.json({
+			results: group.removeOwner(user),
+			message: `Removed Owner ${req.params.uid} from ${req.params.name} group.`
+		});
+	}catch(error){
+		next(error);
+	}
+});
+
+
 router.put('/:name/:uid', async function(req, res, next){
 	try{
+
+		// await permission.byGroup(req.user, ['app_sso_admin']);
+
 		var group = await Group.get(req.params.name);
 		var user = await User.get(req.params.uid);
 		return res.json({
@@ -53,6 +93,9 @@ router.put('/:name/:uid', async function(req, res, next){
 
 router.delete('/:name/:uid', async function(req, res, next){
 	try{
+
+		await permission.byGroup(req.user, ['app_sso_admin']);
+
 		var group = await Group.get(req.params.name);
 		var user = await User.get(req.params.uid);
 		return res.json({
@@ -66,6 +109,9 @@ router.delete('/:name/:uid', async function(req, res, next){
 
 router.delete('/:name', async function(req, res, next){
 	try{
+
+		await permission.byGroup(req.user, ['app_sso_admin']);
+
 		var group = await Group.get(req.params.name);
 		return res.json({
 			removed: await group.remove(),
