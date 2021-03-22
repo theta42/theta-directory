@@ -1,0 +1,14 @@
+[Unit]
+Description=SSO NodeJS manager Service
+After=network.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+Restart=always
+RestartSec=1
+User=root
+ExecStart=/usr/bin/env node /var/www/sso-manager-node/nodejs/bin/www
+
+[Install]
+WantedBy=multi-user.target
