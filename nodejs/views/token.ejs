@@ -1,0 +1,217 @@
+<%- include('top') %>
+<script id="rowTemplate" type="text/html">
+	<div id="group-card-{{cn}}" class="card shadow">
+		<div class="card-header">
+			<h5>
+				<i class="fad fa-users-class"></i>
+				Group: {{ cn }}
+			</h5>
+			<ul class="nav nav-tabs card-header-tabs" id="myTab" role="tablist">
+				<li class="nav-item">
+					<a class="nav-link active" id="group-members-tab-{{cn}}" data-toggle="tab" href="#group-memmbers-{{cn}}" role="tab" aria-controls="member" aria-selected="true">
+						<i class="fad fa-users"></i>
+						Members
+					</a>
+				</li>
+				<li class="nav-item">
+					<a class="nav-link" id="group-admins-tab-{{cn}}" data-toggle="tab" href="#group-admins-{{cn}}" role="tab" aria-controls="admin" aria-selected="false">
+						<i class="fad fa-users-crown"></i>
+						Owners
+					</a>
+				</li>
+				<li class="nav-item float-right">
+					
+				</li>
+			</ul>
+
+		</div>
+		<div class="card-header actionMessage" style="display:none"></div>
+		<div class="card-body">
+			<p>
+				{{ description }}
+			</p>
+			<div class="tab-content" id="myTabContent">			  
+				<div class="tab-pane fade show active" id="group-memmbers-{{cn}}" role="tabpanel" aria-labelledby="member-tab">
+					<p>	
+						<ul class="list-group">
+						{{ #member }}
+							<li id="group-card-{{cn}}-{{uid}}" class="list-group-item shadow">
+								<i class="fad fa-user"></i> {{ uid }}
+								<button type="button" action="group/{{groupCN}}/{{uid}}" method="delete" onclick="formAJAX(this)" evalAJAX="addedUser(data.message, '{{groupCN}}', '{{uid}}', $form)" class="btn btn-sm btn-danger float-right">
+									<i class="fad fa-user-slash"></i>
+								</button>
+							</li>
+						{{ /member }}
+						</ul>
+					</p>
+					<div class="dropdown">
+						<button class="btn btn-secondary dropdown-toggle" type="button" id="group_add_member" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+							<i class="fad fa-user-plus"></i>
+						</button>
+						<div class="dropdown-menu shadow-lg" aria-labelledby="group_add_member">
+						{{ #toAdd }}{{#.}}
+							<a class="dropdown-item" action="group/{{groupCN}}/{{uid}}" method="put" onclick="formAJAX(this)" evalAJAX="addedUser(data.message, '{{groupCN}}', '{{uid}}', $form);">
+								<i class="fad fa-user"></i> {{uid}}
+							</a>
+						{{/.}}{{ /toAdd }}
+						
+						</div>
+					</div>
+				</div>
+
+				<div class="tab-pane fade" id="group-admins-{{cn}}" role="tabpanel" aria-labelledby="admin-tab">
+					<p>
+						<ul class="list-group">
+						{{ #owner }}
+							<li class="list-group-item shadow">
+								<i class="fad fa-user"></i> {{ uid }}
+								<button type="button" action="group/owner/{{groupCN}}/{{uid}}" method="delete" onclick="formAJAX(this)" evalAJAX="addedUser(data.message, '{{groupCN}}', '{{uid}}', $form)" class="btn btn-sm btn-danger float-right">
+									<i class="fad fa-user-slash"></i>
+								</button>
+							</li>
+						{{ /owner }}
+						</ul>
+					</p>
+
+					<div class="dropdown float-left">
+						<button class="btn btn-secondary dropdown-toggle" type="button" id="group_add_admin" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+							<i class="fad fa-user-crown"></i>
+						</button>
+						<div class="dropdown-menu shadow-lg" aria-labelledby="group_add_admin">
+						{{ #toAddOwner }}{{#.}}
+							<a class="dropdown-item" action="group/owner/{{groupCN}}/{{uid}}" method="put" onclick="formAJAX(this)" evalAJAX="addedUser(data.message, '{{groupCN}}', '{{uid}}', $form)">
+								<i class="fad fa-user"></i> {{uid}}
+							</a>
+						{{/.}}{{ /toAddOwner }}
+						
+						</div>
+					</div>
+
+				</div>
+			</div>
+		</div>
+		<div class="card-footer">
+			<div class="float-left">
+				Created: {{createTimestamp}}<br />
+				Last Mortified: {{modifyTimestamp}}
+			</div>
+			<div class="float-right">
+				<button type="button" onclick="" class="btn btn-warning btn-lg shadow">
+					<i class="fad fa-edit"></i>
+				</button>
+				<button type="button" onclick="app.group.remove({cn: '{{cn}}'}, function(){tableAJAX('Group {{cn}} deleted.')})" class="btn btn-danger btn-lg">
+					<i class="fad fa-trash"></i>
+				</button>
+			</div>
+		</div>
+	</div>
+	<br/>
+</script>
+<script type="text/javascript">
+
+	var userlist;
+
+	function getUserList(callback){
+		app.user.list(function(error, data){
+			userlist = data.results;
+			callback()
+		});
+	}
+
+	function addedUser(message, group, user, $form){
+		tableAJAX(null, function(){
+			app.util.actionMessage(message, $("#group-card-"+group), 'success');
+
+
+			$('a[href="#'+$form.closest('.tab-pane').attr('id')+'"]').tab('show');	
+			setTimeout(function(group){
+				$("body,html").animate({
+					 scrollTop: $("#group-card-" + group).offset().top
+				}, 0);
+			}, 400, group);
+		});
+	}
+
+	function tableAJAX(actionMessage, callback){
+		var rowTemplate = $('#rowTemplate').html();
+		var $target = $('#tableAJAX');
+
+		$target.html('').hide();
+		app.util.actionMessage('Refreshing user list...', $target);
+
+		app.group.list(function(error, data){
+			var out = ''
+			$.each(data.results, function(key, value) {
+
+				value.toAdd = userlist.map(function(user){
+					if(!value.member.includes(user.dn)) return user;
+				})
+
+				value.toAddOwner = userlist.map(function(user){
+					if(!value.owner.includes(user.dn)) return user;
+				})
+
+				value.member = value.member.map(function(user){
+					return {
+						dn: user,
+						uid: user.match(/cn=[a-zA-Z0-9\_\-\@\.]+/)[0].replace('cn=', '')
+					}
+				})
+
+				value.owner = value.owner.map(function(user){
+					return {
+						dn: user,
+						uid: user.match(/cn=[a-zA-Z0-9\_\-\@\.]+/)[0].replace('cn=', '')
+					}
+				})
+
+				value.createTimestamp = moment(value.createTimestamp, "YYYYMMDDHHmmssZ").fromNow();
+				value.modifyTimestamp = moment(value.modifyTimestamp, "YYYYMMDDHHmmssZ").fromNow();
+
+
+				value.groupCN = value.cn;
+				out += Mustache.render(rowTemplate, value);
+			});
+
+			$target.html(out);
+
+			$target.fadeIn('slow', ($.isFunction(callback) ? callback: function(){})());
+
+			app.util.actionMessage(actionMessage || '', $target, 'info');
+
+		});
+	}
+
+	$(document).ready(function(){
+		getUserList(tableAJAX);
+	});
+</script>
+<div class="row" style="display:none">
+	<div class="col-md-4">
+		<div class="card shadow-lg">
+			<div class="card-header">
+				<i class="fas fa-layer-plus"></i>
+				Add new group
+			</div>
+			<div class="card-header actionMessage" style="display:none"></div>
+			<div class="card-body">
+				<form action="group/" method="post" onsubmit="formAJAX(this)" evalAJAX="tableAJAX('')">
+					<div class="form-group">
+						<label class="control-label">Name</label>
+						<input type="text" class="form-control shadow" name="name" placeholder="app_gitea_admin" validate=":3" />
+					</div>
+
+					<div class="form-group">
+						<label class="control-label">Description</label>
+						<textarea class="form-control shadow" name="description" placeholder="Admin group for gitea app" validate=":3"></textarea>
+					</div>
+
+					<button type="submit" class="btn btn-outline-dark">Add</button>
+				</form>
+			</div>
+		</div>
+	</div>
+	<div class="col-md-8" id="tableAJAX">
+	</div>
+</div>
+<%- include('bottom') %>

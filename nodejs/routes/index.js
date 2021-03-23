@@ -4,24 +4,31 @@ var express = require('express');
 var router = express.Router();
 const moment = require('moment');
 const {InviteToken, PasswordResetToken} = require('./../models/token');
+const conf = require('../conf/conf.js');
 
 
-/* GET home page. */
 router.get('/', async function(req, res, next) {
-  res.render('home', { title: 'Express' });
+  res.render('home', { title: 'Express', name: conf.name });
 });
 
-/* GET home page. */
+router.get('/login', function(req, res, next) {
+  res.render('login', {redirect: req.query.redirect, name: conf.name });
+});
+
 router.get('/users', function(req, res, next) {
-  res.render('users', { title: 'Express' });
+  res.render('users', { title: 'Express', name: conf.name });
 });
 
 router.get('/users/:uid', function(req, res, next) {
-  res.render('home', { title: 'Express' });
+  res.render('home', { title: 'Express', name: conf.name });
 });
 
 router.get('/groups', function(req, res, next) {
-  res.render('groups', { title: 'Express' });
+  res.render('groups', { title: 'Express', name: conf.name });
+});
+
+router.get('/token', function(req, res, next) {
+  res.render('token', { title: 'Express', name: conf.name });
 });
 
             
@@ -64,12 +71,6 @@ router.get('/login/invite/:token', async function(req, res, next){
 	}catch(error){
 		next(error);
 	}
-});
-
-
-/* GET home page. */
-router.get('/login', function(req, res, next) {
-  res.render('login', {redirect: req.query.redirect});
 });
 
 module.exports = router;

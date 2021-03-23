@@ -243,6 +243,20 @@ app.group = (function(app){
 	return {list, remove}
 })(app)
 
+app.token = (function(app){
+	function list(name, callack){
+		if($.isFunction(name)){
+			callack = name;
+			name = ''
+		}
+		app.api.get('token/'+name+'?detail=true', function(error, data){
+			callack(error, data);
+		});
+	}
+
+	return {list}
+})(app)
+
 app.util = (function(app){
 
 	function getUrlParameter(name) {
