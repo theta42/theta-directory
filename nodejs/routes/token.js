@@ -2,12 +2,24 @@
 
 const router = require('express').Router();
 const {AuthToken} = require('../models/auth');
-const {Token, InviteToken} = require('../models/token');
+var tokens = require('../models/token');
+// const {Token, InviteToken, PasswordResetToken} = require('../models/token');
 
-const tokens  = {
-	auth: AuthToken,
-	invite: InviteToken
-}
+delete tokens.Token;
+
+// const tokens  = {
+// 	auth: AuthToken,
+// 	invite: InviteToken,
+// 	password: PasswordResetToken,
+// }
+
+router.get('/', async function(req, res, next){
+	try{
+		return res.json({results: Object.keys(tokens)})
+	}catch(error){
+		throw(error);
+	}
+});
 
 router.get('/:name', async function(req, res, next){
 	try{
