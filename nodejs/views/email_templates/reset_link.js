@@ -1,7 +1,7 @@
 module.exports = {
-	subject: 'Password reset for Theta 42 account',
+	subject: 'Password reset for {{ name }} account',
 	message: `
-<h2> Theta 42 account</h2>
+<h2> {{ name }} account</h2>
 
 <p>
 	Hello {{ user.givenName }},
@@ -19,7 +19,7 @@ module.exports = {
 
 </p>
 	Thank you,<br />
-	Theta 42
+	{{ name }}
 </p>
 `
 };

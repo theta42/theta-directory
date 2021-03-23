@@ -11,7 +11,7 @@ var Mail = {};
 Mail.send = async function(to, subject, message, from){
 	await sgMail.send({
 		to: to,
-		from: from || 'Theta 42 Accounts <accounts@no-reply.theta42.com>',
+		from: from || `${conf.name} Accounts <accounts@no-reply.theta42.com>`,
 		subject: subject,
 		text: message,
 		html: message,
@@ -20,6 +20,7 @@ Mail.send = async function(to, subject, message, from){
 
 
 Mail.sendTemplate = async function(to, template, context, from){
+	context.name = conf.name;
 	template = require(`../views/email_templates/${template}`);
 	await Mail.send(
 		to,

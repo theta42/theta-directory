@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-		<title>SSO Manager - Theta 42</title>
+		<title>SSO Manager - <%= name %></title>
 		<!-- CSS are placed here -->
 		<link rel="stylesheet" href="/static/css/bootstrap-4.4.1.min.css">
 		<link rel='stylesheet' href='/static/css/styles.css' />
@@ -13,9 +13,10 @@
 		<script type="text/javascript" src="/static/js/bootstrap-4.4.1.min.js"></script>
 		<script type="text/javascript" src="/static/js/all.min.js"></script>
 		<script type="text/javascript" src='/static/js/mustache.min.js'></script>
-		<script type="text/javascript" src="/static/js/app.js"></script>
 		<script type="text/javascript" src="/static/js/val.js"></script>
 		<script type="text/javascript" src="/static/js/moment.js"></script>
+		<script type="text/javascript" src="/static/js/jq-repeat.js"></script>
+		<script type="text/javascript" src="/static/js/app.js"></script>
 
 
 		<!-- HTML5 shim, for IE6-8 support of HTML5 elements -->
@@ -25,7 +26,7 @@
 	</head>
 	<body>
 		<header class="shadow d-flex flex-column flex-md-row align-items-center p-3 px-md-4 mb-3 bg-white border-bottom shadow-sm">
-			<h5 class="hover-effect my-0 mr-md-auto font-weight-normal">SSO Manager - Theta 42</h5>
+			<h5 class="hover-effect my-0 mr-md-auto font-weight-normal">SSO Manager - <%= name %></h5>
 			<nav class="my-2 my-md-0 mr-md-3">
 				<a class="text-dark hover-effect" href="/"><i class="fad fa-tachometer-alt-fastest"></i>Home</a>
 				<a class="text-dark hover-effect" href="/users"><i class="fad fa-users"></i>Users</a>
