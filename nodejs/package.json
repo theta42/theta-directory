@@ -1,5 +1,5 @@
 {
-  "name": "t42-ldap-manager",
+  "name": "t42-sso-manager",
   "version": "1.0.0",
   "private": true,
   "author": [
@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@sendgrid/mail": "^7.4.0",
+    "bcrypt": "^5.0.0",
     "ejs": "^3.1.5",
     "express": "~4.16.1",
     "extend": "^3.0.2",
@@ -25,7 +26,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://git.theta42.com/wmantly/proxy.git"
+    "url": "https://github.com/theta42/sso-manager-node.git"
   },
   "devDependencies": {
     "nodemon": "^2.0.6"
