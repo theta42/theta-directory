@@ -45,11 +45,10 @@ router.get('/login/resetpassword/:token', async function(req, res, next){
 router.get('/login/invite/:token/:mailToken', async function(req, res, next){
 	try{
 		
-		let token = await InviteToken.get(req.params.token);
-, name: conf.name 
+		let token = await InviteToken.get(req.params.token); 
 		if(token.is_valid && token.mail !== '__NONE__' && token.mail_token === req.params.mailToken){
 			token.created_on = moment(token.created_on, 'x').fromNow();
-  			res.render('invite', { title: 'Express', invite: token, name: conf.name });
+  			res.render('invite', { title: 'Express', invite: token, name: conf.name  });
 		}else{
 			next({message: 'token not found', status: 404});
 		}
@@ -64,7 +63,7 @@ router.get('/login/invite/:token', async function(req, res, next){
 		token.created_on = moment(token.created_on, 'x').fromNow();
 
 		if(token.is_valid){
-  			res.render('invite_email', { title: 'Express', invite: token, name: conf.name });
+  			res.render('invite_email', { title: 'Express', invite: token, name: conf.name  });
 		}else{
 			next({message: 'token not found', status: 404});
 		}
