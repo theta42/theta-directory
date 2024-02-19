@@ -1,9 +1,10 @@
 'use strict';
 
 module.exports = {
+	name: "Theta42 SSO",
 	userModel: 'ldap', // pam, redis, ldap
 	ldap: {
-		url: 'ldap://192.168.1.54:389',
+		url: 'ldap://10.1.0.55:389',
 		bindDN: 'cn=admin,dc=theta42,dc=com',
 		bindPassword: '__IN SRECREST FILE__',
 		userBase: 'ou=people,dc=theta42,dc=com',
