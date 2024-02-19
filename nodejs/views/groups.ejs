@@ -113,6 +113,11 @@
 
 	function getUserList(callback){
 		app.user.list(function(error, data){
+			var $target = $('#tableAJAX');
+			if(error){
+				app.util.actionMessage(data.message, $target, 'danger');
+				return;
+			}
 			userlist = data.results;
 			callback()
 		});
@@ -140,6 +145,7 @@
 		app.util.actionMessage('Refreshing user list...', $target);
 
 		app.group.list(function(error, data){
+			console.log('error 5555', error, data);
 			var out = ''
 			$.each(data.results, function(key, value) {
 
@@ -211,7 +217,8 @@
 			</div>
 		</div>
 	</div>
-	<div class="col-md-8" id="tableAJAX">
+	<div class="col-md-8 card border-light" id="tableAJAX" style="background-color: initial; border: none">
+		<div class="card-header actionMessage" style="display:none"></div>
 	</div>
 </div>
 <%- include('bottom') %>
