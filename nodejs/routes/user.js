@@ -6,8 +6,9 @@ const permission = require('../utils/permission');
 
 router.get('/', async function(req, res, next){
 	try{
+		await permission.byGroup(req.user, ['app_sso_admin'])
 		return res.json({
-			results:  await User[req.query.detail ? "listDetail" : "list"]()
+			results:  await User[req.query.detail ? "listDetail" : "list"](),
 		});
 	}catch(error){
 		next(error);
