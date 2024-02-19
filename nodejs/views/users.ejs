@@ -38,6 +38,11 @@
 		app.util.actionMessage('Refreshing user list...', $target);
 
 		app.user.list(function(error, data){
+			if(error){
+				console.log('data', data)
+				app.util.actionMessage(data.message, $target, 'danger');
+				return;
+			}
 			$.each( data.results, function(key, value) {
 				if(value.uidNumber<1500) return;
 				user_row = Mustache.render(rowTemplate, value);
