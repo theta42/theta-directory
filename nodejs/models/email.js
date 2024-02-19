@@ -11,7 +11,7 @@ var Mail = {};
 Mail.send = async function(to, subject, message, from){
 	await sgMail.send({
 		to: to,
-		from: from || `${conf.name} Accounts <accounts@no-reply.theta42.com>`,
+		from: from || `${conf.name} Accounts <noreply@sendgrid.theta42.com>`,
 		subject: subject,
 		text: message,
 		html: message,
