@@ -18,10 +18,11 @@ Auth.errors.login = function(){
 Auth.login = async function(data){
 	try{
 		let user = await User.login(data);
-		let token = await AuthToken.add(user);
+		let token = await AuthToken.create(user);
 
 		return {user, token}
 	}catch(error){
+		console.error("AUTH LOGIN error:", error);
 		throw this.errors.login();
 	}
 };
@@ -33,6 +34,7 @@ Auth.checkToken = async function(data){
 		if(token.is_valid){
 			return await User.get(token.created_by);
 		}
+		throw new Error('invalid token');
 	}catch(error){
 		throw this.errors.login();
 	}

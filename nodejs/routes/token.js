@@ -23,8 +23,6 @@ router.get('/', async function(req, res, next){
 
 router.get('/:name', async function(req, res, next){
 	try{
-		console.log(tokens, req.params.name)
-
 		return res.json({
 			results:  await tokens[req.params.name][req.query.detail ? "listDetail" : "list"]()
 		});

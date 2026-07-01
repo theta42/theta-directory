@@ -1,0 +1,90 @@
+<%- include('top') %>
+<script type="text/javascript">
+
+	// OAuth params embedded by server — not user input
+	var oauthParams = <%- JSON.stringify(params) %>;
+	var clientInfo  = <%- JSON.stringify(oauthClient) %>;
+
+	$(document).ready(function(){
+
+		// Override the global hold-ready redirect so we control the login destination
+		app.auth.isLoggedIn(function(error, isLoggedIn){
+			if(error || !isLoggedIn){
+				app.auth.logOut(function(){});
+				var returnUrl = '/oauth/authorize?' + $.param(oauthParams);
+				location.replace('/login?redirect=' + encodeURIComponent(returnUrl));
+				return;
+			}
+			$('div.row').fadeIn('slow');
+		});
+
+		$('#btn-deny').on('click', function(){
+			var redirectUrl = new URL(oauthParams.redirect_uri);
+			redirectUrl.searchParams.set('error', 'access_denied');
+			if(oauthParams.state) redirectUrl.searchParams.set('state', oauthParams.state);
+			window.location.href = redirectUrl.toString();
+		});
+
+		$('#btn-allow').on('click', function(){
+			var $btn = $(this);
+			$btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> Authorizing...');
+
+			app.api.post('oauth/authorize', oauthParams, function(error, data){
+				if(error){
+					$btn.prop('disabled', false).html('<i class="fa-solid fa-check"></i> Allow');
+					app.util.actionMessage(data.message || 'Authorization failed.', $('#authorize-card'), 'danger');
+					return;
+				}
+				window.location.href = data.redirect_url;
+			});
+		});
+
+	});
+
+</script>
+<div class="row" style="display:none">
+	<div class="col-md-4 offset-md-4">
+		<div id="authorize-card" class="card shadow-lg">
+			<div class="card-header">
+				<i class="fa-solid fa-key"></i>
+				Authorization Request
+			</div>
+			<div class="card-header actionMessage" style="display:none"></div>
+			<div class="card-body">
+				<h5><i class="fa-solid fa-server"></i> <%= oauthClient.name %></h5>
+				<% if(oauthClient.description){ %>
+				<p class="text-muted"><%= oauthClient.description %></p>
+				<% } %>
+				<hr>
+				<p><strong><%= oauthClient.name %></strong> is requesting access to:</p>
+				<ul class="list-group mb-3">
+					<% for(var i = 0; i < scopes.length; i++){ %>
+					<li class="list-group-item">
+						<% if(scopes[i] === 'openid'){ %>
+						<i class="fa-solid fa-id-card"></i> Verify your identity
+						<% } else if(scopes[i] === 'profile'){ %>
+						<i class="fa-solid fa-user"></i> Read your name and username
+						<% } else if(scopes[i] === 'email'){ %>
+						<i class="fa-solid fa-envelope"></i> Read your email address
+						<% } else { %>
+						<i class="fa-solid fa-circle-question"></i> <%= scopes[i] %>
+						<% } %>
+					</li>
+					<% } %>
+				</ul>
+				<div class="d-grid gap-2">
+					<button id="btn-allow" class="btn btn-success">
+						<i class="fa-solid fa-check"></i> Allow
+					</button>
+					<button id="btn-deny" class="btn btn-outline-danger">
+						<i class="fa-solid fa-xmark"></i> Deny
+					</button>
+				</div>
+			</div>
+			<div class="card-footer text-muted small">
+				You are granting access to: <code><%= params.redirect_uri %></code>
+			</div>
+		</div>
+	</div>
+</div>
+<%- include('bottom') %>

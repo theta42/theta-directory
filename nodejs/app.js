@@ -7,18 +7,43 @@ const express = require('express');
 // Set up the express app.
 const app = express();
 
+// Hold list of functions to run when the server is ready
+app.onListen = [];
+
 // Allow the express app to be exported into other files. 
 module.exports = app;
 
-// Build the conf object from the conf files.
-app.conf = require('./conf/conf');
-
-// Hold onto the auth middleware 
+// Hold onto the auth middleware
 const middleware = require('./middleware/auth');
+
+// OAuth routes
+const { router: oauthRouter, authRouter: oauthApiRouter, discovery } = require('./routes/oauth');
+
+// Grab the projects PubSub
+app.contoller = require('./controller');
+
+// Push pubsub over the socket and back.
+app.onListen.push(function(){
+  app.io.use(middleware.authIO);
+
+  app.contoller.ps.subscribe(/./g, function(data, topic){
+    app.io.emit('P2PSub', { topic, data });
+  });                                 
+
+  app.io.on('connection', (socket) => {
+    // console.log('socket', socket)
+    var user = socket.user;
+    socket.on('P2PSub', (msg) => {
+      app.contoller.ps.publish(msg.topic, {...msg.data, __from:socket.user});
+      // socket.broadcast.emit('P2PSub', msg);
+    });
+  });
+}); 
 
 // load the JSON parser middleware. Express will parse JSON into native objects
 // for any request that has JSON in its content type. 
 app.use(express.json());
+app.set('trust proxy', 1);
 
 // Set up the templating engine to build HTML for the front end.
 app.set('views', path.join(__dirname, 'views'));
@@ -40,6 +65,13 @@ app.use('/api/user', middleware.auth, require('./routes/user'));
 app.use('/api/token', middleware.auth, require('./routes/token'));
 
 app.use('/api/group', middleware.auth, require('./routes/group'));
+app.use('/api/notification', middleware.auth, require('./routes/notification'));
+
+// OAuth 2.0 / OpenID Connect
+app.use('/oauth', oauthRouter);
+app.use('/api/oauth/client', middleware.auth, require('./routes/oauth_client'));
+app.use('/api/oauth', middleware.auth, oauthApiRouter);
+app.get('/.well-known/openid-configuration', discovery);
 
 
 // Catch 404 and forward to error handler. If none of the above routes are
@@ -53,7 +85,9 @@ app.use(function(req, res, next) {
 
 // Error handler. This is where `next()` will go on error
 app.use(function(err, req, res, next) {
-  console.error(err.status || res.status, err.name, req.method, req.url);
+  const SILENT_404S = ['/.well-known/'];
+  const isSilent404 = err.status === 404 && SILENT_404S.some(p => req.url.startsWith(p));
+  if (!isSilent404) console.error(err.status || res.status, err.name, req.method, req.url);
   if(![401, 404].includes(err.status || res.status)){
     console.error(err.message);
     console.error(err.stack);

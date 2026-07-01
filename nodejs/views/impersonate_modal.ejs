@@ -1,0 +1,89 @@
+<!-- Impersonation credentials modal — include in any page that has an impersonate button -->
+<div class="modal fade" id="impersonateModal" tabindex="-1" aria-hidden="true">
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="modal-header bg-dark text-white">
+				<h5 class="modal-title">
+					<i class="fa-solid fa-user-secret"></i>
+					Impersonating <span id="impersonateModalTitle" class="fw-bold"></span>
+				</h5>
+				<button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+			</div>
+			<div class="modal-body">
+				<div class="alert alert-warning d-flex align-items-center mb-3" role="alert">
+					<i class="fa-solid fa-triangle-exclamation me-2"></i>
+					<div>The real password is <strong>unchanged</strong>. This temporary credential expires automatically.</div>
+				</div>
+				<div class="mb-3">
+					<label class="form-label fw-bold">Username</label>
+					<input type="text" class="form-control font-monospace" id="impersonateModalUid" readonly>
+				</div>
+				<div class="mb-3">
+					<label class="form-label fw-bold">Temporary Password</label>
+					<div class="input-group">
+						<input type="text" class="form-control font-monospace" id="impersonateModalPassword" readonly>
+						<button class="btn btn-outline-secondary" id="impersonateCopyBtn" type="button" title="Copy password">
+							<i class="fa-solid fa-copy"></i>
+						</button>
+					</div>
+				</div>
+				<p class="text-muted small mb-0">
+					<i class="fa-solid fa-clock"></i>
+					Expires at <strong id="impersonateModalExpires"></strong> &mdash; works for any LDAP-backed service.
+				</p>
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-danger" id="impersonateStopBtn">
+					<i class="fa-solid fa-circle-stop"></i> Stop Impersonating
+				</button>
+				<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+			</div>
+		</div>
+	</div>
+</div>
+
+<script type="text/javascript">
+(function(){
+	// Avoid re-binding if the modal JS was already loaded (e.g. two includes on same page)
+	if(window._impersonateModalBound) return;
+	window._impersonateModalBound = true;
+
+	$(document).ready(function(){
+		$('#impersonateCopyBtn').on('click', function(){
+			var pw = $('#impersonateModalPassword').val();
+			navigator.clipboard.writeText(pw).then(function(){
+				$('#impersonateCopyBtn')
+					.html('<i class="fa-solid fa-check"></i>')
+					.addClass('btn-success').removeClass('btn-outline-secondary');
+				setTimeout(function(){
+					$('#impersonateCopyBtn')
+						.html('<i class="fa-solid fa-copy"></i>')
+						.addClass('btn-outline-secondary').removeClass('btn-success');
+				}, 1500);
+			});
+		});
+	});
+})();
+
+function startImpersonate(uid){
+	app.impersonate.create(uid, function(error, data){
+		if(error){
+			alert('Could not start impersonation: ' + (data && data.message ? data.message : 'Unknown error'));
+			return;
+		}
+		$('#impersonateModalTitle').text(data.uid);
+		$('#impersonateModalUid').val(data.uid);
+		$('#impersonateModalPassword').val(data.temp_password);
+		$('#impersonateModalExpires').text(new Date(data.expires_at).toLocaleTimeString());
+
+		$('#impersonateStopBtn').off('click').on('click', function(){
+			app.impersonate.revoke(data.uid, function(err){
+				$('#impersonateModal').modal('hide');
+				if(!err) app.util.actionMessage('Impersonation ended for ' + data.uid, $('body'), 'success');
+			});
+		});
+
+		$('#impersonateModal').modal('show');
+	});
+}
+</script>

@@ -1,0 +1,310 @@
+<%- include('top') %>
+
+<script type="text/javascript">
+	app.auth.forceLogin();
+	var currentUser;
+
+	function renderProfile(user){
+		// data.photo = unescape(encodeURIComponent(data.jpegPhoto));
+		user.createTimestamp = moment(user.createTimestamp, "YYYYMMDDHHmmssZ").fromNow();
+		user.modifyTimestamp = moment(user.modifyTimestamp, "YYYYMMDDHHmmssZ").fromNow();
+
+		$.scope.user.update(user);
+		$.scope.passwordReset.update(user);
+	};
+
+	async function renderUserGroups(user){
+		try{
+			let res = await app.api.get('group/?detail=true&member='+user.uid);
+			$.scope.mygroups.push(...res.results);
+		}catch(error){
+			console.error('renderUserGroups error:', error)
+		}
+	}
+
+	async function determinUser(){
+		if(location.pathname.includes('/users/')){
+			let uid = location.pathname.replace('/users/', '');
+
+			return (await app.api.get('user/'+uid)).results;
+		}else{
+			return await app.auth.asyncUser;
+		}
+	}
+
+	function editUser(user){
+		user = user || currentUser;
+
+		var $profileCard = $('#userProfile');
+		var $editCard = $('#editProfile');
+
+		$.scope.editProfile.update(user);
+		$profileCard.slideUp();
+		$editCard.slideDown();
+	}
+
+	function editUserSeccess(data){
+		currentUser = data.results;
+		renderProfile(currentUser);
+		$('#editProfile').slideUp();
+		$('#userProfile').slideDown()
+	}
+
+	async function toggleActive(uid, active){
+		app.user.setActive(uid, active, async function(error, data){
+			if(error) return alert('Failed to update user status');
+			currentUser = await determinUser();
+			renderProfile(currentUser);
+		});
+	}
+
+	async function deleteUser(uid, btn){
+		const $card = $(btn).closest('.card');
+		const confirmed = await app.util.actionConfirm(`Delete user "${uid}"?`, $card, 'warning');
+		if (!confirmed) return;
+		app.api.delete('user/' + uid, function(error, data){
+			if (error) {
+				app.util.actionMessage(data.message || 'Failed to delete user', $card, 'danger');
+				return;
+			}
+			window.location.href = '/users';
+		});
+	}
+
+	$(document).ready(async function(){
+		currentUser = await determinUser();
+
+		renderProfile(currentUser);
+		renderUserGroups(currentUser);
+	});
+</script>
+
+<div class="row mb-3" style="display:none">
+	<div class="col-md-4">
+		<div class="shadow-lg card mb-3 card-default">
+			<div class="card-header shadow">
+					<div class="float-end">
+						<i class="fa-solid fa-arrows-up-down"></i>
+					</div>
+					<i class="fa-solid fa-list-ul"></i>
+					Services
+			</div>
+			<div class="card-header shadow actionMessage" style="display:none">
+			</div>
+			<div class="card-body">
+				<ul class="list-group text-dark services-list">
+					<li class="list-group-item text-dark">
+							<i class="fa-solid fa-terminal"></i>
+							SSH <b id="username"></b>@718it.biz:22
+					</li>
+					<a href="https://emby.718it.biz/" target="_blank" class="text-dark">
+						<li class="list-group-item text-dark">
+								<i class="fa-solid fa-film"></i>
+								Emby
+						</li>
+					</a>
+					<a href="https://git.theta42.com" target="_blank" class="text-dark">
+						<li class="list-group-item text-dark">
+								<i class="fab fa-git"></i>
+								Git server
+						</li>
+					</a>
+					<a href="https://rdp.vm42.us" target="_blank" class="text-dark">
+						<li class="list-group-item text-dark">
+								<i class="fa-solid fa-display"></i>
+								Virtual Desktops
+						</li>
+					</a>
+					<a href="https://pve.admin.vm42.us" target="_blank" class="text-dark">
+						<li class="list-group-item text-dark">
+								<i class="fa-solid fa-server"></i>
+								Promox (contact wmanlty for access)
+						</li>
+					</a>
+				</ul>
+			</div>
+		</div>
+
+		<div class="shadow-lg card">
+			<div class="card-header shadow">
+				<i class="fa-solid fa-arrow-rotate-left"></i>
+				Password Reset
+				<div class="float-end">
+					<i class="fa-solid fa-arrows-up-down"></i>
+				</div>
+			</div>
+			<div class="card-header shadow actionMessage" style="display:none">
+			</div>
+			<div jq-repeat="passwordReset" class="card-body">
+				<h3>
+					Reset Password for {{uid}}
+				</h3>
+				<form action="user/{{uid}}/password" method="put" onsubmit="formAJAX(this)" class="mb-3">
+					<div class="mb-3">
+						<label class="form-label">Password</label>
+						<div class="input-group shadow">
+							<span class="input-group-text" id="addon-wrapping"><i class="fa-solid fa-key"></i></span>
+							<input type="password" name="userPassword" class="form-control" placeholder="huunteR!23" aria-label="Username" aria-describedby="addon-wrapping">
+						</div>
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Again</label>
+						<div class="input-group shadow">
+							<span class="input-group-text" id="addon-wrapping"><i class="fa-solid fa-key"></i></span>
+							<input type="password" name="password" class="form-control" placeholder="huunteR!23" aria-label="Username" aria-describedby="addon-wrapping">
+						</div>
+					</div>
+					<button type="submit" class="btn btn-outline-secondary shadow">Change</button>
+				</form>
+
+			</div>
+		</div>
+	</div>
+
+	<div class="col-md-8">
+		<div id="userProfile" class="shadow-lg card card-default mb-8">
+			<div class="card-header shadow">
+				<i class="fa-regular fa-id-card"></i>
+				Profile
+				<div class="float-end">
+					<i class="fa-solid fa-arrows-up-down"></i>
+				</div>
+			</div>
+			<div class="card-header shadow actionMessage" style="display:none">
+			</div>
+			<div class="profile-body" jq-repeat="user">
+				<div class="card-body profile-body-{{uid}}">
+					<h2><i>User Name:</i> <b>{{uid}}</b></h2>
+					<i>Name:</i> <b>{{givenName}} {{sn}}</b><br />
+					<i>Email:</i> <b>{{mail}}</b>
+					{{#emailVerified}}<span class="badge bg-success ms-1"><i class="fa-solid fa-circle-check"></i> Verified</span>{{/emailVerified}}
+					<br />
+					<i>Phone:</i> <b>{{mobile}}</b>
+					{{#phoneVerified}}<span class="badge bg-success ms-1"><i class="fa-solid fa-circle-check"></i> Verified</span>{{/phoneVerified}}
+					<br />
+					<i>LDAP DN:</i> <b>{{dn}} </b><br />
+					<i>Home Directory:</i> <b>{{homeDirectory}} </b><br />
+					<i>Login Shell:</i> <b>{{loginShell}} </b><br />
+					<i>Status:</i>
+					{{#isActive}}<span class="badge bg-success">Active</span>{{/isActive}}
+					{{#isInactive}}<span class="badge bg-danger">Inactive</span>{{/isInactive}}
+					<br />
+					<i>Date of Birth:</i> <b>{{dateOfBirth}}</b><br />
+					<i>TOS:</i>
+					{{#tosAccepted}}<span class="badge bg-success">Accepted</span>{{/tosAccepted}}
+					{{#tosNotAccepted}}<span class="badge bg-warning text-dark">Pending</span>{{/tosNotAccepted}}
+					<br />
+					<i>SSH Public Key:</i> <b>{{sshPublicKey}}</b><br />
+					<i>Unix User ID:</i> <b>{{uidNumber}} </b><br />
+					<i>Unix Group ID:</i> <b>{{gidNumber}} </b><br />
+					<i>Description:</i><br>
+					<p>
+						{{description}}
+					</p>
+					<!-- <img id="profile_photo" /> -->
+				</div>
+				<div class="card-footer profile-body-{{uid}}">
+					<div class="float-end">
+						<button type="button" onclick="editUser()" class="btn btn-warning btn shadow ">
+							<i class="fa-solid fa-user-pen"></i>
+						</button>
+						{{#isActive}}
+						<button type="button" class="btn btn-outline-warning shadow group-required group-required-app_sso_admin" title="Deactivate user" onclick="toggleActive('{{uid}}', false)">
+							<i class="fa-solid fa-lock"></i>
+						</button>
+						{{/isActive}}
+						{{#isInactive}}
+						<button type="button" class="btn btn-warning shadow group-required group-required-app_sso_admin" title="Activate user" onclick="toggleActive('{{uid}}', true)">
+							<i class="fa-solid fa-lock-open"></i>
+						</button>
+						{{/isInactive}}
+						<button type="button" class="btn btn-secondary shadow group-required group-required-app_sso_admin" title="Impersonate this user" onclick="startImpersonate('{{uid}}')">
+							<i class="fa-solid fa-user-secret"></i>
+						</button>
+						<button type="button" class="btn btn-danger shadow group-required group-required-app_sso_admin" onclick="deleteUser('{{uid}}', this)">
+							<i class="fa-solid fa-user-slash"></i>
+						</button>
+					</div>
+					<div class="float-left">
+						<i>Joined:</i> <b>{{createTimestamp}} </b> <br/>
+						<i>Edited:</i> <b>{{modifyTimestamp}} </b>
+					</div>
+
+				</div>
+			</div>
+		</div>
+
+		<div id="editProfile" class="shadow-lg card card-default mb-8" style="display:none">
+			<div class="card-header shadow">
+				<i class="fad fa-id-card"></i>
+				Edit Profile
+				<div class="float-end">
+					<i class="fa-solid fa-arrows-up-down"></i>
+				</div>
+			</div>
+			<div class="card-header shadow actionMessage" style="display:none">
+			</div>
+			<div class="card-body" jq-repeat="editProfile">
+				<div id="tableAJAX">
+					<h3>Editing {{uid}}</h3>
+					<form action="user/{{uid}}" method="put" onsubmit="formAJAX(this)" evalAJAX="editUserSeccess(data)">
+						<div class="mb-3">
+							<label class="form-label">Date of Birth</label>
+							<input type="date" class="form-control shadow" name="dateOfBirth" value="{{dateOfBirth}}" />
+						</div>
+
+						<div class="mb-3">
+							<label class="form-label">SSH Public Key</label>
+							<input type="text" class="form-control" name="sshPublicKey" placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQ..." value="{{sshPublicKey}}" />
+						</div>
+
+						<div class="mb-3">
+							<label class="form-label">Mobile Phone</label>
+							<input type="text" class="form-control" name="mobile" placeholder="9175551234" validate=":9" value="{{mobile}}" />
+						</div>
+						<div class="mb-3">
+							<label class="form-label">User Description (Optional)</label>
+							<textarea class="form-control" name="description" placeholder="Admin group for gitea app">{{description}}</textarea>
+						</div>
+						<button type="submit" class="btn btn-outline-dark btn-warning">Change</button>
+
+					</form>
+				</div>
+			</div>
+		</div>
+
+		<div class="shadow-lg card card-default mb-8">
+			<div class="card-header shadow">
+				<i class="fa-solid fa-users-viewfinder"></i>
+				My groups
+				<div class="float-end">
+					<i class="fa-solid fa-arrows-up-down"></i>
+				</div>
+			</div>
+			<div class="card-header shadow actionMessage" style="display:none">
+			</div>
+			<div class="card-body" style="padding-bottom:0">
+				<div class="table-responsive">
+					<table class="table">
+						<thead>
+							<th>
+								Name
+							</th>
+							<th>
+								Description
+							</th>
+						</thead>
+						<tbody jq-repeat="mygroups">
+							<tr>
+								<td>{{cn}}</td>
+								<td>{{description}}</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+<%- include('impersonate_modal') %>
+<%- include('bottom') %>

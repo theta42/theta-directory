@@ -15,4 +15,14 @@ async function auth(req, res, next){
 	}
 }
 
-module.exports = {auth};
+async function authIO(socket, next){
+	try{
+		let token = await Auth.checkToken(socket.handshake.auth.token || 0);
+		socket.user = await token.getUser();
+		next();
+	}catch(error){
+		next(error);
+	}
+}
+
+module.exports = {auth, authIO};

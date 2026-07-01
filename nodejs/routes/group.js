@@ -32,6 +32,7 @@ router.post('/', async function(req, res, next){
 	}
 });
 
+
 router.get('/:name', async function(req, res, next){
 	try{
 		return res.json({
@@ -50,7 +51,7 @@ router.put('/owner/:group/:uid', async function(req, res, next){
 		var group = await Group.get(req.params.group);
 		var user = await User.get(req.params.uid);
 		return res.json({
-			results: group.addOwner(user),
+			results: await group.addOwner(user),
 			message: `Added owner ${req.params.uid} to ${req.params.group} group.`
 		});
 	}catch(error){
@@ -66,7 +67,7 @@ router.delete('/owner/:group/:uid', async function(req, res, next){
 		var group = await Group.get(req.params.group);
 		var user = await User.get(req.params.uid);
 		return res.json({
-			results: group.removeOwner(user),
+			results: await group.removeOwner(user),
 			message: `Removed Owner ${req.params.uid} from ${req.params.group} group.`
 		});
 	}catch(error){
@@ -82,7 +83,7 @@ router.put('/:group/:uid', async function(req, res, next){
 		var group = await Group.get(req.params.group);
 		var user = await User.get(req.params.uid);
 		return res.json({
-			results: group.addMember(user),
+			results: await group.addMember(user),
 			message: `Added user ${req.params.uid} to ${req.params.group} group.`
 		});
 	}catch(error){
@@ -98,7 +99,7 @@ router.delete('/:group/:uid', async function(req, res, next){
 		var group = await Group.get(req.params.group);
 		var user = await User.get(req.params.uid);
 		return res.json({
-			results: group.removeMember(user),
+			results: await group.removeMember(user),
 			message: `Removed user ${req.params.uid} from ${req.params.group} group.`
 		});
 	}catch(error){

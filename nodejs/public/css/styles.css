@@ -1,3 +1,35 @@
+nav.navbar{
+	padding-left: 1em;
+	padding-right: 1em;
+}
+
+body {
+	display: flex;
+	flex-direction: column;
+	min-height: 100vh;
+}
+
+#spa-shell {
+	margin-top: 4.5rem;
+	padding-bottom: 1em;
+	flex-grow: 1;
+}
+
+.card-title{
+	font-weight: bold;
+}
+
+div.card:not(:last-child){
+	margin-bottom: 1em;
+}
+
+.group-required{
+	display: none;
+}
+
+/*.actionMessage{
+	position: fixed;
+}*/
 
 *{
 	transition: all .4s ease;
@@ -11,18 +43,4 @@ a:hover, button:hover, div.form-group:hover, header nav a{
 	-webkit-transform: scale(1.05); 
 	transform: scale(1.05); /* Standard syntax */
 	z-index: 999999;
-}
-
-div.card-body{
-	padding-left: 1.5em;
-	padding-right: 1.5em;
-}
-
-
-.my-2 > a {
-	padding-right: .5em;
-}
-
-header nav svg{
-	margin-right: .4em
 }

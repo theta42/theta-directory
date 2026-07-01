@@ -1,71 +1,127 @@
 'use strict';
 
-const redis_model = require('../utils/redis_model')
+const Table = require('.');
 const UUID = function b(a){return a?(a^Math.random()*16>>a/4).toString(16):([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,b)};
 
 
-const Token = function(data){
-	return redis_model({
-		_name: `token_${data.name}`,
-		_key: 'token',
-		_keyMap: Object.assign({}, {
-			'created_by': {isRequired: true, type: 'string', min: 3, max: 500},
-			'created_on': {default: function(){return (new Date).getTime()}},
-			'updated_on': {default: function(){return (new Date).getTime()}, always: true},
-			'token': {default: UUID, type: 'string', min: 36, max: 36},
-			'is_valid': {default: true, type: 'boolean'}
-		}, data.keyMap || {})
-	});
-};
-
-Token.check = async function(data){
-	try{
-		return this.is_valid;
-	}catch(error){
-		return false
+class Token extends Table{
+	static _key = 'token';
+	static _keyMap = {
+		'created_by': {isRequired: true, type: 'string', min: 3, max: 500},
+		'created_on': {default: function(){return (new Date).getTime()}},
+		'updated_on': {default: function(){return (new Date).getTime()}, always: true},
+		'token': {default: UUID, type: 'string', min: 36, max: 36, isPrivate: true},
+		'is_valid': {default: true, type: 'boolean'},	
 	}
-}
 
-var InviteToken = Object.create(Token({
-	name: 'invite',
-	keyMap:{
-		claimed_by: {default:"__NONE__", isRequired: false, type: 'string',},
-		mail: {default:"__NONE__", isRequired: false, type: 'string',},
-		mail_token: {default: UUID, type: 'string', min: 36, max: 36},
+	constructor(...args){
+		super(...args);
 	}
-}));
 
-InviteToken.consume = async function(data){
-	try{
-		if(this.is_valid){
-			data['is_valid'] = false;
-
-			await this.update(data);
-			return true;
+	async check(){
+		try{
+			return this.is_valid;
+		}catch(error){
+			return false
 		}
-		return false;
-
-	}catch(error){
-		throw error;
 	}
 }
 
-var AuthToken = Object.create(Token({
-	name: 'auth',
-}));
+Token.register();
 
-AuthToken.add = async function(data){
-	data.created_by = data.uid;
-	return AuthToken.__proto__.add(data);
-};
+class AuthToken extends Token{
+	static _keyMap = {
+		...super._keyMap,
+		user: {model: 'User', rel: 'one', localKey: 'created_by'},
+	}
 
-var PasswordResetToken = Object.create(Token({
-	name: 'auth',
-}));
+	static async create(data){
+		data.created_by = data.username;
+		return super.create(data)
 
-PasswordResetToken.add = async function(data){
-	data.created_by = data.uid;
-	return PasswordResetToken.__proto__.add(data);
-};
+	}
+}
+AuthToken.register();
 
-module.exports = {Token, InviteToken, AuthToken, PasswordResetToken};
+class InviteToken extends Token{
+	static _keyMap = {
+		...super._keyMap,
+		claimed_by:  {default: '__NONE__', isRequired: false, type: 'string'},
+		mail:        {default: '__NONE__', type: 'string'},
+		mail_token:  {default: '__NONE__', type: 'string'},
+		groups:      {default: '[]',       type: 'string'},
+	}
+
+	async consume(data){
+		try{
+			if(this.is_valid){
+				data['is_valid'] = false;
+
+				await this.update(data);
+				return true;
+			}
+			return false;
+
+		}catch(error){
+			throw error;
+		}
+	}
+}
+InviteToken.register();
+
+class ImpersonationToken extends Token {
+	static _keyMap = {
+		...super._keyMap,
+		target_uid: {isRequired: true, type: 'string', min: 1, max: 200},
+		temp_hash:  {isRequired: true, type: 'string', min: 1, max: 500},
+		expires_at: {default: function(){ return (new Date).getTime() + 7200000 }, type: 'number'},
+	}
+
+	get isExpired() {
+		return (new Date).getTime() > this.expires_at;
+	}
+
+	static async add(data) {
+		data.created_by = data.admin_uid;
+		return this.create(data);
+	}
+}
+ImpersonationToken.register();
+
+class PasswordResetToken extends Token {}
+PasswordResetToken.register();
+
+class OtpToken extends Token {
+	static _keyMap = {
+		...Token._keyMap,
+		uid:        {isRequired: true, type: 'string'},
+		code:       {isRequired: true, type: 'string'},
+		method:     {isRequired: true, type: 'string'},
+		expires_at: {default: function(){ return (new Date).getTime() + 600000 }, type: 'number'},
+	};
+
+	get isExpired() {
+		return (new Date).getTime() > this.expires_at;
+	}
+
+	// Factory method — named `issue` to avoid shadowing Token's `create(data)`
+	static async issue(uid, method) {
+		const existing = await this.listDetail({uid});
+		for (const t of existing) {
+			if (t.is_valid) await t.update({is_valid: false});
+		}
+		const code = String(Math.floor(100000 + Math.random() * 900000));
+		return this.create({uid, code, method, created_by: uid});
+	}
+
+	static async verify(uid, code) {
+		const tokens = await this.listDetail({uid});
+		const match = tokens.find(t => t.is_valid && !t.isExpired && t.code === code);
+		if (!match) return null;
+		await match.update({is_valid: false});
+		return match;
+	}
+}
+OtpToken.register();
+
+module.exports = {Token, InviteToken, AuthToken, ImpersonationToken, PasswordResetToken, OtpToken};
