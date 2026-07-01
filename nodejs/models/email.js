@@ -1,20 +1,42 @@
 'use strict';
 
-const sgMail = require('@sendgrid/mail');
+const nodemailer = require('nodemailer');
 const mustache = require('mustache');
-const conf = require('../app').conf;
-
-sgMail.setApiKey(conf.SENDGRID_API_KEY);
+const conf = require('@simpleworkjs/conf');
 
 var Mail = {};
 
-Mail.send = async function(to, subject, message, from){
-	await sgMail.send({
-		to: to,
-		from: from || `${conf.name} Accounts <noreply@sendgrid.theta42.com>`,
-		subject: subject,
-		text: message,
-		html: message,
+Mail.send = function(to, subject, message, from){
+	return new Promise(function(resolve, reject){
+		var transportOpts = {
+			host: conf.smtp.host || 'localhost',
+			port: conf.smtp.port || 25,
+			secure: conf.smtp.secure !== undefined ? conf.smtp.secure : false
+		};
+
+		if (conf.smtp.user && conf.smtp.pass) {
+			transportOpts.auth = {
+				user: conf.smtp.user,
+				pass: conf.smtp.pass
+			};
+		}
+
+		var transporter = nodemailer.createTransport(transportOpts);
+
+		var mailOpts = {
+			from: from || conf.smtp.from || `${conf.name} Accounts <noreply@theta42.com>`,
+			to: to,
+			subject: subject,
+			html: message
+		};
+
+		transporter.sendMail(mailOpts, function(err, info){
+			if (err) {
+				reject(err);
+			} else {
+				resolve(info);
+			}
+		});
 	});
 };
 

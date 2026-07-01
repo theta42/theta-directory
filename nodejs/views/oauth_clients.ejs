@@ -1,0 +1,190 @@
+<%- include('top') %>
+
+<!-- Secret modal -->
+<div class="modal fade" id="secretModal" tabindex="-1">
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title"><i class="fa-solid fa-key"></i> Client Secret</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+			</div>
+			<div class="modal-body">
+				<p class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> Save this secret now — it will <strong>not</strong> be shown again.</p>
+				<div class="input-group">
+					<input type="text" id="secretValue" class="form-control font-monospace" readonly>
+					<button class="btn btn-outline-secondary" onclick="copySecret()" title="Copy">
+						<i class="fa-solid fa-copy"></i>
+					</button>
+				</div>
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Done</button>
+			</div>
+		</div>
+	</div>
+</div>
+
+<script type="text/javascript">
+	app.auth.forceLogin('app_sso_oauth_admin');
+
+	var secretModal = new bootstrap.Modal(document.getElementById('secretModal'));
+
+	function showSecret(secret){
+		document.getElementById('secretValue').value = secret;
+		secretModal.show();
+	}
+
+	function copySecret(){
+		var el = document.getElementById('secretValue');
+		el.select();
+		document.execCommand('copy');
+	}
+
+	function fmtTTL(seconds){
+		if(seconds < 3600) return seconds + 's';
+		if(seconds < 86400) return (seconds / 3600).toFixed(1) + 'h';
+		return (seconds / 86400).toFixed(1) + 'd';
+	}
+
+	function processClient(client){
+		client.scopes_display = (client.scopes || []).join(' ');
+		client.access_token_ttl  = fmtTTL((client.token_lifetime || {}).access_token  || 3600);
+		client.refresh_token_ttl = fmtTTL((client.token_lifetime || {}).refresh_token || 2592000);
+		return client;
+	}
+
+	async function tableAJAX(){
+		let data = await app.oauthClient.list();
+		$.scope.oauthClientCard.empty();
+		$.each(data.results, function(_, client){
+			$.scope.oauthClientCard.push(processClient(client));
+		});
+	}
+
+	async function deleteClient(client_id, name, btn){
+		const $card = $(btn).closest('.card');
+		$card.addClass('table-warning');
+		const confirmed = await app.util.actionConfirm('Delete OAuth client "' + name + '"?', $card, 'warning');
+		$card.removeClass('table-warning');
+		if (!confirmed) return;
+		app.api.delete('oauth/client/' + client_id, function(error, data){
+			if(error){ app.util.actionMessage('Error: ' + data.message, $card, 'danger'); return; }
+			$.scope.oauthClientCard.remove('client_id', client_id);
+		});
+	}
+
+	async function rotateSecret(client_id, name, btn){
+		const $card = $(btn).closest('.card');
+		const confirmed = await app.util.actionConfirm('Rotate secret for "' + name + '"? The old secret will stop working immediately.', $card, 'warning');
+		if (!confirmed) return;
+		app.oauthClient.rotateSecret({client_id: client_id}, function(error, data){
+			if(error){ app.util.actionMessage('Error: ' + data.message, $card, 'danger'); return; }
+			showSecret(data.client_secret);
+		});
+	}
+
+	$(document).ready(function(){
+		tableAJAX();
+
+		$('form[action="oauth/client/"]').attr('evalAJAX',
+			'showSecret(data.client_secret); tableAJAX(); $form.trigger("reset");'
+		);
+	});
+
+</script>
+<div class="row" style="display:none">
+	<div class="col-md-4">
+		<div class="card shadow-lg">
+			<div class="card-header">
+				<i class="fa-solid fa-plus"></i>
+				Register OAuth Client
+			</div>
+			<div class="card-header actionMessage" style="display:none"></div>
+			<div class="card-body">
+				<form action="oauth/client/" method="post" onsubmit="formAJAX(this)">
+					<div class="mb-3">
+						<label class="form-label">Name</label>
+						<input type="text" class="form-control shadow" name="name" placeholder="Home Assistant" validate=":1">
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Description</label>
+						<input type="text" class="form-control shadow" name="description" placeholder="Home automation dashboard">
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Redirect URIs <small class="text-muted">(one per line)</small></label>
+						<textarea class="form-control shadow font-monospace" name="redirect_uris" rows="3"
+							placeholder="https://ha.example.com/auth/external/callback" validate=":1"></textarea>
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Scopes <small class="text-muted">(space-separated)</small></label>
+						<input type="text" class="form-control shadow" name="scopes" value="openid profile email">
+					</div>
+					<div class="row mb-3">
+						<div class="col">
+							<label class="form-label">Access Token TTL <small class="text-muted">(seconds)</small></label>
+							<input type="number" class="form-control shadow" name="token_lifetime[access_token]" value="3600" min="60">
+						</div>
+						<div class="col">
+							<label class="form-label">Refresh Token TTL <small class="text-muted">(seconds)</small></label>
+							<input type="number" class="form-control shadow" name="token_lifetime[refresh_token]" value="2592000" min="3600">
+						</div>
+					</div>
+					<button type="submit" class="btn btn-outline-dark">
+						<i class="fa-solid fa-plus"></i> Register
+					</button>
+				</form>
+			</div>
+		</div>
+	</div>
+	<div class="col-md-8" style="background-color: initial; border: none">
+		<div class="card-header actionMessage" style="display:none"></div>
+
+		<div jq-repeat="oauthClientCard" jq-index-key="client_id" id="oauth-card-{{client_id}}" class="card shadow mb-3">
+			<div class="card-header">
+				<h5>
+					<i class="fa-solid fa-server"></i>
+					{{ name }}
+				</h5>
+				<small class="text-muted font-monospace">{{ client_id }}</small>
+			</div>
+			<div class="card-header actionMessage" style="display:none"></div>
+			<div class="card-body">
+				{{ #description }}
+				<p>{{ description }}</p>
+				{{ /description }}
+				<dl class="row mb-0">
+					<dt class="col-sm-3">Redirect URIs</dt>
+					<dd class="col-sm-9">
+						<ul class="list-unstyled mb-0">
+						{{ #redirect_uris }}
+							<li><code>{{ . }}</code></li>
+						{{ /redirect_uris }}
+						</ul>
+					</dd>
+					<dt class="col-sm-3">Scopes</dt>
+					<dd class="col-sm-9"><code>{{ scopes_display }}</code></dd>
+					<dt class="col-sm-3">Access Token</dt>
+					<dd class="col-sm-9">{{ access_token_ttl }}</dd>
+					<dt class="col-sm-3">Refresh Token</dt>
+					<dd class="col-sm-9">{{ refresh_token_ttl }}</dd>
+					<dt class="col-sm-3">Created by</dt>
+					<dd class="col-sm-9">{{ created_by }}</dd>
+				</dl>
+			</div>
+			<div class="card-footer">
+				<button type="button"
+					onclick="rotateSecret('{{client_id}}', '{{name}}', this)"
+					class="btn btn-warning btn-sm">
+					<i class="fa-solid fa-arrows-rotate"></i> Rotate Secret
+				</button>
+				<button type="button"
+					onclick="deleteClient('{{client_id}}', '{{name}}', this)"
+					class="btn btn-danger btn-sm float-end">
+					<i class="fa-solid fa-trash"></i> Delete
+				</button>
+			</div>
+		</div>
+
+	</div>
+</div>
+<%- include('bottom') %>

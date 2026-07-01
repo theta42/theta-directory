@@ -1,0 +1,304 @@
+<%- include('top') %>
+
+<script type="text/javascript">
+	app.auth.forceLogin(['app_sso_admin', 'app_sso_invite']);
+
+	let allGroups = [];
+	let currentUserUid = null;
+	let isAdmin = false;
+
+	async function init() {
+		const [user, groupData] = await Promise.all([
+			app.api.get('user/me'),
+			app.api.get('group/'),
+		]);
+		currentUserUid = user.uid;
+		isAdmin = (user.memberOf || []).some(dn => dn.startsWith('cn=app_sso_admin,'));
+		allGroups = groupData.results || [];
+
+		// Populate create-form group select
+		populateGroupSelect('create-groups', allGroups, []);
+
+		loadInvites();
+	}
+
+	function fuzzyMatch(query, text) {
+		query = query.toLowerCase();
+		text  = text.toLowerCase();
+		let qi = 0;
+		for (let i = 0; i < text.length && qi < query.length; i++) {
+			if (text[i] === query[qi]) qi++;
+		}
+		return qi === query.length;
+	}
+
+	function filterGroups(inputEl, selectId) {
+		const query = inputEl.value;
+		[...document.getElementById(selectId).options].forEach(function(opt) {
+			opt.hidden = query ? !fuzzyMatch(query, opt.value) : false;
+		});
+	}
+
+	function populateGroupSelect(id, groups, selected) {
+		const sel = document.getElementById(id);
+		sel.innerHTML = '';
+		groups.forEach(function(cn) {
+			const opt = document.createElement('option');
+			opt.value = cn;
+			opt.textContent = cn;
+			opt.selected = selected.includes(cn);
+			sel.appendChild(opt);
+		});
+	}
+
+	function inviteStatus(t) {
+		if (t.claimed_by && t.claimed_by !== '__NONE__') return { label: 'Claimed', cls: 'text-secondary' };
+		if (!t.is_valid)                                   return { label: 'Revoked', cls: 'text-danger'   };
+		return                                                    { label: 'Pending', cls: 'text-success'  };
+	}
+
+	function groupsDisplay(groups) {
+		try {
+			const arr = JSON.parse(groups || '[]');
+			return arr.length ? arr.join(', ') : '—';
+		} catch(_) { return '—'; }
+	}
+
+	async function loadInvites() {
+		try {
+			const data = await app.api.get('user/invite');
+			const tbody = document.getElementById('invite-tbody');
+			tbody.innerHTML = '';
+			(data.results || [])
+				.sort((a, b) => (b.created_on || 0) - (a.created_on || 0))
+				.forEach(function(t) {
+					const status = inviteStatus(t);
+					const canEdit = isAdmin || t.created_by === currentUserUid;
+					const mail = (!t.mail || t.mail === '__NONE__') ? '—' : t.mail;
+					const isPending = t.is_valid && (!t.claimed_by || t.claimed_by === '__NONE__');
+
+					const tr = document.createElement('tr');
+					tr.dataset.token = t.token;
+					tr.innerHTML = `
+						<td><small class="text-muted">${moment(Number(t.created_on)).fromNow()}</small></td>
+						<td><small>${t.created_by}</small></td>
+						<td><small>${mail}</small></td>
+						<td><small class="text-muted">${groupsDisplay(t.groups)}</small></td>
+						<td><small class="${status.cls}">${status.label}</small></td>
+						<td class="text-nowrap">
+							${canEdit && isPending ? `
+								<button class="btn btn-sm btn-outline-secondary me-1" onclick="openEdit('${t.token}')">
+									<i class="fa-solid fa-pen"></i>
+								</button>
+								<button class="btn btn-sm btn-outline-danger" onclick="revokeInvite('${t.token}', this)">
+									<i class="fa-solid fa-ban"></i>
+								</button>
+							` : ''}
+							${isPending ? `
+								<button class="btn btn-sm btn-outline-dark ms-1" onclick="copyLink('${t.token}', this)">
+									<i class="fa-solid fa-copy"></i>
+								</button>
+							` : ''}
+						</td>
+					`;
+					tbody.appendChild(tr);
+				});
+		} catch(e) {
+			if (e && e.status === 401) location.replace('/');
+			else console.error('Failed to load invites:', e);
+		}
+	}
+
+	async function createInvite() {
+		const mail   = document.getElementById('create-email').value.trim();
+		const groups = [...document.getElementById('create-groups').selectedOptions].map(o => o.value);
+		const result = document.getElementById('create-result');
+		result.style.display = 'none';
+		try {
+			const data = await app.api.post('user/invite', { mail, groups });
+			result.style.display = '';
+			if (data.mail_sent) {
+				result.className = 'alert alert-success mt-2';
+				result.textContent = `Invite sent to ${mail}`;
+			} else {
+				result.className = 'alert alert-info mt-2';
+				result.innerHTML = `Link: <a href="${data.link}" target="_blank">${data.link}</a>`;
+			}
+			document.getElementById('create-email').value = '';
+			[...document.getElementById('create-groups').options].forEach(o => o.selected = false);
+			loadInvites();
+		} catch(e) {
+			result.style.display = '';
+			result.className = 'alert alert-danger mt-2';
+			result.textContent = 'Failed: ' + ((e.responseJSON && e.responseJSON.message) || 'Unknown error');
+		}
+	}
+
+	function openEdit(tokenId) {
+		// Find cached data from the DOM isn't reliable — re-fetch
+		app.api.get('user/invite').then(function(data) {
+			const t = (data.results || []).find(x => x.token === tokenId);
+			if (!t) return;
+
+			document.getElementById('edit-token').value = tokenId;
+			document.getElementById('edit-email').value  = (t.mail && t.mail !== '__NONE__') ? t.mail : '';
+
+			const selected = JSON.parse(t.groups || '[]');
+			populateGroupSelect('edit-groups', allGroups, selected);
+
+			const modal = new bootstrap.Modal(document.getElementById('editModal'));
+			modal.show();
+		});
+	}
+
+	async function saveEdit() {
+		const tokenId = document.getElementById('edit-token').value;
+		const mail    = document.getElementById('edit-email').value.trim();
+		const groups  = [...document.getElementById('edit-groups').selectedOptions].map(o => o.value);
+		const result  = document.getElementById('edit-result');
+		result.style.display = 'none';
+		try {
+			await app.api.put(`user/invite/${tokenId}`, { mail, groups });
+			bootstrap.Modal.getInstance(document.getElementById('editModal')).hide();
+			loadInvites();
+		} catch(e) {
+			result.style.display = '';
+			result.className = 'alert alert-danger mt-2';
+			result.textContent = 'Failed: ' + ((e.responseJSON && e.responseJSON.message) || 'Unknown error');
+		}
+	}
+
+	async function revokeInvite(tokenId, btn) {
+		$thisRow = $(btn).closest('tr');
+		$thisRow.addClass('table-warning');
+		let confirmation = await app.util.actionConfirm('Revoke selected invite token?', $thisRow, 'warning');
+
+		if(!confirmation){
+			$thisRow.removeClass('table-warning');
+			return;
+		}
+
+		// lets not use `confirm``
+		// if (!confirm('Revoke this invite token?')) return;
+		try {
+			await app.api.delete(`user/invite/${tokenId}`);
+			loadInvites();
+		} catch(e) {
+			alert('Failed to revoke invite.');
+		}
+	}
+
+	function copyLink(tokenId, btn) {
+		const link = `${location.origin}/login/invite/${tokenId}`;
+		navigator.clipboard.writeText(link).then(function() {
+			const orig = btn.innerHTML;
+			btn.innerHTML = '<i class="fa-solid fa-check"></i>';
+			setTimeout(() => btn.innerHTML = orig, 1500);
+		});
+	}
+
+	$(document).ready(function() {
+		init();
+	});
+</script>
+
+<div class="row">
+	<div class="col-12">
+
+		<div class="d-flex align-items-center mb-3 mt-2">
+			<h4 class="mb-0"><i class="fa-solid fa-envelope-open-text"></i> Invites</h4>
+		</div>
+
+		<div class="row g-3">
+
+			<!-- Create invite -->
+			<div class="col-lg-4">
+				<div class="card shadow-lg">
+					<div class="card-header shadow">
+						<i class="fa-solid fa-plus"></i> Create Invite
+					</div>
+					<div class="card-body">
+						<div class="mb-2">
+							<label class="form-label small">Email <small class="text-muted">(optional)</small></label>
+							<input type="email" id="create-email" class="form-control shadow" placeholder="user@example.com" />
+						</div>
+						<div class="mb-2">
+							<label class="form-label small">Groups <small class="text-muted">(Ctrl/⌘ for multiple)</small></label>
+							<input type="text" class="form-control form-control-sm shadow mb-1" placeholder="Filter groups…" oninput="filterGroups(this, 'create-groups')" />
+							<select id="create-groups" class="form-select shadow" multiple size="5"></select>
+						</div>
+						<button class="btn btn-primary shadow" onclick="createInvite()">
+							<i class="fa-solid fa-paper-plane"></i> Send Invite
+						</button>
+						<div id="create-result" style="display:none" class="mt-2"></div>
+					</div>
+				</div>
+			</div>
+
+			<!-- Invite list -->
+			<div class="col-lg-8">
+				<div class="card shadow-lg">
+					<div class="card-header shadow d-flex justify-content-between align-items-center">
+						<span><i class="fa-solid fa-list"></i> Invite Tokens</span>
+						<button class="btn btn-sm btn-outline-secondary" onclick="loadInvites()">
+							<i class="fa-solid fa-rotate"></i>
+						</button>
+					</div>
+					<div class="card-header actionMessage" style="display:none;"></div>
+					<div class="card-body p-0">
+						<table class="table table-sm mb-0">
+							<thead>
+								<tr>
+									<th>Created</th>
+									<th>By</th>
+									<th>Email</th>
+									<th>Groups</th>
+									<th>Status</th>
+									<th></th>
+								</tr>
+							</thead>
+							<tbody id="invite-tbody">
+								<tr><td colspan="6" class="text-center text-muted py-3">Loading…</td></tr>
+							</tbody>
+						</table>
+					</div>
+				</div>
+			</div>
+
+		</div>
+	</div>
+</div>
+
+<!-- Edit modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title"><i class="fa-solid fa-pen"></i> Edit Invite</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+			</div>
+			<div class="modal-body">
+				<input type="hidden" id="edit-token" />
+				<div class="mb-3">
+					<label class="form-label">Email <small class="text-muted">(leave blank to clear; changing sends a new verification email)</small></label>
+					<input type="email" id="edit-email" class="form-control shadow" placeholder="user@example.com" />
+				</div>
+				<div class="mb-3">
+					<label class="form-label">Groups <small class="text-muted">(Ctrl/⌘ for multiple)</small></label>
+					<input type="text" class="form-control form-control-sm shadow mb-1" placeholder="Filter groups…" oninput="filterGroups(this, 'edit-groups')" />
+					<select id="edit-groups" class="form-select shadow" multiple size="6"></select>
+				</div>
+				<div id="edit-result" style="display:none"></div>
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+				<button type="button" class="btn btn-primary" onclick="saveEdit()">
+					<i class="fa-solid fa-floppy-disk"></i> Save
+				</button>
+			</div>
+		</div>
+	</div>
+</div>
+
+<%- include('impersonate_modal') %>
+<%- include('bottom') %>

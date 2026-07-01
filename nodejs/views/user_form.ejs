@@ -1,41 +1,109 @@
+<script>
+function renderUsernameSuggestions(suggestions) {
+	const container = document.getElementById('usernameOptions');
+	const hidden    = document.getElementById('selectedUid');
+	const selector  = document.getElementById('usernameSelector');
+	container.innerHTML = '';
+	if (!suggestions || !suggestions.length) return;
+	selector.style.display = '';
+	suggestions.forEach(function(uid, i) {
+		const btn = document.createElement('button');
+		btn.type = 'button';
+		btn.dataset.uid = uid;
+		btn.textContent = uid;
+		btn.className = 'btn ' + (i === 0 ? 'btn-secondary' : 'btn-outline-secondary');
+		btn.onclick = function() {
+			container.querySelectorAll('.btn').forEach(function(b) {
+				b.className = 'btn btn-outline-secondary';
+			});
+			btn.className = 'btn btn-secondary';
+			hidden.value = uid;
+			const override = document.getElementById('adminUidOverride');
+			if (override) override.value = '';
+		};
+		container.appendChild(btn);
+	});
+	hidden.value = suggestions[0];
+}
+
+async function fetchUsernameSuggestions() {
+	const gnEl = document.querySelector('[name="givenName"]');
+	const snEl = document.querySelector('[name="sn"]');
+	const dobEl = document.querySelector('[name="dob"]');
+	if (!gnEl || !snEl) return;
+	const gn = gnEl.value.trim();
+	const sn = snEl.value.trim();
+	const dob = dobEl ? dobEl.value.trim() : '';
+	if (gn.length < 2 || sn.length < 2) return;
+	try {
+		const params = new URLSearchParams({ givenName: gn, sn, dob });
+		const resp = await fetch('/api/auth/username-suggestions?' + params);
+		const data = await resp.json();
+		renderUsernameSuggestions(data.suggestions);
+	} catch(e) {}
+}
+</script>
 <form action="user/" method="post" onsubmit="formAJAX(this)">
 	<input type="hidden" class="form-control" name="delete" value="false" />
-	<div class="form-group">
-		<label class="control-label">First name</label>
-		<input type="text" class="form-control shadow" name="givenName" placeholder="John" validate=":3" />
+	<div class="mb-3">
+		<label class="form-label">First name</label>
+		<input type="text" class="form-control shadow" name="givenName" placeholder="John" validate=":3" onblur="fetchUsernameSuggestions()" />
+		<div class="invalid-feedback"></div>
 	</div>
 
-	<div class="form-group">
-		<label class="control-label">Last name</label>
-		<input type="text" class="form-control shadow" name="sn" placeholder="smith" validate=":3" />
+	<div class="mb-3">
+		<label class="form-label">Last name</label>
+		<input type="text" class="form-control shadow" name="sn" placeholder="smith" validate=":3" onblur="fetchUsernameSuggestions()" />
 	</div>
 
-	<div class="form-group">
-		<label class="control-label">Email</label>
+	<div class="mb-3">
+		<label class="form-label">Date of Birth</label>
+		<input type="date" class="form-control shadow" name="dob" required onchange="fetchUsernameSuggestions()" />
+	</div>
+
+	<div class="mb-3" id="usernameSelector" style="display:none">
+		<label class="form-label">Username</label>
+		<div id="usernameOptions" class="d-flex flex-wrap gap-2 mb-2"></div>
+		<input type="hidden" name="uid" id="selectedUid" />
+		<% if (locals.adminMode) { %>
+		<input type="text" class="form-control shadow mt-2" id="adminUidOverride"
+			placeholder="Custom username (admin only)"
+			oninput="document.getElementById('selectedUid').value = this.value.trim() || (document.querySelector('#usernameOptions .btn-secondary') && document.querySelector('#usernameOptions .btn-secondary').dataset.uid) || ''" />
+		<% } %>
+	</div>
+
+	<div class="mb-3">
+		<label class="form-label">Email</label>
 		<input type="text" class="form-control shadow" name="mail" placeholder="jsmith@gmail.com" validate="email:3" />
 	</div>
 
-	<div class="form-group">
-		<label class="control-label">SSH Public Key</label>
+	<div class="mb-3">
+		<label class="form-label">SSH Public Key</label>
 		<input type="text" class="form-control shadow" name="sshPublicKey" placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQ..." />
 	</div>
 
-	<div class="form-group">
-		<label class="control-label">Mobile Phone</label>
-		<input type="text" class="form-control shadow" name="mobile" placeholder="9175551234" validate=":9" />
+	<div class="mb-3">
+		<label class="form-label">Mobile Phone <small class="text-muted">(optional, include country code e.g. +14155551234)</small></label>
+		<input type="text" class="form-control shadow" name="mobile" placeholder="+14155551234" />
 	</div>
 
-	<div class="form-group">
-		<label class="control-label">Password</label>
+	<div class="mb-3">
+		<label class="form-label">Password</label>
 		<input type="password" class="form-control shadow" name="userPassword" placeholder="Atleast 5 char. long" validate="password:5"/>
 	</div>
-	<div class="form-group">
-		<label class="control-label">Again</label>
+	<div class="mb-3">
+		<label class="form-label">Again</label>
 		<input type="password" class="form-control shadow" name="passwordMatch" placeholder="Retype password" validate="eq:userPassword"/>
 	</div>
-	<div class="form-group">
-		<label class="control-label">User Description (Optional)</label>
+	<div class="mb-3">
+		<label class="form-label">User Description (Optional)</label>
 		<textarea class="form-control shadow" name="description" placeholder="Admin group for gitea app"></textarea>
+	</div>
+	<div class="mb-3 form-check">
+		<input type="checkbox" class="form-check-input" id="tosAgree" name="tosAgree" required>
+		<label class="form-check-label" for="tosAgree">
+			I have read and agree to the <a href="/tos" target="_blank">Terms of Service</a>
+		</label>
 	</div>
 	<button type="submit" class="btn btn-outline-dark">Add</button>
 </form>

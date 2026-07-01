@@ -1,68 +1,132 @@
 <%- include('top') %>
 <script id="rowTemplate" type="text/html">
-	<tr class="" action="user/password/{{ username }}" method="put" evalAJAX="$form.trigger('reset')">
-		<td>
-			{{ uidNumber }}
-		</td>
-		<td>
-			<a href='/users/{{uid}}'>{{ uid }}</a>	
-		</td>
-		<td>
-			{{givenName}} {{sn}} 
-		</td>
-		<td>
-			{{mail}}
-		</td>
-		<td>
-			{{#sudoUser}}<i class="fad fa-check-square"></i>{{/sudoUser}}
-		</td>
-		<td>
-			{{#sshPublicKey}}<i class="fad fa-check-square"></i>{{/sshPublicKey}}
-		</td>
-		<td>
-			<form action="user/{{uid}}" method="delete" onsubmit="formAJAX(this)" evalAJAX="renderUsers('Deleted {{uid}}', 'success')">
-				<button type="submit" class="btn btn-sm btn-danger">
-					<i class="fad fa-user-slash"></i>
-				</button>
-			</form>
-		</td>
-	</tr>
+
 </script>
 <script type="text/javascript">
-
 	function renderUsers(actionMessage, type){
-		var rowTemplate = $('#rowTemplate').html();
-		var $target = $('#tableAJAX');
-
-		$target.html('').hide();
-		app.util.actionMessage('Refreshing user list...', $target);
 
 		app.user.list(function(error, data){
 			if(error){
-				console.log('data', data)
 				app.util.actionMessage(data.message, $target, 'danger');
 				return;
 			}
-			$.each( data.results, function(key, value) {
-				if(value.uidNumber<1500) return;
-				user_row = Mustache.render(rowTemplate, value);
-				$target.append(user_row);
-			});
-
-			$target.fadeIn('slow');
-
-			app.util.actionMessage(actionMessage || '', $target, type || 'info');
+			$.scope.userRow.push(...data.results);
 
 		});
 	}
 
-	$(document).ready(function(){
-		renderUsers(); //populate the table
-		$('form[action="user/"]').attr('evalAJAX', 'renderUsers("User added", "success")')
-	});
+	function toggleActive(uid, active){
+		app.user.setActive(uid, active, function(error, data){
+			if(error) return alert('Failed to update user status');
+			renderUsers();
+		});
+	}
+
+	async function deleteUser(uid, btn){
+		const $row = $(btn).closest('tr');
+		$row.addClass('table-warning');
+		const confirmed = await app.util.actionConfirm(`Delete user "${uid}"?`, $row, 'warning');
+		$row.removeClass('table-warning');
+		if (!confirmed) return;
+		app.api.delete('user/' + uid, function(error, data){
+			if (error) {
+				app.util.actionMessage(data.message || 'Failed to delete user', $row, 'danger');
+				return;
+			}
+			renderUsers();
+		});
+	}
+
+	function fuzzyMatch(query, text) {
+		query = query.toLowerCase();
+		text  = text.toLowerCase();
+		let qi = 0;
+		for (let i = 0; i < text.length && qi < query.length; i++) {
+			if (text[i] === query[qi]) qi++;
+		}
+		return qi === query.length;
+	}
+
+	function filterGroups(inputEl, selectId) {
+		const query = inputEl.value;
+		[...document.getElementById(selectId).options].forEach(function(opt) {
+			opt.hidden = query ? !fuzzyMatch(query, opt.value) : false;
+		});
+	}
+
+	async function loadInviteGroups(){
+		const data = await app.api.get('group/');
+		const sel = document.getElementById('invite-groups');
+		(data.results || []).forEach(function(cn){
+			const opt = document.createElement('option');
+			opt.value = cn;
+			opt.textContent = cn;
+			sel.appendChild(opt);
+		});
+	}
+
+	async function sendInvite(){
+		const mail   = document.getElementById('invite-email').value.trim();
+		const groups = [...document.getElementById('invite-groups').selectedOptions].map(o => o.value);
+		const result = document.getElementById('invite-result');
+		result.style.display = 'none';
+		try{
+			const data = await app.api.post('user/invite', { mail, groups });
+			result.style.display = '';
+			if(data.mail_sent){
+				result.className = 'alert alert-success mt-2';
+				result.textContent = `Invite sent to ${mail}`;
+			} else {
+				result.className = 'alert alert-info mt-2';
+				result.innerHTML = `Link: <a href="${data.link}" target="_blank">${data.link}</a>`;
+			}
+			document.getElementById('invite-email').value = '';
+			[...document.getElementById('invite-groups').options].forEach(o => o.selected = false);
+		}catch(e){
+			result.style.display = '';
+			result.className = 'alert alert-danger mt-2';
+			result.textContent = 'Failed: ' + ((e.responseJSON && e.responseJSON.message) || 'Unknown error');
+		}
+	}
+
+	(async function(){
+		await app.auth.forceLogin('app_sso_admin');
+
+		$(document).ready(function(){
+			renderUsers();
+			loadInviteGroups();
+			$('form[action="user/"]').attr('evalAJAX', 'renderUsers("User added", "success")')
+		});
+	})();
+
 </script>
 <div class="row" style="display:none">
 	<div class="col-md-4">
+		<div class="shadow-lg card mb-3 card-default group-required group-required-app_sso_admin">
+			<div class="card-header shadow">
+				<i class="fas fa-user-plus"></i>
+				Invite User
+				<span class="float-end">
+					<i class="fa-solid fa-arrows-up-down"></i>
+				</span>
+			</div>
+			<div class="card-header shadow actionMessage" style="display: none;"></div>
+			<div class="card-body">
+				<div class="mb-2">
+					<label class="form-label small">Email <small class="text-muted">(optional — sends invite immediately)</small></label>
+					<input type="email" id="invite-email" class="form-control form-control-sm shadow" placeholder="user@example.com" />
+				</div>
+				<div class="mb-2">
+					<label class="form-label small">Groups <small class="text-muted">(optional — hold Ctrl/⌘ for multiple)</small></label>
+					<input type="text" class="form-control form-control-sm shadow mb-1" placeholder="Filter groups…" oninput="filterGroups(this, 'invite-groups')" />
+					<select id="invite-groups" class="form-select form-select-sm shadow" multiple size="4"></select>
+				</div>
+				<button onclick="sendInvite()" class="btn btn-sm btn-outline-dark shadow">
+					<i class="fa-solid fa-envelope"></i> Send Invite
+				</button>
+				<div id="invite-result" style="display:none" class="mt-2"></div>
+			</div>
+		</div>
 		<div class="card shadow-lg">
 			<div class="card-header">
 				<i class="fas fa-user-plus"></i>
@@ -70,32 +134,73 @@
 			</div>
 			<div class="card-header actionMessage" style="display:none"></div>
 			<div class="card-body">
-				<%- include('user_form') %>
+				<%- include('user_form', {adminMode: true}) %>
 			</div>
 		</div>
 	</div>
 	<div class="col-md-8">
 		<div class="card shadow">
 			<div class="card-header">
-				<i class="fad fa-th-list"></i>
+				<i class="fa-solid fa-users"></i>
 				User List
 			</div>
 			<div class="card-header actionMessage" style="display:none"></div>
 			<table class="card-body table table-striped" style="margin-bottom:0">
 				<thead>
 					<th>ID</th>
-					<th>User Name</th>
 					<th>Name</th>
 					<th>eMail</th>
-					<th>Sudo</th>
 					<th>Key</th>
+					<th>Active</th>
+					<th>TOS</th>
 					<th></th>
 				</thead>
 				<tbody id="tableAJAX">
-					<!-- ajax loaded table -->
+					<tr jq-repeat="userRow">
+						<td>
+							{{ uidNumber }}
+						</td>
+						<td>
+							<a href='/users/{{uid}}'>{{givenName}} {{sn}}</a>
+						</td>
+						<td>
+							{{mail}}
+						</td>
+						<td>
+							{{#sshPublicKey}}<i class="fa-regular fa-circle-check text-success"></i>{{/sshPublicKey}}
+						</td>
+						<td>
+							{{#isActive}}<i class="fa-regular fa-circle-check text-success"></i>{{/isActive}}
+							{{#isInactive}}<i class="fa-solid fa-circle-xmark text-danger"></i>{{/isInactive}}
+						</td>
+						<td>
+							{{#tosAccepted}}<i class="fa-solid fa-circle-check text-success" title="TOS accepted"></i>{{/tosAccepted}}
+							{{#tosNotAccepted}}<i class="fa-solid fa-circle-xmark text-danger" title="TOS not accepted"></i>{{/tosNotAccepted}}
+						</td>
+						<td class="text-nowrap">
+							{{#isActive}}
+							<button class="btn btn-sm btn-outline-warning me-1" title="Deactivate" onclick="toggleActive('{{uid}}', false)">
+								<i class="fa-solid fa-lock"></i>
+							</button>
+							{{/isActive}}
+							{{#isInactive}}
+							<button class="btn btn-sm btn-warning me-1" title="Activate" onclick="toggleActive('{{uid}}', true)">
+								<i class="fa-solid fa-lock-open"></i>
+							</button>
+							{{/isInactive}}
+							<button class="btn btn-sm btn-outline-secondary me-1" title="Impersonate" onclick="startImpersonate('{{uid}}')">
+								<i class="fa-solid fa-user-secret"></i>
+							</button>
+							<button class="btn btn-sm btn-danger" onclick="deleteUser('{{uid}}', this)">
+								<i class="fa-solid fa-user-slash"></i>
+							</button>
+						</td>
+					</tr>
 				</tbody>
 			</table>
 		</div>
 	</div>
 </div>
+
+<%- include('impersonate_modal') %>
 <%- include('bottom') %>

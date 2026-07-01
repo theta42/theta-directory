@@ -1,0 +1,187 @@
+<%- include('top') %>
+
+<script type="text/javascript">
+	app.auth.forceLogin();
+
+	var currentUser;
+
+	async function loadOnboarding() {
+		currentUser = await app.auth.asyncUser;
+
+		var needs = currentUser.onboardingNeeds || [];
+
+		if (!needs.length) {
+			location.replace('/');
+			return;
+		}
+
+		if (needs.includes('tos')) {
+			document.getElementById('section-tos').style.display = '';
+		}
+		if (needs.includes('dob')) {
+			document.getElementById('section-dob').style.display = '';
+		}
+		if (needs.includes('password')) {
+			document.getElementById('section-password').style.display = '';
+		}
+	}
+
+	function checkAllDone() {
+		var sections = document.querySelectorAll('.onboarding-section');
+		var anyVisible = false;
+		sections.forEach(function(el) {
+			if (el.style.display !== 'none') anyVisible = true;
+		});
+		if (!anyVisible) location.replace('/');
+	}
+
+	async function acceptTos() {
+		var checkbox = document.getElementById('tosCheckbox');
+		if (!checkbox.checked) {
+			alert('Please read and check the box to accept the Terms of Service.');
+			return;
+		}
+		try {
+			var resp = await fetch('/api/user/accept-tos', {
+				method: 'POST',
+				headers: { 'auth-token': localStorage.getItem('APIToken') }
+			});
+			if (!resp.ok) throw new Error('Failed');
+			document.getElementById('section-tos').style.display = 'none';
+			checkAllDone();
+		} catch(e) {
+			alert('Could not save TOS acceptance. Please try again.');
+		}
+	}
+
+	async function saveDob() {
+		var dob = document.getElementById('dobInput').value;
+		if (!dob) {
+			alert('Please enter your date of birth.');
+			return;
+		}
+		try {
+			var resp = await fetch('/api/user/' + currentUser.uid, {
+				method: 'PUT',
+				headers: {
+					'auth-token': localStorage.getItem('APIToken'),
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ dateOfBirth: dob })
+			});
+			if (!resp.ok) throw new Error('Failed');
+			document.getElementById('section-dob').style.display = 'none';
+			checkAllDone();
+		} catch(e) {
+			alert('Could not save date of birth. Please try again.');
+		}
+	}
+
+	async function changePassword() {
+		var pw  = document.getElementById('pwInput').value;
+		var pw2 = document.getElementById('pwInput2').value;
+		if (!pw || pw.length < 5) {
+			alert('Password must be at least 5 characters.');
+			return;
+		}
+		if (pw !== pw2) {
+			alert('Passwords do not match.');
+			return;
+		}
+		try {
+			var resp = await fetch('/api/user/password', {
+				method: 'PUT',
+				headers: {
+					'auth-token': localStorage.getItem('APIToken'),
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ userPassword: pw, password: pw2 })
+			});
+			if (!resp.ok) throw new Error('Failed');
+			document.getElementById('section-password').style.display = 'none';
+			checkAllDone();
+		} catch(e) {
+			alert('Could not change password. Please try again.');
+		}
+	}
+
+	$(document).ready(function() {
+		loadOnboarding();
+	});
+</script>
+
+<div class="row justify-content-center" style="display:none">
+	<div class="col-md-8">
+
+		<div class="card shadow-lg mb-4 mt-2">
+			<div class="card-header shadow">
+				<i class="fa-solid fa-circle-user"></i> Account Setup
+			</div>
+			<div class="card-body">
+				<p class="text-muted mb-0">Please complete the steps below before continuing.</p>
+			</div>
+		</div>
+
+		<!-- TOS -->
+		<div id="section-tos" class="onboarding-section card shadow-lg mb-4" style="display:none">
+			<div class="card-header shadow">
+				<i class="fa-solid fa-file-contract"></i> Terms of Service
+			</div>
+			<div class="card-body">
+				<div class="border rounded p-3 mb-3" style="max-height:300px;overflow-y:auto">
+					<%- tosHtml %>
+				</div>
+				<div class="form-check mb-3">
+					<input class="form-check-input" type="checkbox" id="tosCheckbox">
+					<label class="form-check-label" for="tosCheckbox">
+						I have read and agree to the Terms of Service
+					</label>
+				</div>
+				<button class="btn btn-primary shadow" onclick="acceptTos()">
+					<i class="fa-solid fa-check"></i> Accept
+				</button>
+			</div>
+		</div>
+
+		<!-- DOB -->
+		<div id="section-dob" class="onboarding-section card shadow-lg mb-4" style="display:none">
+			<div class="card-header shadow">
+				<i class="fa-solid fa-calendar"></i> Date of Birth
+			</div>
+			<div class="card-body">
+				<p class="text-muted">Your date of birth is required for account verification.</p>
+				<div class="mb-3">
+					<label class="form-label">Date of Birth</label>
+					<input type="date" class="form-control shadow" id="dobInput" />
+				</div>
+				<button class="btn btn-primary shadow" onclick="saveDob()">
+					<i class="fa-solid fa-check"></i> Save
+				</button>
+			</div>
+		</div>
+
+		<!-- Password -->
+		<div id="section-password" class="onboarding-section card shadow-lg mb-4" style="display:none">
+			<div class="card-header shadow">
+				<i class="fa-solid fa-key"></i> Change Password
+			</div>
+			<div class="card-body">
+				<p class="text-muted">You must set a new password before continuing.</p>
+				<div class="mb-3">
+					<label class="form-label">New Password</label>
+					<input type="password" class="form-control shadow" id="pwInput" placeholder="At least 5 characters" />
+				</div>
+				<div class="mb-3">
+					<label class="form-label">Confirm Password</label>
+					<input type="password" class="form-control shadow" id="pwInput2" placeholder="Retype password" />
+				</div>
+				<button class="btn btn-primary shadow" onclick="changePassword()">
+					<i class="fa-solid fa-check"></i> Change Password
+				</button>
+			</div>
+		</div>
+
+	</div>
+</div>
+
+<%- include('bottom') %>
