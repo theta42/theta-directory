@@ -4,7 +4,7 @@ const crypto = require('crypto');
 const request = require('supertest');
 const app = require('../app');
 
-const TEST_CREDS = { uid: 'test', password: 'ZxAsQw!2' };
+const TEST_CREDS = { uid: 'test', password: 'MyTestPassword!2' };
 
 async function login() {
 	const res = await request(app)
