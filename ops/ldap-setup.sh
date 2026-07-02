@@ -52,13 +52,17 @@ TMPFILE=$(mktemp /tmp/ldap-setup.XXXXXX.ldif)
 trap 'rm -f "$TMPFILE"' EXIT
 
 # Run an ldapsearch against cn=config (EXTERNAL/SASL — must be root)
+# NOTE: ldapsearch echoes the search filter/base back as "# ..." comment lines.
+# Those comments contain the very terms we grep for (e.g. "ppolicy"), which would
+# make every existence check a false positive. Strip all comment lines so callers
+# only ever see real result data.
 config_search() {
-    ldapsearch -Q -Y EXTERNAL -H ldapi:/// -b "cn=config" "$@" 2>/dev/null
+    ldapsearch -Q -Y EXTERNAL -H ldapi:/// -b "cn=config" "$@" 2>/dev/null | grep -v '^#'
 }
 
 # Run an ldapsearch against the directory (bind DN + password)
 dir_search() {
-    ldapsearch -x -D "$BIND_DN" -w "$ADMIN_PASS" -H ldapi:/// -b "$BASE_DN" "$@" 2>/dev/null
+    ldapsearch -x -D "$BIND_DN" -w "$ADMIN_PASS" -H ldapi:/// -b "$BASE_DN" "$@" 2>/dev/null | grep -v '^#'
 }
 
 # Apply an LDIF file via ldapadd against cn=config
@@ -99,7 +103,7 @@ ok "user database: ${DB_DN}"
 # ── 1. pw-sha2 module (SSHA512 password hashing) ─────────────────────────────
 info "pw-sha2 module"
 
-if config_search -b "cn=module{0},cn=config" "(olcModuleLoad=pw-sha2)" | grep -q "pw-sha2"; then
+if config_search -b "cn=config" "(objectClass=olcModuleList)" olcModuleLoad | grep -q "^olcModuleLoad:.*pw-sha2"; then
     skip "pw-sha2 already loaded"
 else
     config_add "dn: cn=module{0},cn=config
@@ -112,7 +116,7 @@ fi
 # ── 2. ppolicy module ─────────────────────────────────────────────────────────
 info "ppolicy module"
 
-if config_search -b "cn=module{0},cn=config" "(olcModuleLoad=ppolicy)" | grep -q "ppolicy"; then
+if config_search -b "cn=config" "(objectClass=olcModuleList)" olcModuleLoad | grep -q "^olcModuleLoad:.*ppolicy"; then
     skip "ppolicy module already loaded"
 else
     config_add "dn: cn=module{0},cn=config
@@ -125,7 +129,7 @@ fi
 # ── 3. ppolicy overlay ────────────────────────────────────────────────────────
 info "ppolicy overlay"
 
-if config_search -b "$DB_DN" "(olcOverlay=*ppolicy*)" dn | grep -q "ppolicy"; then
+if config_search -b "$DB_DN" "(olcOverlay=*ppolicy*)" dn | grep -qi "^dn:.*ppolicy"; then
     skip "ppolicy overlay already configured on ${DB_DN}"
 else
     config_add "dn: olcOverlay=ppolicy,${DB_DN}
@@ -263,10 +267,20 @@ info "verifying ppolicy is active on ${DB_DN}"
 
 VERIFY_FAILED=0
 
-if config_search -b "$DB_DN" "(olcOverlay=*ppolicy*)" dn | grep -q "ppolicy"; then
+if config_search -b "$DB_DN" "(olcOverlay=*ppolicy*)" dn | grep -qi "^dn:.*ppolicy"; then
     ok "ppolicy overlay is attached to the user database"
 else
     warn "ppolicy overlay is NOT attached to ${DB_DN} — active/inactive toggle will fail"
+    VERIFY_FAILED=1
+fi
+
+# The authoritative test: is pwdAccountLockedTime known to the running slapd?
+# This is the exact attribute User.setActive modifies.
+if ldapsearch -Q -Y EXTERNAL -H ldapi:/// -s base -b "cn=Subschema" attributeTypes 2>/dev/null \
+    | grep -qi "pwdAccountLockedTime"; then
+    ok "pwdAccountLockedTime attribute is registered (setActive will work)"
+else
+    warn "pwdAccountLockedTime is NOT registered — setActive will return 503"
     VERIFY_FAILED=1
 fi
 
