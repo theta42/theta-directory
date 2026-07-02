@@ -5,17 +5,24 @@
 	var oauthParams = <%- JSON.stringify(params) %>;
 	var clientInfo  = <%- JSON.stringify(oauthClient) %>;
 
+	// Send the user to log in, then return to this exact authorize request.
+	// logInRedirect() strips the leading "/login" after auth, so the return
+	// target must be encoded as a path under /login (not a ?redirect= param).
+	function goToLogin(){
+		location.replace('/login/oauth/authorize?' + $.param(oauthParams));
+	}
+
 	$(document).ready(function(){
 
-		// Override the global hold-ready redirect so we control the login destination
-		app.auth.isLoggedIn(function(error, isLoggedIn){
-			if(error || !isLoggedIn){
-				app.auth.logOut(function(){});
-				var returnUrl = '/oauth/authorize?' + $.param(oauthParams);
-				location.replace('/login?redirect=' + encodeURIComponent(returnUrl));
+		// Require an authenticated session before showing the consent screen.
+		app.auth.isLoggedIn().then(function(user){
+			if(!user){
+				goToLogin();
 				return;
 			}
 			$('div.row').fadeIn('slow');
+		}).catch(function(){
+			goToLogin();
 		});
 
 		$('#btn-deny').on('click', function(){

@@ -300,6 +300,44 @@ router.get('/userinfo', async function(req, res, next) {
 	}
 });
 
+// RP-initiated logout — clears the SSO browser session, then returns the user
+// to the requesting app's post_logout_redirect_uri (if it belongs to a
+// registered client, to prevent this being used as an open redirect).
+router.get('/logout', async function(req, res, next) {
+	try {
+		const { post_logout_redirect_uri, state } = req.query;
+		let target = '/';
+
+		if (post_logout_redirect_uri) {
+			let requested;
+			try {
+				requested = new URL(post_logout_redirect_uri);
+			} catch(_) {
+				return next(makeError('InvalidRequest', 'post_logout_redirect_uri is not a valid URL.', 400));
+			}
+
+			const clients = await OAuthClient.listDetail();
+			const allowed = clients.some(client =>
+				(client.redirect_uris || []).some(uri => {
+					try { return new URL(uri).origin === requested.origin; }
+					catch(_) { return false; }
+				})
+			);
+
+			if (!allowed) {
+				return next(makeError('InvalidRedirectURI', 'post_logout_redirect_uri origin is not registered for any client.', 400));
+			}
+
+			if (state) requested.searchParams.set('state', state);
+			target = requested.toString();
+		}
+
+		res.render('oauth_logout', { ...pageLocals, target });
+	} catch(error) {
+		next(error);
+	}
+});
+
 // --- authenticated API router (mounted at /api/oauth with auth middleware) ---
 
 const authRouter = express.Router();
@@ -355,6 +393,7 @@ function discovery(req, res) {
 		authorization_endpoint: `${base}/oauth/authorize`,
 		token_endpoint: `${base}/oauth/token`,
 		userinfo_endpoint: `${base}/oauth/userinfo`,
+		end_session_endpoint: `${base}/oauth/logout`,
 		scopes_supported: ['openid', 'profile', 'email'],
 		response_types_supported: ['code'],
 		grant_types_supported: ['authorization_code', 'refresh_token'],

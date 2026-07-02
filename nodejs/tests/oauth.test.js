@@ -57,6 +57,33 @@ describe('OIDC Discovery', () => {
 		expect(res.body.grant_types_supported).toContain('refresh_token');
 		expect(res.body.code_challenge_methods_supported).toContain('S256');
 	});
+
+	test('advertises end_session_endpoint', async () => {
+		const res = await request(app).get('/.well-known/openid-configuration');
+		expect(res.body).toHaveProperty('end_session_endpoint');
+	});
+});
+
+describe('OAuth — GET /oauth/logout (RP-initiated logout)', () => {
+	test('renders logout page with no redirect', async () => {
+		const res = await request(app).get('/oauth/logout');
+		expect(res.status).toBe(200);
+	});
+
+	test('accepts a post_logout_redirect_uri on a registered client origin', async () => {
+		const res = await request(app)
+			.get('/oauth/logout')
+			.query({ post_logout_redirect_uri: 'https://test.example.com/' });
+		expect(res.status).toBe(200);
+		expect(res.text).toContain('https://test.example.com/');
+	});
+
+	test('rejects a post_logout_redirect_uri on an unregistered origin', async () => {
+		const res = await request(app)
+			.get('/oauth/logout')
+			.query({ post_logout_redirect_uri: 'https://evil.example.com/' });
+		expect(res.status).toBeGreaterThanOrEqual(400);
+	});
 });
 
 describe('OAuth — GET /oauth/authorize (consent page validation)', () => {
