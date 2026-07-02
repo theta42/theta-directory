@@ -73,7 +73,8 @@ router.get('/login', async function(req, res, next) {
 });
 
 router.get('/oauth-clients', function(req, res, next) {
-  res.render('oauth_clients', {...values});
+  const issuer = ((conf.oauth && conf.oauth.issuer) || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  res.render('oauth_clients', {...values, issuer, discoveryUrl: `${issuer}/.well-known/openid-configuration`});
 });
 
 

@@ -35,9 +35,22 @@
 	}
 
 	function copySecret(){
-		var el = document.getElementById('secretValue');
+		copyField('secretValue');
+	}
+
+	// Copy the value of an input by id; briefly flips the button icon to a check.
+	function copyField(id, btn){
+		var el = document.getElementById(id);
+		if(!el) return;
 		el.select();
+		el.setSelectionRange(0, 99999);
 		document.execCommand('copy');
+		if(btn){
+			var $i = $(btn).find('i');
+			var prev = $i.attr('class');
+			$i.attr('class', 'fa-solid fa-check');
+			setTimeout(function(){ $i.attr('class', prev); }, 1200);
+		}
 	}
 
 	function fmtTTL(seconds){
@@ -93,6 +106,32 @@
 
 </script>
 <div class="row" style="display:none">
+	<div class="col-12 mb-3">
+		<div class="card shadow-sm border-info">
+			<div class="card-header bg-info bg-opacity-10">
+				<i class="fa-solid fa-circle-info"></i>
+				OpenID Connect Endpoints
+			</div>
+			<div class="card-body">
+				<p class="mb-2 text-muted small">
+					Point OIDC/OAuth clients (e.g. Home Assistant) at the discovery URL below.
+					It advertises the authorization, token, and userinfo endpoints automatically.
+				</p>
+				<dl class="row mb-0">
+					<dt class="col-sm-2">Issuer</dt>
+					<dd class="col-sm-10"><code><%= issuer %></code></dd>
+					<dt class="col-sm-2">Discovery URL</dt>
+					<dd class="col-sm-10">
+						<div class="input-group input-group-sm">
+							<input type="text" id="discoveryUrl" class="form-control font-monospace" readonly value="<%= discoveryUrl %>">
+							<a class="btn btn-outline-secondary" href="<%= discoveryUrl %>" target="_blank" title="Open"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+							<button class="btn btn-outline-secondary" type="button" onclick="copyField('discoveryUrl', this)" title="Copy"><i class="fa-solid fa-copy"></i></button>
+						</div>
+					</dd>
+				</dl>
+			</div>
+		</div>
+	</div>
 	<div class="col-md-4">
 		<div class="card shadow-lg">
 			<div class="card-header">
@@ -153,6 +192,13 @@
 				<p>{{ description }}</p>
 				{{ /description }}
 				<dl class="row mb-0">
+					<dt class="col-sm-3">Client ID</dt>
+					<dd class="col-sm-9">
+						<div class="input-group input-group-sm">
+							<input type="text" id="clientid-{{client_id}}" class="form-control font-monospace" readonly value="{{client_id}}">
+							<button class="btn btn-outline-secondary" type="button" onclick="copyField('clientid-{{client_id}}', this)" title="Copy Client ID"><i class="fa-solid fa-copy"></i></button>
+						</div>
+					</dd>
 					<dt class="col-sm-3">Redirect URIs</dt>
 					<dd class="col-sm-9">
 						<ul class="list-unstyled mb-0">
