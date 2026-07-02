@@ -61,6 +61,8 @@
 
 	function processClient(client){
 		client.scopes_display = (client.scopes || []).join(' ');
+		client.allowed_groups_display = (client.allowed_groups || []).join(', ');
+		client.has_group_restriction = (client.allowed_groups || []).length > 0;
 		client.access_token_ttl  = fmtTTL((client.token_lifetime || {}).access_token  || 3600);
 		client.refresh_token_ttl = fmtTTL((client.token_lifetime || {}).refresh_token || 2592000);
 		return client;
@@ -156,7 +158,13 @@
 					</div>
 					<div class="mb-3">
 						<label class="form-label">Scopes <small class="text-muted">(space-separated)</small></label>
-						<input type="text" class="form-control shadow" name="scopes" value="openid profile email">
+						<input type="text" class="form-control shadow" name="scopes" value="openid profile email groups">
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Restrict to Groups <small class="text-muted">(one per line, optional)</small></label>
+						<textarea class="form-control shadow font-monospace" name="allowed_groups" rows="2"
+							placeholder="app_homeassistant&#10;app_sso_admin"></textarea>
+						<small class="text-muted">Leave empty to allow any user. If set, only members of a listed LDAP group can log in.</small>
 					</div>
 					<div class="row mb-3">
 						<div class="col">
@@ -209,6 +217,16 @@
 					</dd>
 					<dt class="col-sm-3">Scopes</dt>
 					<dd class="col-sm-9"><code>{{ scopes_display }}</code></dd>
+					<dt class="col-sm-3">Access</dt>
+					<dd class="col-sm-9">
+						{{ #has_group_restriction }}
+						<span class="badge bg-warning text-dark"><i class="fa-solid fa-user-lock"></i> Restricted</span>
+						<code>{{ allowed_groups_display }}</code>
+						{{ /has_group_restriction }}
+						{{ ^has_group_restriction }}
+						<span class="badge bg-secondary"><i class="fa-solid fa-users"></i> Any user</span>
+						{{ /has_group_restriction }}
+					</dd>
 					<dt class="col-sm-3">Access Token</dt>
 					<dd class="col-sm-9">{{ access_token_ttl }}</dd>
 					<dt class="col-sm-3">Refresh Token</dt>
