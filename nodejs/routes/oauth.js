@@ -8,6 +8,7 @@ const conf = require('@simpleworkjs/conf');
 const { OAuthClient } = require('../models/oauth_client');
 const { OAuthCode, OAuthAccessToken, OAuthRefreshToken } = require('../models/oauth_code');
 const { User } = require('../models/user');
+const { Group } = require('../models/group_ldap');
 
 const oauthConf = conf.oauth || {};
 const issuer = oauthConf.issuer || `http://localhost:${conf.port || 3000}`;
@@ -56,7 +57,16 @@ function parseClientAuth(req) {
 	};
 }
 
-function buildIdToken(user, client, scope, now) {
+// The LDAP group CNs a user belongs to (empty on any lookup failure).
+async function userGroups(user) {
+	try {
+		return await Group.list(user.dn);
+	} catch(_) {
+		return [];
+	}
+}
+
+async function buildIdToken(user, client, scope, now) {
 	const scopes = scope.split(' ');
 	const claims = {
 		iss: issuer,
@@ -75,11 +85,14 @@ function buildIdToken(user, client, scope, now) {
 	if (scopes.includes('email')) {
 		claims.email = user.mail;
 	}
+	if (scopes.includes('groups')) {
+		claims.groups = await userGroups(user);
+	}
 
 	return jwt.sign(claims, jwtSecret, { algorithm: 'HS256' });
 }
 
-function userClaims(user, scope) {
+async function userClaims(user, scope) {
 	const scopes = scope.split(' ');
 	const claims = { sub: user.uid };
 
@@ -91,6 +104,9 @@ function userClaims(user, scope) {
 	}
 	if (scopes.includes('email')) {
 		claims.email = user.mail;
+	}
+	if (scopes.includes('groups')) {
+		claims.groups = await userGroups(user);
 	}
 
 	return claims;
@@ -216,7 +232,7 @@ router.post('/token', express.urlencoded({ extended: false }), async function(re
 			};
 
 			if (authCode.scope.split(' ').includes('openid')) {
-				response.id_token = buildIdToken(user, client, authCode.scope, now);
+				response.id_token = await buildIdToken(user, client, authCode.scope, now);
 			}
 
 			return res.json(response);
@@ -256,7 +272,7 @@ router.post('/token', express.urlencoded({ extended: false }), async function(re
 			};
 
 			if (oldRefreshToken.scope.split(' ').includes('openid')) {
-				response.id_token = buildIdToken(user, client, oldRefreshToken.scope, now);
+				response.id_token = await buildIdToken(user, client, oldRefreshToken.scope, now);
 			}
 
 			return res.json(response);
@@ -294,7 +310,7 @@ router.get('/userinfo', async function(req, res, next) {
 		}
 
 		const user = await User.get(accessToken.username);
-		return res.json(userClaims(user, accessToken.scope));
+		return res.json(await userClaims(user, accessToken.scope));
 	} catch(error) {
 		next(error);
 	}
@@ -365,11 +381,28 @@ authRouter.post('/authorize', async function(req, res, next) {
 			return next(makeError('InvalidRedirectURI', 'redirect_uri is not registered for this client.', 400));
 		}
 
+		// Group-based access control: if the client restricts to specific groups,
+		// only members of at least one of them may obtain an authorization code.
+		if (client.allowed_groups && client.allowed_groups.length) {
+			const groups = await userGroups(req.user);
+			if (!client.allowed_groups.some(g => groups.includes(g))) {
+				return next(makeError('AccessDenied', 'You are not a member of a group permitted to use this application.', 403));
+			}
+		}
+
+		// Only grant scopes the client is actually registered for (a direct API
+		// caller could otherwise request scopes the consent screen filtered out).
+		const grantedScope = (scope || 'openid')
+			.split(' ')
+			.filter(Boolean)
+			.filter(s => client.scopes.includes(s))
+			.join(' ') || 'openid';
+
 		const authCode = await OAuthCode.add({
 			username: req.user.uid,
 			client_id,
 			redirect_uri,
-			scope: scope || 'openid',
+			scope: grantedScope,
 			code_challenge: code_challenge || '',
 			code_challenge_method: code_challenge_method || 'S256',
 		});
@@ -394,7 +427,8 @@ function discovery(req, res) {
 		token_endpoint: `${base}/oauth/token`,
 		userinfo_endpoint: `${base}/oauth/userinfo`,
 		end_session_endpoint: `${base}/oauth/logout`,
-		scopes_supported: ['openid', 'profile', 'email'],
+		scopes_supported: ['openid', 'profile', 'email', 'groups'],
+		claims_supported: ['sub', 'preferred_username', 'name', 'given_name', 'family_name', 'email', 'groups'],
 		response_types_supported: ['code'],
 		grant_types_supported: ['authorization_code', 'refresh_token'],
 		code_challenge_methods_supported: ['S256'],

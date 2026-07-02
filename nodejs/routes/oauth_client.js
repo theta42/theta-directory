@@ -29,6 +29,10 @@ router.post('/', async function(req, res, next) {
 		if (typeof req.body.scopes === 'string') {
 			req.body.scopes = req.body.scopes.split(' ').map(s => s.trim()).filter(Boolean);
 		}
+		// Parse allowed_groups if sent as newline-separated string
+		if (typeof req.body.allowed_groups === 'string') {
+			req.body.allowed_groups = req.body.allowed_groups.split('\n').map(s => s.trim()).filter(Boolean);
+		}
 		// jQuery serializeObject sends nested fields as "token_lifetime[access_token]"
 		if (req.body['token_lifetime[access_token]'] || req.body['token_lifetime[refresh_token]']) {
 			req.body.token_lifetime = {
@@ -71,6 +75,9 @@ router.put('/:client_id', async function(req, res, next) {
 		}
 		if (typeof req.body.scopes === 'string') {
 			req.body.scopes = req.body.scopes.split(' ').map(s => s.trim()).filter(Boolean);
+		}
+		if (typeof req.body.allowed_groups === 'string') {
+			req.body.allowed_groups = req.body.allowed_groups.split('\n').map(s => s.trim()).filter(Boolean);
 		}
 
 		return res.json({

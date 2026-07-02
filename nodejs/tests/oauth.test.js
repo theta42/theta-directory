@@ -23,7 +23,7 @@ beforeAll(async () => {
 		.send({
 			name: 'OAuth Flow Test',
 			redirect_uris: REDIRECT_URI,
-			scopes: 'openid profile email',
+			scopes: 'openid profile email groups',
 			token_lifetime: { access_token: 3600, refresh_token: 86400 },
 		});
 
@@ -379,5 +379,82 @@ describe('OAuth — POST /oauth/token (refresh_token grant)', () => {
 
 		expect(reuseRes.status).toBe(400);
 		expect(reuseRes.body.error).toBe('invalid_grant');
+	});
+});
+
+describe('OAuth — groups claim', () => {
+	test('userinfo includes a groups array when the groups scope is granted', async () => {
+		const { challenge, verifier } = generatePKCE();
+
+		const codeRes = await request(app)
+			.post('/api/oauth/authorize')
+			.set('auth-token', token)
+			.send({
+				response_type: 'code',
+				client_id: clientId,
+				redirect_uri: REDIRECT_URI,
+				scope: 'openid groups',
+				code_challenge: challenge,
+				code_challenge_method: 'S256',
+			});
+		const code = new URL(codeRes.body.redirect_url).searchParams.get('code');
+
+		const tokRes = await request(app)
+			.post('/oauth/token')
+			.type('form')
+			.send({
+				grant_type: 'authorization_code',
+				code,
+				redirect_uri: REDIRECT_URI,
+				client_id: clientId,
+				client_secret: clientSecret,
+				code_verifier: verifier,
+			});
+		expect(tokRes.status).toBe(200);
+
+		const uiRes = await request(app)
+			.get('/oauth/userinfo')
+			.set('Authorization', 'Bearer ' + tokRes.body.access_token);
+		expect(uiRes.status).toBe(200);
+		expect(Array.isArray(uiRes.body.groups)).toBe(true);
+	});
+});
+
+describe('OAuth — allowed_groups access control', () => {
+	let restrictedId;
+
+	beforeAll(async () => {
+		const res = await request(app)
+			.post('/api/oauth/client/')
+			.set('auth-token', token)
+			.send({
+				name: 'Restricted Group Test',
+				redirect_uris: REDIRECT_URI,
+				scopes: 'openid',
+				allowed_groups: 'this_group_does_not_exist_xyz',
+			});
+		restrictedId = res.body.results && res.body.results.client_id;
+	});
+
+	afterAll(async () => {
+		if (restrictedId) {
+			await request(app).delete('/api/oauth/client/' + restrictedId).set('auth-token', token);
+		}
+	});
+
+	test('denies a user who is not in any allowed group (403)', async () => {
+		const { challenge } = generatePKCE();
+		const res = await request(app)
+			.post('/api/oauth/authorize')
+			.set('auth-token', token)
+			.send({
+				response_type: 'code',
+				client_id: restrictedId,
+				redirect_uri: REDIRECT_URI,
+				scope: 'openid',
+				code_challenge: challenge,
+				code_challenge_method: 'S256',
+			});
+		expect(res.status).toBe(403);
 	});
 });

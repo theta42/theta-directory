@@ -73,6 +73,8 @@
 						<i class="fa-solid fa-user"></i> Read your name and username
 						<% } else if(scopes[i] === 'email'){ %>
 						<i class="fa-solid fa-envelope"></i> Read your email address
+						<% } else if(scopes[i] === 'groups'){ %>
+						<i class="fa-solid fa-users"></i> Read your group memberships
 						<% } else { %>
 						<i class="fa-solid fa-circle-question"></i> <%= scopes[i] %>
 						<% } %>
