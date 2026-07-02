@@ -139,18 +139,25 @@ olcPPolicyHashCleartext: FALSE"
 fi
 
 # ── 4. ppolicy schema ─────────────────────────────────────────────────────────
-# The ppolicy module registers its schema internally when loaded — loading a
-# separate schema LDIF creates duplicate OIDs and breaks slapd. Only load from
-# a .ldif file if a ppolicy.ldif is explicitly present on disk AND the module
-# hasn't already registered the schema via its built-in definitions.
+# The pwdPolicy objectClass and pwdAccountLockedTime attribute must be known to
+# the RUNNING slapd (this is what User.setActive relies on).
+#
+# On OpenLDAP 2.5+ the ppolicy schema is BUILT INTO ppolicy.so and registered
+# in memory when the module loads — it does NOT appear in cn=schema,cn=config,
+# so we must check the live subschema (cn=Subschema) instead.
+# On older builds the schema ships as a separate ppolicy.ldif that we load.
 info "ppolicy schema"
 
-if ldapsearch -Q -Y EXTERNAL -H ldapi:/// \
-    -b "cn=schema,cn=config" -s sub \
-    "(olcObjectClasses=*pwdPolicy*)" olcObjectClasses 2>/dev/null \
-    | grep -q "^olcObjectClasses:"; then
-    skip "ppolicy schema already loaded"
+# True if pwdPolicy is known to the running server right now.
+ppolicy_schema_live() {
+    ldapsearch -Q -Y EXTERNAL -H ldapi:/// -s base -b "cn=Subschema" \
+        objectClasses attributeTypes 2>/dev/null | grep -qi "pwdPolicy"
+}
+
+if ppolicy_schema_live; then
+    skip "ppolicy schema present in running slapd"
 else
+    # Try a shipped schema file (older OpenLDAP that doesn't build it into the module).
     PPOLICY_LDIF=""
     for candidate in \
         /etc/ldap/schema/ppolicy.ldif \
@@ -158,17 +165,21 @@ else
         /usr/share/doc/slapd/examples/schema/ppolicy.ldif \
         /usr/local/etc/openldap/schema/ppolicy.ldif \
         /usr/share/ldap/schema/ppolicy.ldif; do
-        if [[ -f "$candidate" ]]; then
-            PPOLICY_LDIF="$candidate"
-            break
-        fi
+        [[ -f "$candidate" ]] && { PPOLICY_LDIF="$candidate"; break; }
     done
 
     if [[ -n "$PPOLICY_LDIF" ]]; then
         ldapadd -Q -Y EXTERNAL -H ldapi:/// -f "$PPOLICY_LDIF"
         ok "ppolicy schema loaded from $PPOLICY_LDIF"
     else
-        echo "  [--]  ppolicy schema is registered internally by the module (no .ldif needed)"
+        # No schema file and not live: the module is meant to provide it built-in
+        # but the running slapd hasn't registered it. This almost always means the
+        # module was added to cn=config but slapd was never restarted to load it.
+        warn "ppolicy schema is NOT registered in the running slapd and no ppolicy.ldif"
+        warn "was found on disk. On OpenLDAP 2.5+ the schema is built into ppolicy.so"
+        warn "and is registered on module load. Restart slapd and re-run this script:"
+        warn "    systemctl restart slapd && $0 -p '<admin-password>'"
+        exit 1
     fi
 fi
 
