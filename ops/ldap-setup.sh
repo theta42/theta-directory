@@ -76,6 +76,25 @@ dir_add() {
 ok()   { echo "  [ok]  $*"; }
 skip() { echo "  [--]  $* (already applied)"; }
 info() { echo; echo "==> $*"; }
+warn() { echo "  [!!]  $*" >&2; }
+
+# ── Detect the database that serves BASE_DN ──────────────────────────────────
+# The ppolicy overlay MUST be attached to the database that actually holds the
+# user entries, otherwise pwdAccountLockedTime is never registered for them and
+# the app's active/inactive toggle fails with "undefined attribute type".
+# Do NOT hardcode olcDatabase={1}mdb — the index/backend varies per install.
+info "locating user database for ${BASE_DN}"
+
+DB_DN=$(config_search -b "cn=config" \
+    "(&(objectClass=olcDatabaseConfig)(olcSuffix=${BASE_DN}))" dn \
+    | awk '/^dn:/{sub(/^dn: /,""); print; exit}')
+
+if [[ -z "$DB_DN" ]]; then
+    warn "Could not find a database with olcSuffix=${BASE_DN} under cn=config."
+    warn "Check the base DN (-b) and that slapd is running with a cn=config backend."
+    exit 1
+fi
+ok "user database: ${DB_DN}"
 
 # ── 1. pw-sha2 module (SSHA512 password hashing) ─────────────────────────────
 info "pw-sha2 module"
@@ -106,17 +125,17 @@ fi
 # ── 3. ppolicy overlay ────────────────────────────────────────────────────────
 info "ppolicy overlay"
 
-if config_search -b "cn=config" "(olcOverlay=ppolicy)" | grep -q "ppolicy"; then
-    skip "ppolicy overlay already configured"
+if config_search -b "$DB_DN" "(olcOverlay=*ppolicy*)" dn | grep -q "ppolicy"; then
+    skip "ppolicy overlay already configured on ${DB_DN}"
 else
-    config_add "dn: olcOverlay=ppolicy,olcDatabase={1}mdb,cn=config
+    config_add "dn: olcOverlay=ppolicy,${DB_DN}
 objectClass: olcOverlayConfig
 objectClass: olcPPolicyConfig
 olcOverlay: ppolicy
 olcPPolicyDefault: cn=ppolicy,${POLICY_BASE}
 olcPPolicyUseLockout: TRUE
 olcPPolicyHashCleartext: FALSE"
-    ok "ppolicy overlay added"
+    ok "ppolicy overlay added to ${DB_DN}"
 fi
 
 # ── 4. ppolicy schema ─────────────────────────────────────────────────────────
@@ -225,6 +244,34 @@ member: ${BIND_DN}"
     fi
 done
 
+# ── 9. Verify ppolicy is actually active on the user database ─────────────────
+# This is the exact condition the app relies on: if the ppolicy overlay is not
+# attached to the database holding the users, modifying pwdAccountLockedTime
+# fails and User.setActive() returns a 503.
+info "verifying ppolicy is active on ${DB_DN}"
+
+VERIFY_FAILED=0
+
+if config_search -b "$DB_DN" "(olcOverlay=*ppolicy*)" dn | grep -q "ppolicy"; then
+    ok "ppolicy overlay is attached to the user database"
+else
+    warn "ppolicy overlay is NOT attached to ${DB_DN} — active/inactive toggle will fail"
+    VERIFY_FAILED=1
+fi
+
+if dir_search -b "cn=ppolicy,${POLICY_BASE}" -s base "(objectClass=*)" dn 2>/dev/null | grep -q "dn:"; then
+    ok "default password policy entry exists"
+else
+    warn "default ppolicy entry missing at cn=ppolicy,${POLICY_BASE}"
+    VERIFY_FAILED=1
+fi
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo
-echo "Setup complete."
+if [[ "$VERIFY_FAILED" -eq 0 ]]; then
+    echo "Setup complete. ppolicy is active — user active/inactive toggle will work."
+else
+    echo "Setup finished WITH WARNINGS — see [!!] lines above. The app's" >&2
+    echo "active/inactive feature will not work until they are resolved." >&2
+    exit 1
+fi

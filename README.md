@@ -36,6 +36,14 @@ Existing `{MD5}` password hashes continue to work after the module is loaded —
 
 User activation and deactivation uses the OpenLDAP `ppolicy` overlay. When a user is marked inactive, `pwdAccountLockedTime` is set on their entry, which causes all LDAP binds to fail — including logins to Emby, Gitea, and any other LDAP-backed service.
 
+> **The easy way:** run [`ops/ldap-setup.sh`](ops/ldap-setup.sh) on the LDAP server. It is idempotent, auto-detects the correct user database, applies everything below (pw-sha2, ppolicy module/overlay/schema, custom schema, policy entry, SSO groups) and verifies ppolicy is active at the end:
+>
+> ```bash
+> sudo ./ops/ldap-setup.sh -p <admin-password>
+> ```
+>
+> If the app returns `503 OpenLDAP ppolicy overlay is not configured` on `PUT /api/user/<uid>/active`, run this script — it means the overlay is not attached to the database holding your users. The manual steps below are equivalent and kept for reference.
+
 **1. Load the ppolicy module:**
 
 ```bash
@@ -48,6 +56,13 @@ EOF
 ```
 
 **2. Add the overlay to your user database:**
+
+> ⚠️ The database index below (`{1}mdb`) is **not** the same on every install. Confirm yours first — the overlay must go on the database whose `olcSuffix` is your base DN, or account locking silently won't apply to your users:
+>
+> ```bash
+> ldapsearch -Q -Y EXTERNAL -H ldapi:/// -b cn=config \
+>   '(&(objectClass=olcDatabaseConfig)(olcSuffix=dc=theta42,dc=com))' dn
+> ```
 
 ```bash
 ldapadd -Y EXTERNAL -H ldapi:/// << 'EOF'
