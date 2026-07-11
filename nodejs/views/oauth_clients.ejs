@@ -1,5 +1,55 @@
 <%- include('top') %>
 
+<!-- Edit modal -->
+<div class="modal fade" id="editModal" tabindex="-1">
+	<div class="modal-dialog modal-lg">
+		<div class="modal-content">
+			<div class="modal-header">
+				<h5 class="modal-title"><i class="fa-solid fa-pen-to-square"></i> Edit OAuth Client</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+			</div>
+			<div class="modal-body">
+				<div class="card-header actionMessage mb-3" style="display:none"></div>
+				<input type="hidden" id="edit-client-id">
+				<div class="mb-3">
+					<label class="form-label">Name</label>
+					<input type="text" id="edit-name" class="form-control shadow">
+				</div>
+				<div class="mb-3">
+					<label class="form-label">Description</label>
+					<input type="text" id="edit-description" class="form-control shadow">
+				</div>
+				<div class="mb-3">
+					<label class="form-label">Redirect URIs <small class="text-muted">(one per line)</small></label>
+					<textarea id="edit-redirect_uris" class="form-control shadow font-monospace" rows="3"></textarea>
+				</div>
+				<div class="mb-3">
+					<label class="form-label">Scopes</label>
+					<div id="edit-scopes"></div>
+				</div>
+				<div class="mb-3">
+					<label class="form-label">Restrict to Groups <small class="text-muted">(optional)</small></label>
+					<div id="edit-allowed_groups"></div>
+				</div>
+				<div class="row mb-3">
+					<div class="col">
+						<label class="form-label">Access Token TTL <small class="text-muted">(seconds)</small></label>
+						<input type="number" id="edit-access_ttl" class="form-control shadow" min="60">
+					</div>
+					<div class="col">
+						<label class="form-label">Refresh Token TTL <small class="text-muted">(seconds)</small></label>
+						<input type="number" id="edit-refresh_ttl" class="form-control shadow" min="3600">
+					</div>
+				</div>
+			</div>
+			<div class="modal-footer">
+				<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+				<button type="button" class="btn btn-primary" onclick="saveEdit(this)"><i class="fa-solid fa-floppy-disk"></i> Save</button>
+			</div>
+		</div>
+	</div>
+</div>
+
 <!-- Secret modal -->
 <div class="modal fade" id="secretModal" tabindex="-1">
 	<div class="modal-dialog">
@@ -27,7 +77,16 @@
 <script type="text/javascript">
 	app.auth.forceLogin('app_sso_oauth_admin');
 
+	// The scopes this provider actually understands (see routes/oauth.js discovery).
+	var VALID_SCOPES = ['openid', 'profile', 'email', 'groups'];
+	var DEFAULT_SCOPES = ['openid', 'profile', 'email', 'groups'];
+
 	var secretModal = new bootstrap.Modal(document.getElementById('secretModal'));
+	var editModal   = new bootstrap.Modal(document.getElementById('editModal'));
+
+	// Widget handles + a lookup of the latest client data (for the edit modal).
+	var createScopes, createGroups, editScopes, editGroups;
+	var clientsById = {};
 
 	function showSecret(secret){
 		document.getElementById('secretValue').value = secret;
@@ -60,6 +119,7 @@
 	}
 
 	function processClient(client){
+		clientsById[client.client_id] = client; // keep raw data for the edit modal
 		client.scopes_display = (client.scopes || []).join(' ');
 		client.allowed_groups_display = (client.allowed_groups || []).join(', ');
 		client.has_group_restriction = (client.allowed_groups || []).length > 0;
@@ -98,11 +158,67 @@
 		});
 	}
 
+	// Open the edit modal pre-filled from the client's current values.
+	function editClient(client_id){
+		var c = clientsById[client_id];
+		if(!c) return;
+		$('#edit-client-id').val(client_id);
+		$('#edit-name').val(c.name || '');
+		$('#edit-description').val(c.description || '');
+		$('#edit-redirect_uris').val((c.redirect_uris || []).join('\n'));
+		$('#edit-access_ttl').val((c.token_lifetime || {}).access_token || 3600);
+		$('#edit-refresh_ttl').val((c.token_lifetime || {}).refresh_token || 2592000);
+
+		// (Re)build the tag widgets fresh each open so they reflect this client.
+		editScopes = app.ui.tagInput('#edit-scopes', {
+			values: c.scopes || [], options: VALID_SCOPES, freeSolo: false,
+			separator: ' ', placeholder: 'Add a scope…',
+		});
+		editGroups = app.ui.groupSelect('#edit-allowed_groups', {
+			values: c.allowed_groups || [], placeholder: 'Type a group name…',
+		});
+		editModal.show();
+	}
+
+	function saveEdit(btn){
+		var $msg = $('#editModal .actionMessage');
+		var payload = {
+			client_id: $('#edit-client-id').val(),
+			name: $('#edit-name').val(),
+			description: $('#edit-description').val(),
+			redirect_uris: $('#edit-redirect_uris').val().split('\n').map(function(s){ return s.trim(); }).filter(Boolean),
+			scopes: editScopes.get(),
+			allowed_groups: editGroups.get(),
+			token_lifetime: {
+				access_token: Number($('#edit-access_ttl').val()) || 3600,
+				refresh_token: Number($('#edit-refresh_ttl').val()) || 2592000,
+			},
+		};
+		app.oauthClient.update(payload, function(error, data){
+			if(error){
+				app.util.actionMessage((data && data.message) || 'Update failed.', $msg.parent(), 'danger');
+				return;
+			}
+			editModal.hide();
+			tableAJAX();
+		});
+	}
+
 	$(document).ready(function(){
 		tableAJAX();
 
+		// Initialise the create-form tag widgets.
+		createScopes = app.ui.tagInput('#create-scopes', {
+			name: 'scopes', values: DEFAULT_SCOPES, options: VALID_SCOPES,
+			freeSolo: false, separator: ' ', placeholder: 'Add a scope…',
+		});
+		createGroups = app.ui.groupSelect('#create-allowed_groups', {
+			name: 'allowed_groups', values: [], placeholder: 'Type a group name…',
+		});
+
+		// After a successful create, reset the widgets too (form reset ignores them).
 		$('form[action="oauth/client/"]').attr('evalAJAX',
-			'showSecret(data.client_secret); tableAJAX(); $form.trigger("reset");'
+			'showSecret(data.client_secret); tableAJAX(); $form.trigger("reset"); createScopes.set(DEFAULT_SCOPES); createGroups.clear();'
 		);
 	});
 
@@ -157,13 +273,12 @@
 							placeholder="https://ha.example.com/auth/external/callback" validate=":1"></textarea>
 					</div>
 					<div class="mb-3">
-						<label class="form-label">Scopes <small class="text-muted">(space-separated)</small></label>
-						<input type="text" class="form-control shadow" name="scopes" value="openid profile email groups">
+						<label class="form-label">Scopes</label>
+						<div id="create-scopes"></div>
 					</div>
 					<div class="mb-3">
-						<label class="form-label">Restrict to Groups <small class="text-muted">(one per line, optional)</small></label>
-						<textarea class="form-control shadow font-monospace" name="allowed_groups" rows="2"
-							placeholder="app_homeassistant&#10;app_sso_admin"></textarea>
+						<label class="form-label">Restrict to Groups <small class="text-muted">(optional)</small></label>
+						<div id="create-allowed_groups"></div>
 						<small class="text-muted">Leave empty to allow any user. If set, only members of a listed LDAP group can log in.</small>
 					</div>
 					<div class="row mb-3">
@@ -236,6 +351,11 @@
 				</dl>
 			</div>
 			<div class="card-footer">
+				<button type="button"
+					onclick="editClient('{{client_id}}')"
+					class="btn btn-primary btn-sm">
+					<i class="fa-solid fa-pen-to-square"></i> Edit
+				</button>
 				<button type="button"
 					onclick="rotateSecret('{{client_id}}', '{{name}}', this)"
 					class="btn btn-warning btn-sm">
