@@ -1,0 +1,93 @@
+# Docker Compose for the SSO Manager all-in-one image (app + OpenLDAP in one container).
+#
+# The image (Dockerfile.openldap) bundles a slapd that the app talks to over
+# localhost. Configuration is supplied to the app via `app_*` environment
+# variables — the highest-precedence config layer in @simpleworkjs/conf. Any
+# `app_*` var not set here falls back to a sensible default baked into
+# docker-entrypoint.sh (e.g. app_ldap__url -> ldap://localhost:389).
+#
+# Copy this file to .env (or export the vars) to set the secrets below, or
+# set them inline on the command line:
+#   LDAP_ADMIN_PASS=... JWT_SECRET=... docker compose up -d
+#
+# Requires @simpleworkjs/conf >= 1.1.0 in the image (env overrides). Refresh
+# nodejs/package-lock.json with `npm install @simpleworkjs/conf@^1.1.0` before
+# building, so the image actually contains the env-override feature.
+
+services:
+  sso-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile.openldap
+    container_name: sso-manager
+    restart: unless-stopped
+    ports:
+      # SSO Manager web UI (HTTP inside the container; terminate TLS at the
+      # front proxy — e.g. the theta42/proxy). Don't expose 3001 to the open
+      # internet; bind it to localhost or leave it on the docker network only.
+      - "${PORT:-3001}:3001"
+      # LDAPS — direct LDAP binds from legacy apps / the proxy over the network
+      # (TLS, self-signed cert by default; mount your own at LDAP_CERT_DIR).
+      - "${LDAPS_PORT:-636}:636"
+      # LDAP plain (389) is NOT mapped to the host by default — it would allow
+      # cleartext password binds over the LAN. Uncomment to permit StartTLS or
+      # plain binds from the LAN (not recommended):
+      # - "${LDAP_PORT:-389}:389"
+    environment:
+      # ── LDAP server-side (configures the bundled slapd) ──
+      - LDAP_BASE_DN=${LDAP_BASE_DN:-dc=example,dc=com}
+      - LDAP_DOMAIN=${LDAP_DOMAIN:-example.com}
+      - LDAP_ADMIN_PASS=${LDAP_ADMIN_PASS:-admin}      # slapd root + app bind password
+      - ORG_NAME=${ORG_NAME:-SSO Manager}
+      # CN on the LDAP TLS cert. Clients verify against this hostname. Leave
+      # empty to default to LDAP_DOMAIN; set to the public hostname clients
+      # connect over (computed in docker-entrypoint.sh, not here, to avoid
+      # nested-variable interpolation limitations in compose v1).
+      - LDAP_CERT_CN=${LDAP_CERT_CN:-}
+
+      # ── App config overrides (app_* -> @simpleworkjs/conf) ──
+      # Defaults come from docker-entrypoint.sh; set these to override.
+      # - app_oauth__issuer=https://sso.example.com
+      # - app_ldap__url=ldap://localhost:389           # default; points at bundled slapd
+      # - app_ldap__bindDN=cn=admin,${LDAP_BASE_DN}
+      # - app_ldap__bindPassword=${LDAP_ADMIN_PASS}
+      # - app_ldap__userBase=ou=people,${LDAP_BASE_DN}
+      # - app_ldap__groupBase=ou=groups,${LDAP_BASE_DN}
+      - app_oauth__jwtSecret=${JWT_SECRET}            # falls back to an auto-generated secret
+      # OIDC issuer advertised in /.well-known/openid-configuration. This is the
+      # browser-facing URL the front proxy serves the SSO at — the theta42/proxy
+      # (an OIDC client) and other apps use it for discovery. Server-to-server
+      # token/userinfo calls from the proxy can go to http://sso-manager:3001
+      # over the docker network; only the issuer/redirect URLs must be public.
+      # Leave empty to default to https://sso.<LDAP_DOMAIN> (set in the entrypoint).
+      - app_oauth__issuer=${OAUTH_ISSUER:-}
+      - app_name=${ORG_NAME:-SSO Manager}
+
+      # ── Optional SMTP (outbound email) ──
+      - app_smtp__host=${SMTP_HOST:-localhost}
+      - app_smtp__port=${SMTP_PORT:-587}
+      - app_smtp__user=${SMTP_USER:-}
+      - app_smtp__pass=${SMTP_PASS:-}
+      - app_smtp__from=${SMTP_FROM:-SSO Manager <noreply@example.com>}
+
+      - NODE_ENV=production
+      - NODE_PORT=3001
+    volumes:
+      # Persist the LDAP database across container recreation.
+      - ldap-data:/var/lib/ldap
+      # Persist the auto-generated self-signed TLS cert so clients don't have to
+      # re-trust it on every rebuild. To use your own CA-signed cert instead,
+      # replace this with a bind mount of your cert dir, e.g.:
+      #   - ./certs:/etc/openldap/certs
+      # (must contain ldap.crt + ldap.key; the entrypoint leaves them untouched).
+      - ldap-certs:/etc/openldap/certs
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  ldap-data:
+  ldap-certs:

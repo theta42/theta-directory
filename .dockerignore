@@ -1,0 +1,45 @@
+# Git
+.git
+.gitignore
+
+# Development
+.claude
+*.md
+# README.md and tos.md are both read at runtime (tos.md is loaded by
+# routes/index.js at boot), so they must stay in the build context.
+!README.md
+!tos.md
+
+# Tests
+nodejs/tests/
+nodejs/*.test.js
+
+# Host dependency tree — let the image run a clean `npm ci`. Also avoids
+# copying platform-wrong native modules (e.g. bcrypt built for the host OS).
+nodejs/node_modules
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker (prevent recursive copy)
+Dockerfile*
+docker-compose.yml
+.dockerignore
+
+# Ops scripts (not needed in container)
+ops/
+
+# Secrets (mount at runtime instead)
+nodejs/conf/secrets.js
+secrets.js

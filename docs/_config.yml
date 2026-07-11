@@ -1,0 +1,9 @@
+title: SSO Manager
+description: A self-hosted OpenID Connect provider with an OpenLDAP directory and a web management UI
+theme: jekyll-theme-cayman
+show_downloads: true
+github:
+  repository_url: https://github.com/theta42/sso-manager-node
+  zip_url: https://github.com/theta42/sso-manager-node/archive/refs/heads/master.zip
+  tar_url: https://github.com/theta42/sso-manager-node/archive/refs/heads/master.tar.gz
+  repository_name: theta42/sso-manager-node

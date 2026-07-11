@@ -1,22 +1,29 @@
 'use strict';
 
+// Base configuration — generic defaults usable by anyone.
+//
+// These are NON-secret defaults. Per-deployment values (LDAP bind DN, user/group
+// bases, SMTP host/user, OAuth issuer, sender address) should be overridden via
+// conf/secrets.js or `app_*` environment variables (see @simpleworkjs/conf).
+// Secret values (passwords, JWT secret, API keys) MUST come from secrets.js or
+// `app_*` env vars — never commit them here.
 module.exports = {
-	name: "Theta42 SSO",
+	name: "SSO Manager", // displayed in the UI and outbound email
 	userModel: 'ldap', // pam, redis, ldap
 	redis: {
 		prefix: 'sso_manager_'
 	},
 	ldap: {
-		url: 'ldaps://ldap.internal.theta42.com:636',
-		bindDN: 'cn=admin,dc=theta42,dc=com',
-		bindPassword: '__IN SRECREST FILE__',
-		userBase: 'ou=people,dc=theta42,dc=com',
-		groupBase: 'ou=groups,dc=theta42,dc=com',		
+		url: 'ldap://localhost',
+		bindDN: 'cn=admin,dc=example,dc=com',
+		bindPassword: '__in secrets file__',
+		userBase: 'ou=people,dc=example,dc=com',
+		groupBase: 'ou=groups,dc=example,dc=com',
 		userFilter: '(objectClass=posixAccount)',
 		userNameAttribute: 'uid'
 	},
 	oauth: {
-		issuer: 'https://sso.theta42.com',
+		issuer: '', // falls back to the request host at runtime (routes/index.js)
 		jwtSecret: '__in secrets file__',
 		token_lifetime: {
 			access_token: 3600,     // 1 hour (seconds)
@@ -29,11 +36,11 @@ module.exports = {
 		did:      '__in secrets file__',
 	},
 	smtp: {
-		host: 'mail.wgnode.com',
+		host: 'localhost',
 		port: 587,
 		secure: false,
-		user: 'noreply@users.theta42.com',
+		user: 'noreply@example.com',
 		pass: '__in secrets file__',
-		from: 'Theta42 Accounts <noreply@users.theta42.com>',
+		from: 'SSO Manager <noreply@example.com>',
 	},
 };

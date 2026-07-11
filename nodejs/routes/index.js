@@ -39,6 +39,11 @@ frontEndModules.forEach(dep => {
 // local folder.
 router.use('/static', express.static(path.join(__dirname, '../public')))
 
+// Public health endpoint for container/orchestration healthchecks.
+// Mounted at / (no auth) in app.js, so this is intentionally unauthenticated.
+router.get('/health', function(req, res) {
+  res.json({ status: 'ok' });
+});
 
 router.get('/tos', function(req, res) {
   res.render('tos', {...values, tosHtml});

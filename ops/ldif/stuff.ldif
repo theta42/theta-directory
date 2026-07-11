@@ -1,0 +1,26 @@
+# Entry 1: cn=stuff-manager,ou=groups,dc=theta42,dc=com
+dn: cn=stuff-manager,ou=groups,dc=theta42,dc=com
+cn: stuff-manager
+gidnumber: 1498
+objectclass: posixGroup
+objectclass: top
+
+# Entry 1: cn=stuff-manager,ou=people,dc=theta42,dc=com
+dn: cn=stuff-manager,ou=people,dc=theta42,dc=com
+cn: stuff-manager
+gidnumber: 1498
+givenname: Stuff
+homedirectory: /home/stuff-manager
+loginshell: /bin/bash
+objectclass: inetOrgPerson
+objectclass: sudoRole
+objectclass: ldapPublicKey
+objectclass: posixAccount
+objectclass: top
+sn: Manager
+sudocommand: ALL
+sudohost: ALL
+sudouser: stuff-manager
+uid: stuff-manager
+uidnumber: 1498
+userpassword: {MD5}YSv5lro/uQ0B7i81kGDPVQ==

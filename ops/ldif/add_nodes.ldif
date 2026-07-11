@@ -1,0 +1,7 @@
+dn: ou=people,dc=theta42,dc=com
+objectClass: organizationalUnit
+ou: People
+
+dn: ou=groups,dc=theta42,dc=com
+objectClass: organizationalUnit
+ou: Groups

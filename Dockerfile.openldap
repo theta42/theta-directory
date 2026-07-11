@@ -1,0 +1,87 @@
+# Theta42 SSO Manager with OpenLDAP - All-in-One Dockerfile
+# App + OpenLDAP in a single container, for development/testing or a
+# self-contained single-node deployment. For production, run a dedicated
+# LDAP server and configure the app via app_* env vars / mounted secrets.js.
+
+FROM node:20-alpine
+
+# Install OpenLDAP and required packages.
+# Alpine splits OpenLDAP into many small subpackages; there is no catch-all
+# "openldap-overlays" package. We install exactly the backends/overlays/modules
+# the app depends on:
+#   openldap-back-mdb     : the mdb backend (slapd.conf uses `database mdb`)
+#   openldap-overlay-ppolicy   : ppolicy module + overlay (account locking)
+#   openldap-overlay-memberof  : reverse group membership
+#   openldap-overlay-refint    : referential integrity on group members
+#   openldap-passwd-sha2       : pw-sha2 module ({SSHA512} user password hashing)
+# Note: Alpine does NOT ship a ppolicy.schema file — on OpenLDAP 2.6 the ppolicy
+# schema is built into ppolicy.so and registered when the module loads, so
+# docker-entrypoint.sh loads it via `moduleload ppolicy` (no schema include).
+#   openssl : used by docker-entrypoint.sh to generate a JWT secret
+RUN apk add --no-cache \
+    openldap \
+    openldap-clients \
+    openldap-back-mdb \
+    openldap-overlay-ppolicy \
+    openldap-overlay-memberof \
+    openldap-overlay-refint \
+    openldap-passwd-sha2 \
+    dumb-init \
+    bash \
+    openssl \
+    redis \
+    && rm -rf /var/cache/apk/*
+
+# The openldap package already creates the `ldap` user/group, which slapd runs
+# as (see -u ldap -g ldap in docker-entrypoint.sh). Nothing to add here.
+
+WORKDIR /app
+
+# Create required directories. slapd runs as the ldap user; the app process
+# runs as root in this image (matches the bare-metal systemd unit).
+RUN mkdir -p /var/lib/ldap /etc/ldap/sasl2 && \
+    chown -R ldap:ldap /var/lib/ldap /etc/ldap/sasl2
+
+# Copy application source and install production dependencies.
+# .dockerignore excludes nodejs/node_modules so npm ci builds a clean tree.
+COPY nodejs/package*.json ./
+RUN npm ci --omit=dev
+
+COPY nodejs/app.js ./
+COPY nodejs/bin ./bin
+COPY nodejs/conf ./conf
+COPY nodejs/controller ./controller
+COPY nodejs/middleware ./middleware
+COPY nodejs/models ./models
+COPY nodejs/routes ./routes
+COPY nodejs/utils ./utils
+COPY nodejs/views ./views
+COPY nodejs/public ./public
+
+# routes/index.js reads path.join(__dirname, '../../tos.md') at boot. With the
+# app flattened into /app, __dirname is /app/routes and ../../ resolves to /,
+# so the file must exist at /tos.md (mirroring the repo where tos.md sits one
+# level above the nodejs/ app dir). Without this the app crashes on startup.
+COPY tos.md /tos.md
+
+# Copy startup script
+COPY docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+# Expose ports
+# 3001: SSO Manager web interface (HTTP — terminate TLS at the front proxy)
+# 389:  LDAP  (plain + StartTLS) — used internally by the app; map to host only
+#       if you want LAN clients to bind without TLS (not recommended).
+# 636:  LDAPS — for legacy apps / direct LDAP binds over the network (TLS)
+EXPOSE 3001 389 636
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+
+# dumb-init reaps zombies and forwards signals to the node process the
+# entrypoint execs into. Without it SIGTERM from `docker stop` is ignored
+# and the container hits the 10s kill timeout.
+ENTRYPOINT ["dumb-init", "/usr/local/bin/docker-entrypoint.sh"]
+
+CMD ["node", "bin/www"]
