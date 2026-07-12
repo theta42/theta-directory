@@ -68,6 +68,13 @@ COPY tos.md /tos.md
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
+# theta42 custom schema (dateOfBirth + theta42Person). The app adds
+# objectClass theta42Person when a user has a dateOfBirth, so the directory
+# must know it or user create/update fails with LDAP 0x15. Mirrors the
+# cn=config LDIF ops/ldap-setup.sh loads on bare metal, in .schema form so
+# docker-entrypoint.sh can `include` it in the static slapd.conf.
+COPY ops/schema/theta42.schema /etc/openldap/schema/theta42.schema
+
 # Expose ports
 # 3001: SSO Manager web interface (HTTP — terminate TLS at the front proxy)
 # 389:  LDAP  (plain + StartTLS) — used internally by the app; map to host only
