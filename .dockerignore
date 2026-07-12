@@ -37,8 +37,11 @@ Dockerfile*
 docker-compose.yml
 .dockerignore
 
-# Ops scripts (not needed in container)
+# Ops scripts (not needed in container) — except the custom LDAP schema files,
+# which Dockerfile.openldap COPYs into the image for the bundled slapd.
 ops/
+!ops/schema/
+!ops/schema/*.schema
 
 # Secrets (mount at runtime instead)
 nodejs/conf/secrets.js

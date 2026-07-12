@@ -68,12 +68,19 @@ COPY tos.md /tos.md
 COPY docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
-# theta42 custom schema (dateOfBirth + theta42Person). The app adds
-# objectClass theta42Person when a user has a dateOfBirth, so the directory
-# must know it or user create/update fails with LDAP 0x15. Mirrors the
-# cn=config LDIF ops/ldap-setup.sh loads on bare metal, in .schema form so
-# docker-entrypoint.sh can `include` it in the static slapd.conf.
-COPY ops/schema/theta42.schema /etc/openldap/schema/theta42.schema
+# Custom LDAP schemas the app's user model depends on. addPosixAccount
+# (nodejs/models/user_ldap.js) tags every user entry with objectClasses
+# theta42Person, sudoRole, and ldapPublicKey and writes dateOfBirth /
+# sudoHost,sudoCommand,sudoUser / sshPublicKey — so the directory must know
+# all three or user create/update fails (theta42Person: LDAP 0x15; sudoRole /
+# ldapPublicKey: objectClassViolation 65). .dockerignore excludes ops/ from
+# the build context except ops/schema/*.schema, which is why these COPYs work.
+#   theta42.schema : dateOfBirth + theta42Person (mirrors ldap-setup.sh §5)
+#   sudo.schema    : sudoRole (AUXILIARY — see file header) + sudo* attributes
+#   openssh-lpk.schema : sshPublicKey + ldapPublicKey (AUXILIARY)
+COPY ops/schema/theta42.schema    /etc/openldap/schema/theta42.schema
+COPY ops/schema/sudo.schema       /etc/openldap/schema/sudo.schema
+COPY ops/schema/openssh-lpk.schema /etc/openldap/schema/openssh-lpk.schema
 
 # Expose ports
 # 3001: SSO Manager web interface (HTTP — terminate TLS at the front proxy)
