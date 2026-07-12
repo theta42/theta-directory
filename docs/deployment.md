@@ -54,6 +54,19 @@ Then `docker compose up -d --build`.
 - OIDC discovery: `http://localhost:3001/.well-known/openid-configuration`
 - LDAPS (legacy apps / direct binds): `ldaps://<host>:636`
 
+### Logs
+
+The all-in-one image runs the Node app and slapd (OpenLDAP) in one container,
+both writing to the container's stdout/stderr, so `docker compose logs` is the
+primary view (slapd runs with `-d 0`, so LDAP output is there too).
+
+```bash
+docker compose logs -f sso-manager                       # app + slapd (stdout/stderr)
+docker compose logs --tail=200 --since=10m sso-manager   # recent context
+docker compose exec sso-manager ldapsearch -x -H ldap://localhost:389 \
+  -D "cn=admin,$LDAP_BASE_DN" -W -b "$LDAP_BASE_DN"       # LDAP health check
+```
+
 ### Environment variables
 
 | Variable | Default | Description |
