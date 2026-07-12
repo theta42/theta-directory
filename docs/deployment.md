@@ -105,16 +105,20 @@ The bundled slapd generates a **self-signed cert** on first start (CN =
 > Port 389 (plain LDAP) is **not** mapped to the host by default — direct-LDAP
 > clients should use LDAPS (636) or StartTLS.
 
-### Backups (~100 users)
+### Backups and restore
+
+LDAP, Redis (OAuth clients + tokens), and the `./config/` secrets are all
+persisted and restorable. Redis is now AOF+RDB persisted to the `sso-data`
+volume (not in-memory) so OAuth clients survive rebuilds.
+
+See the **Backups and restore** section of `DEPLOYMENT.md` for the full runbook
+(what lives where, manual backup, full / Redis-only / LDAP-only restore, and
+the AOF-vs-RDB note). Quick LDAP backup:
 
 ```bash
 docker compose exec sso-manager slapcat -f /etc/openldap/slapd.conf \
   -b "dc=yourdomain,dc=com" > ldap-backup-$(date +%F).ldif
 ```
-
-Restorable with `ldapadd`/`ldapmodify` against a fresh instance. Redis is
-in-memory (session/cache only — safe to lose). Persist `JWT_SECRET` +
-`LDAP_ADMIN_PASS` outside the container (your `.env`, a password manager).
 
 ## Method 2: Bare metal (Debian/Ubuntu)
 

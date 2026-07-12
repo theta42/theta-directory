@@ -30,6 +30,48 @@ APP_LDAP_URL="${app_ldap__url:-ldap://localhost:389}"
 info()  { echo "[INFO] $*"; }
 error() { echo "[ERROR] $*" >&2; }
 
+# ── Optional: load operational config from a mounted secrets.js ──────────────
+# The unified theta-env stack mounts ./config/sso-secrets.js at /config and
+# treats it as the authoritative source for the SSO's config (LDAP base, admin
+# password, org name, JWT secret, ...). When present, symlink it into
+# /app/conf/secrets.js so @simpleworkjs/conf reads it, and override the
+# env-derived operational vars below with the file's values. When absent
+# (standalone / env-var deployments) the env vars set above stay in effect and
+# the app_* exports further down are emitted as before.
+SECRETS_JS_MODE=0
+if [[ -f /config/sso-secrets.js ]]; then
+    ln -sf /config/sso-secrets.js /app/conf/secrets.js
+    SECRETS_JS_MODE=1
+    # Pull the entrypoint's operational vars out of secrets.js in one node call.
+    # Node emits `KEY<TAB>base64(value)` lines; we decode each with base64 -d and
+    # assign via printf -v. base64 carries quotes / special chars safely with no
+    # eval and no shell-quoting gymnastics. No app_* env is exported in this mode
+    # — @simpleworkjs/conf reads the file directly, and any app_* env would
+    # override it (precedence: base.js < <env>.js < secrets.js < app_* env).
+    _node_out="$(node -e '
+        const c = require("/config/sso-secrets.js");
+        const b = s => Buffer.from(String(s == null ? "" : s)).toString("base64");
+        const o = {
+            LDAP_BASE_DN:    (c.stack && c.stack.ldapBaseDn) || "",
+            LDAP_ADMIN_PASS: (c.ldap && c.ldap.bindPassword) || "",
+            ORG_NAME:        c.name || "",
+            LDAP_DOMAIN:     (c.stack && c.stack.ldapDomain) || "",
+            LDAP_CERT_CN:    (c.stack && c.stack.ldapCertCn) || "",
+            JWT_SECRET:      (c.oauth && c.oauth.jwtSecret) || "",
+        };
+        for (const k in o) console.log(k + "\t" + b(o[k]));
+    ')" || { error "Failed to parse /config/sso-secrets.js (see stderr above)"; exit 1; }
+    [[ -n "$_node_out" ]] || { error "/config/sso-secrets.js produced no config"; exit 1; }
+    while IFS=$'\t' read -r _k _v; do
+        [[ -n "$_k" ]] || continue
+        printf -v "$_k" '%s' "$(printf '%s' "$_v" | base64 -d)"
+    done <<< "$_node_out"
+    LDAP_BIND_DN="cn=admin,${LDAP_BASE_DN}"
+    [[ -n "$LDAP_ADMIN_PASS" ]] || { error "/config/sso-secrets.js: ldap.bindPassword is empty"; exit 1; }
+    [[ -n "$JWT_SECRET"      ]] || { error "/config/sso-secrets.js: oauth.jwtSecret is empty"; exit 1; }
+    info "Loaded config from /config/sso-secrets.js (secrets.js authoritative)"
+fi
+
 # ── Locate the OpenLDAP module directory ────────────────────────────────────
 # slapd.conf needs `modulepath` to find pw-sha2/ppolicy/memberof/refint. The
 # path varies by distro; auto-detect rather than hardcode.
@@ -248,13 +290,21 @@ else
 fi
 
 # ── Start Redis ──────────────────────────────────────────────────────────────
-# The app stores models/sessions in Redis (model-redis). The all-in-one image
-# bundles a Redis server for a self-contained single-node deployment. Point the
-# app at an external Redis instead by setting app_redis__host before starting.
-# In-memory, no persistence: cache/session data is rebuilt on restart.
+# The app stores models/sessions in Redis (model-redis), and the SSO's
+# non-bootstrap OAuth clients also live there. The all-in-one image bundles a
+# Redis server for a self-contained single-node deployment. Persist it to /data
+# (AOF + RDB) so OAuth clients, tokens, and other Redis-backed state survive
+# container recreation. Point the app at an external Redis instead by setting
+# app_redis__host before starting (then no bundled Redis runs here). redis runs
+# as root in this image, so a root-owned /data is writable.
 if [[ -z "${app_redis__host:-}" ]]; then
-    info "Starting Redis..."
-    redis-server --save "" --appendonly no --daemonize no &
+    REDIS_DATA_DIR="${REDIS_DATA_DIR:-/data}"
+    mkdir -p "$REDIS_DATA_DIR"
+    chmod 700 "$REDIS_DATA_DIR"
+    info "Starting Redis (AOF persisted to $REDIS_DATA_DIR)..."
+    redis-server --daemonize no --dir "$REDIS_DATA_DIR" --appendonly yes \
+        --appendfilename appendonly.aof --save 900 1 --save 300 10 --save 60 10000 \
+        --dbfilename dump.rdb &
     REDIS_PID=$!
     for i in $(seq 1 15); do
         if redis-cli ping >/dev/null 2>&1; then
@@ -271,8 +321,9 @@ if [[ -z "${app_redis__host:-}" ]]; then
     # is needed when running the bundled Redis.
 fi
 
-# ── Generate a JWT secret if none was provided ──────────────────────────────
-if [[ -z "${JWT_SECRET:-}" && -z "${app_oauth__jwtSecret:-}" ]]; then
+# ── Generate a JWT secret if none was provided (env mode only) ──────────────
+# In secrets.js mode the JWT secret comes from the file and was validated above.
+if [[ "${SECRETS_JS_MODE:-0}" != 1 && -z "${JWT_SECRET:-}" && -z "${app_oauth__jwtSecret:-}" ]]; then
     if command -v openssl >/dev/null 2>&1; then
         JWT_SECRET=$(openssl rand -hex 32)
     else
@@ -281,30 +332,34 @@ if [[ -z "${JWT_SECRET:-}" && -z "${app_oauth__jwtSecret:-}" ]]; then
     info "Generated JWT secret (set JWT_SECRET or app_oauth__jwtSecret to persist)"
 fi
 
-# ── Export app_* config overrides for the SSO Manager process ────────────────
-# These are the highest-precedence config layer in @simpleworkjs/conf. Any
-# value already set in the environment is preserved (${VAR:-default}).
-export app_ldap__url="${app_ldap__url:-$APP_LDAP_URL}"
-export app_ldap__bindDN="${app_ldap__bindDN:-$LDAP_BIND_DN}"
-export app_ldap__bindPassword="${app_ldap__bindPassword:-$LDAP_ADMIN_PASS}"
-export app_ldap__userBase="${app_ldap__userBase:-ou=people,${LDAP_BASE_DN}}"
-export app_ldap__groupBase="${app_ldap__groupBase:-ou=groups,${LDAP_BASE_DN}}"
-export app_oauth__jwtSecret="${app_oauth__jwtSecret:-$JWT_SECRET}"
-# OIDC issuer advertised in /.well-known/openid-configuration. Default to the
-# public https URL on the SSO subdomain of the LDAP domain; override with
-# OAUTH_ISSUER / app_oauth__issuer. Computed here (not in compose) because
-# compose v1 doesn't interpolate nested ${VAR:-...} defaults.
-export app_oauth__issuer="${app_oauth__issuer:-https://sso.${LDAP_DOMAIN}}"
-export app_name="${app_name:-$ORG_NAME}"
+# ── Export app_* config overrides for the SSO Manager process (env mode) ─────
+# In secrets.js mode the app reads /app/conf/secrets.js directly, so we export
+# NO app_* vars — they would override the file (@simpleworkjs/conf precedence:
+# base.js < <env>.js < secrets.js < app_* env). In env mode these remain the
+# highest-precedence layer, derived from the LDAP_* / ORG_NAME / SMTP_* env.
+if [[ "${SECRETS_JS_MODE:-0}" != 1 ]]; then
+    export app_ldap__url="${app_ldap__url:-$APP_LDAP_URL}"
+    export app_ldap__bindDN="${app_ldap__bindDN:-$LDAP_BIND_DN}"
+    export app_ldap__bindPassword="${app_ldap__bindPassword:-$LDAP_ADMIN_PASS}"
+    export app_ldap__userBase="${app_ldap__userBase:-ou=people,${LDAP_BASE_DN}}"
+    export app_ldap__groupBase="${app_ldap__groupBase:-ou=groups,${LDAP_BASE_DN}}"
+    export app_oauth__jwtSecret="${app_oauth__jwtSecret:-$JWT_SECRET}"
+    # OIDC issuer advertised in /.well-known/openid-configuration. Default to the
+    # public https URL on the SSO subdomain of the LDAP domain; override with
+    # OAUTH_ISSUER / app_oauth__issuer. Computed here (not in compose) because
+    # compose v1 doesn't interpolate nested ${VAR:-...} defaults.
+    export app_oauth__issuer="${app_oauth__issuer:-https://sso.${LDAP_DOMAIN}}"
+    export app_name="${app_name:-$ORG_NAME}"
 
-# SMTP (optional). If no user/pass, disable auth by clearing the user.
-export app_smtp__host="${app_smtp__host:-${SMTP_HOST:-localhost}}"
-export app_smtp__port="${app_smtp__port:-${SMTP_PORT:-587}}"
-if [[ -n "${SMTP_USER:-}" || -n "${SMTP_PASS:-}" ]]; then
-    export app_smtp__user="${app_smtp__user:-$SMTP_USER}"
-    export app_smtp__pass="${app_smtp__pass:-$SMTP_PASS}"
-else
-    export app_smtp__user="${app_smtp__user:-}"
+    # SMTP (optional). If no user/pass, disable auth by clearing the user.
+    export app_smtp__host="${app_smtp__host:-${SMTP_HOST:-localhost}}"
+    export app_smtp__port="${app_smtp__port:-${SMTP_PORT:-587}}"
+    if [[ -n "${SMTP_USER:-}" || -n "${SMTP_PASS:-}" ]]; then
+        export app_smtp__user="${app_smtp__user:-$SMTP_USER}"
+        export app_smtp__pass="${app_smtp__pass:-$SMTP_PASS}"
+    else
+        export app_smtp__user="${app_smtp__user:-}"
+    fi
 fi
 
 # HTTP port for the app (bin/www reads NODE_PORT).

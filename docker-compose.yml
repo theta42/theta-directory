@@ -1,18 +1,20 @@
 # Docker Compose for the SSO Manager all-in-one image (app + OpenLDAP in one container).
 #
 # The image (Dockerfile.openldap) bundles a slapd that the app talks to over
-# localhost. Configuration is supplied to the app via `app_*` environment
-# variables — the highest-precedence config layer in @simpleworkjs/conf. Any
-# `app_*` var not set here falls back to a sensible default baked into
-# docker-entrypoint.sh (e.g. app_ldap__url -> ldap://localhost:389).
+# localhost. The app reads its configuration from conf/base.js + conf/secrets.js
+# (deep-merged by @simpleworkjs/conf). The operator-edited secrets live in a
+# bind-mounted ./config/sso-secrets.js, which docker-entrypoint.sh symlinks into
+# /app/conf/secrets.js on startup. No app_* env vars are passed here: any app_*
+# env would override secrets.js (env beats the file in @simpleworkjs/conf), so
+# the file must be the only source.
 #
-# Copy this file to .env (or export the vars) to set the secrets below, or
-# set them inline on the command line:
-#   LDAP_ADMIN_PASS=... JWT_SECRET=... docker compose up -d
+# Compose only interpolates the port defaults below — there is no .env file.
+# Override a port on the command line if needed:
+#   PORT=3002 LDAPS_PORT=1636 docker compose up -d
 #
-# Requires @simpleworkjs/conf >= 1.1.0 in the image (env overrides). Refresh
+# Requires @simpleworkjs/conf >= 1.1.0 in the image. Refresh
 # nodejs/package-lock.json with `npm install @simpleworkjs/conf@^1.1.0` before
-# building, so the image actually contains the env-override feature.
+# building.
 
 services:
   sso-manager:
@@ -34,45 +36,16 @@ services:
       # plain binds from the LAN (not recommended):
       # - "${LDAP_PORT:-389}:389"
     environment:
-      # ── LDAP server-side (configures the bundled slapd) ──
-      - LDAP_BASE_DN=${LDAP_BASE_DN:-dc=example,dc=com}
-      - LDAP_DOMAIN=${LDAP_DOMAIN:-example.com}
-      - LDAP_ADMIN_PASS=${LDAP_ADMIN_PASS:-admin}      # slapd root + app bind password
-      - ORG_NAME=${ORG_NAME:-SSO Manager}
-      # CN on the LDAP TLS cert. Clients verify against this hostname. Leave
-      # empty to default to LDAP_DOMAIN; set to the public hostname clients
-      # connect over (computed in docker-entrypoint.sh, not here, to avoid
-      # nested-variable interpolation limitations in compose v1).
-      - LDAP_CERT_CN=${LDAP_CERT_CN:-}
-
-      # ── App config overrides (app_* -> @simpleworkjs/conf) ──
-      # Defaults come from docker-entrypoint.sh; set these to override.
-      # - app_oauth__issuer=https://sso.example.com
-      # - app_ldap__url=ldap://localhost:389           # default; points at bundled slapd
-      # - app_ldap__bindDN=cn=admin,${LDAP_BASE_DN}
-      # - app_ldap__bindPassword=${LDAP_ADMIN_PASS}
-      # - app_ldap__userBase=ou=people,${LDAP_BASE_DN}
-      # - app_ldap__groupBase=ou=groups,${LDAP_BASE_DN}
-      - app_oauth__jwtSecret=${JWT_SECRET}            # falls back to an auto-generated secret
-      # OIDC issuer advertised in /.well-known/openid-configuration. This is the
-      # browser-facing URL the front proxy serves the SSO at — the theta42/proxy
-      # (an OIDC client) and other apps use it for discovery. Server-to-server
-      # token/userinfo calls from the proxy can go to http://sso-manager:3001
-      # over the docker network; only the issuer/redirect URLs must be public.
-      # Leave empty to default to https://sso.<LDAP_DOMAIN> (set in the entrypoint).
-      - app_oauth__issuer=${OAUTH_ISSUER:-}
-      - app_name=${ORG_NAME:-SSO Manager}
-
-      # ── Optional SMTP (outbound email) ──
-      - app_smtp__host=${SMTP_HOST:-localhost}
-      - app_smtp__port=${SMTP_PORT:-587}
-      - app_smtp__user=${SMTP_USER:-}
-      - app_smtp__pass=${SMTP_PASS:-}
-      - app_smtp__from=${SMTP_FROM:-SSO Manager <noreply@example.com>}
-
+      # Config (LDAP, OAuth, SMTP, ...) comes from ./config/sso-secrets.js (see
+      # volumes below), not from env. NODE_ENV/NODE_PORT are the only env the app
+      # reads that are not part of its conf tree.
       - NODE_ENV=production
       - NODE_PORT=3001
     volumes:
+      # Operator-edited secrets (sso-secrets.js). The entrypoint symlinks
+      # /config/sso-secrets.js -> /app/conf/secrets.js so @simpleworkjs/conf reads
+      # it. See secrets.js.example / config.example/ for the shape.
+      - ./config:/config:ro
       # Persist the LDAP database across container recreation.
       - ldap-data:/var/lib/ldap
       # Persist the auto-generated self-signed TLS cert so clients don't have to
@@ -81,6 +54,10 @@ services:
       #   - ./certs:/etc/openldap/certs
       # (must contain ldap.crt + ldap.key; the entrypoint leaves them untouched).
       - ldap-certs:/etc/openldap/certs
+      # Persist Redis (AOF + RDB) so OAuth clients, tokens, and other
+      # Redis-backed state survive container recreation. Restoring Redis also
+      # restores lua-resty-auto-ssl cert state if this image fronts a proxy.
+      - sso-data:/data
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
       interval: 30s
@@ -91,3 +68,4 @@ services:
 volumes:
   ldap-data:
   ldap-certs:
+  sso-data:

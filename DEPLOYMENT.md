@@ -45,53 +45,60 @@ need to set a few secrets.
 
 ### Setup
 
+The bundled `docker-compose.yml` reads config from a bind-mounted
+`./config/sso-secrets.js` (not from a `.env` file). Copy the example, fill in
+your secrets, then build + start:
+
 ```bash
-# Minimal: set an LDAP admin password and a JWT secret, then build + start.
-LDAP_ADMIN_PASS='choose-a-strong-password' \
-JWT_SECRET="$(openssl rand -hex 32)" \
+mkdir -p config && chmod 700 config
+cp secrets.js.example config/sso-secrets.js
+$EDITOR config/sso-secrets.js     # set ldap.bindPassword, oauth.jwtSecret, ...
 docker compose up -d --build
 ```
 
-For a customized deployment, put the overrides in a `.env` file next to
-`docker-compose.yml`:
+`docker-entrypoint.sh` symlinks `/config/sso-secrets.js` → `/app/conf/secrets.js`
+so `@simpleworkjs/conf` reads it, and pulls the server-side LDAP vars (base DN,
+admin password, org, domain, cert CN, JWT secret) out of the same file. No
+`app_*` env is passed — `app_*` env would override `secrets.js` (env beats the
+file in `@simpleworkjs/conf`), so the file is kept authoritative.
 
-```env
-LDAP_BASE_DN=dc=yourdomain,dc=com
-LDAP_DOMAIN=yourdomain.com
-LDAP_ADMIN_PASS=your-admin-password
-ORG_NAME=Your Org
-JWT_SECRET=your-jwt-secret
-OAUTH_ISSUER=https://sso.yourdomain.com   # browser-facing URL the proxy serves
-LDAP_CERT_CN=sso.yourdomain.com           # hostname LDAPS clients verify against
-SMTP_HOST=smtp.yourdomain.com
-SMTP_PORT=587
-SMTP_USER=noreply@yourdomain.com
-SMTP_PASS=your-smtp-password
-SMTP_FROM=Your Org <noreply@yourdomain.com>
-PORT=3001
-LDAPS_PORT=636
-# LDAP_PORT=389   # uncomment the 389 host mapping in compose if you need plain LAN binds
-```
+> Running the unified `theta-env` stack? Its `setup.sh` generates
+> `./config/sso-secrets.js` (+ `./config/proxy-secrets.js`) for you with random
+> secrets and snapshots state before rebuilds — see the theta-env README.
 
-Then `docker compose up -d --build`.
+**Quick test (defaults):** with no `./config/sso-secrets.js` the entrypoint
+falls back to env-mode with safe defaults (`dc=example,dc=com`, admin password
+`admin`, an auto-generated JWT secret) — fine for kicking the tires, not for
+production.
+
+**Advanced — env vars instead of the file:** the entrypoint also supports
+config via `LDAP_*` / `app_*` env vars (env-mode, used when
+`/config/sso-secrets.js` is absent). Since the bundled compose no longer passes
+those env vars, you'd add them to its `environment:` block yourself, e.g.
+`LDAP_ADMIN_PASS`, `JWT_SECRET`, `app_oauth__issuer`. This is mainly for
+bare-metal / advanced standalone use; most deployments should use the file.
 
 ### What the entrypoint does
 
 `docker-entrypoint.sh` (run as the container entrypoint):
 
-1. Generates a self-signed TLS cert (unless one is already present at
+1. If `/config/sso-secrets.js` is mounted, symlinks it to `/app/conf/secrets.js`
+   and reads the server-side LDAP vars from it (secrets.js mode). Otherwise it
+   derives them from `LDAP_*` env vars with safe defaults (env mode).
+2. Generates a self-signed TLS cert (unless one is already present at
    `LDAP_CERT_DIR`), generates a `slapd.conf` for the bundled OpenLDAP (`mdb`
    database, `pw-sha2`/`ppolicy`/`memberof`/`refint` modules + overlays, TLS,
    indexes, access controls), and starts `slapd -f /etc/openldap/slapd.conf`
    listening on `ldap:///` (389) and `ldaps:///` (636).
-2. Seeds the directory (base DN, `ou=people`/`ou=groups`/`ou=policies`, a default
+3. Seeds the directory (base DN, `ou=people`/`ou=groups`/`ou=policies`, a default
    `pwdPolicy`, and the required SSO groups `app_sso_admin`, `app_sso_invite`,
    `app_sso_oauth_admin`) — idempotently, so container restarts are safe.
-3. Starts a bundled Redis (the app uses `model-redis` for models/sessions), unless
+4. Starts a bundled Redis (the app uses `model-redis` for models/sessions and
+   stores OAuth clients there), AOF+RDB persisted to `/data`, unless
    `app_redis__host` is set (then it's expected to be external).
-4. Exports `app_*` env vars so the app binds to the local slapd (any `app_*` you
-   set in the compose environment wins over the entrypoint's defaults).
-5. `exec`s `node bin/www`.
+5. In env mode, exports `app_*` env vars so the app binds to the local slapd. In
+   secrets.js mode it exports none (the app reads the file directly).
+6. `exec`s `node bin/www`.
 
 ### Access
 
@@ -191,20 +198,84 @@ proxy and a natural fit — it's both an **OIDC client** of the SSO Manager *and
    create a dedicated LDAP service account under `ou=people` (e.g.
    `cn=ldapclient,ou=people,…`) via the SSO Manager UI — don't reuse the admin DN.
 
-### Backups (small-business / ~100 users)
+### Backups and restore
 
-- **LDAP data** lives on the `ldap-data` volume (`/var/lib/ldap` in the container).
-  Back up the directory with an `ldapsearch`/`slapcat` export on a schedule:
-  ```bash
-  docker compose exec sso-manager slapcat -f /etc/openldap/slapd.conf \
-    -b "dc=yourdomain,dc=com" > ldap-backup-$(date +%F).ldif
-  ```
-  (Restorable with `ldapadd`/`ldapmodify` against a fresh instance.)
-- **Redis** is in-memory and not persisted by default (session/cache only — safe
-  to lose). If you want session durability, mount a Redis AOF/RDB volume and
-  enable persistence in `docker-entrypoint.sh`.
-- **JWT_SECRET** and **LDAP_ADMIN_PASS** are operational secrets — store them
-  outside the container (your `.env`, a password manager, etc.).
+**What lives where**
+
+| State | Location | Persisted? |
+|-------|----------|------------|
+| LDAP directory (users, groups, policies) | `ldap-data` volume (`/var/lib/ldap`) | yes (volume) |
+| LDAP TLS cert | `ldap-certs` volume (`/etc/openldap/certs`) | yes (volume) |
+| Redis (OAuth clients, tokens, sessions) | `sso-data` volume (`/data`) | yes (AOF + RDB) |
+| Secrets (LDAP admin pass, JWT secret, SMTP) | `./config/sso-secrets.js` (bind mount) | your responsibility — back up off-host |
+
+**Automatic snapshots** — when run as part of the unified `theta-env` stack,
+`setup.sh` snapshots LDAP + Redis + `./config/` to `./backups/<timestamp>/`
+before every rebuild and keeps the last `BACKUP_KEEP` (default 5). Standalone
+deployments don't get this; use the manual steps below.
+
+**Manual backup**
+
+```bash
+# LDAP — full directory export (works while slapd is running)
+docker compose exec sso-manager slapcat -f /etc/openldap/slapd.conf \
+  -b "dc=yourdomain,dc=com" > ldap-backup-$(date +%F).ldif
+
+# Redis — hot snapshot: trigger a save, then copy the RDB out
+docker compose exec sso-manager redis-cli BGSAVE
+docker compose cp sso-manager:/data/dump.rdb sso-redis-$(date +%F).rdb
+
+# Secrets — copy the config dir (holds LDAP_ADMIN_PASS, JWT secret, etc.)
+cp -a ./config config-backup-$(date +%F) && chmod 700 config-backup-$(date +%F)
+```
+Store the `.ldif`, `.rdb`, and config copy **off the host** — they contain
+secrets and the whole user directory.
+
+**Restore — full (disaster recovery)**
+
+The SSO image uses a static `slapd.conf` (slapd starts with `-f`, not `-F`
+cn=config), so LDAP restore uses `slapadd -f /etc/openldap/slapd.conf`:
+
+```bash
+# 1. Secrets
+cp -a config-backup-<date> ./config && chmod 700 ./config
+./setup.sh                       # fresh empty volumes (or: docker compose up -d)
+docker compose stop sso-manager
+
+# 2. LDAP — wipe the mdb files, then load the LDIF into the stopped directory
+docker compose run --rm --no-deps --entrypoint sh sso-manager -c \
+  'rm -f /var/lib/ldap/* && slapadd -f /etc/openldap/slapd.conf -l /dev/stdin' \
+  < ldap-backup-<date>.ldif
+docker compose start sso-manager
+
+# 3. Redis — see the AOF note below
+docker compose stop sso-manager
+docker compose run --rm --no-deps --entrypoint sh sso-manager -c \
+  'rm -f /data/appendonly.aof /data/appendonly.aof.*'   # REQUIRED — see note
+docker compose cp sso-redis-<date>.rdb sso-manager:/data/dump.rdb
+docker compose start sso-manager
+```
+
+**Restore — Redis only** = step 3 above. **Restore — LDAP only** = step 2 above.
+
+> **AOF vs RDB (important):** with `--appendonly yes`, Redis loads
+> `appendonly.aof` on startup and **ignores** `dump.rdb` if the AOF exists. To
+> restore from an RDB snapshot you **must delete the AOF first** (step 3 does
+> this); Redis then loads the RDB and writes a fresh AOF. Verify after restoring:
+> `docker compose exec sso-manager redis-cli DBSIZE` and
+> `docker compose exec sso-manager ldapsearch -x -b "dc=yourdomain,dc=com"`.
+
+**Upgrades**
+
+```bash
+./setup.sh          # backs up, then rebuilds — volumes keep LDAP + Redis state
+# (standalone) docker compose pull && docker compose up -d
+```
+LDAP data and Redis state survive the rebuild because they live on named
+volumes, not in the image. Verify health (`docker compose ps`, log in, check an
+OAuth client). Note: re-running bootstrap resets the bootstrap-admin and
+service-account passwords to the values in `./config/sso-secrets.js`; non-theta
+OAuth clients live in SSO Redis and are preserved by the volume.
 
 ---
 

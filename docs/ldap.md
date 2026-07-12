@@ -123,14 +123,33 @@ idempotently against a running slapd (auto-detects the database holding your
 base DN, and verifies `pwdAccountLockedTime` is live — the attribute the app's
 active/inactive toggle depends on).
 
-## Backups
+## Backups and restore
+
+**Backup** (while slapd is running):
 
 ```bash
 docker compose exec sso-manager slapcat -f /etc/openldap/slapd.conf \
   -b "dc=yourdomain,dc=com" > ldap-backup-$(date +%F).ldif
 ```
 
-Restorable with `ldapadd`/`ldapmodify` against a fresh instance.
+Store the `.ldif` off the host — it contains every user's password hash.
+
+**Restore** into a stopped directory. The SSO image uses a static `slapd.conf`
+(slapd starts with `-f`, not cn=config `-F`), so restore uses `slapadd -f`:
+
+```bash
+docker compose stop sso-manager
+docker compose run --rm --no-deps --entrypoint sh sso-manager -c \
+  'rm -f /var/lib/ldap/* && slapadd -f /etc/openldap/slapd.conf -l /dev/stdin' \
+  < ldap-backup-<date>.ldif
+docker compose start sso-manager
+```
+
+Verify: `docker compose exec sso-manager ldapsearch -x -b "dc=yourdomain,dc=com"`.
+
+Redis state (OAuth clients, tokens) and `./config/` secrets are backed up
+separately — see the *Backups and restore* section of `DEPLOYMENT.md` for the
+full (LDAP + Redis + secrets) runbook.
 
 ## Troubleshooting
 
