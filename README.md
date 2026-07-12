@@ -147,3 +147,23 @@ ldapsearch -Y EXTERNAL -H ldapi:/// -b "cn=theta42,cn=schema,cn=config" olcAttri
 |-------|---------|
 | `app_sso_admin` | Full admin access: manage users, groups, OAuth clients |
 | `app_sso_oauth_admin` | Manage OAuth clients only |
+
+## Logs (Docker)
+
+The all-in-one image runs the Node app and slapd (OpenLDAP) in one container,
+both writing to the container's stdout/stderr, so `docker compose logs` is the
+primary view (slapd runs with `-d 0`, so LDAP output is there too).
+
+```bash
+docker compose logs -f sso-manager          # app + slapd (stdout/stderr)
+# or, by container name:
+docker logs -f sso-manager
+
+docker compose logs --tail=200 --since=10m sso-manager   # recent context
+
+# Query the directory directly to confirm LDAP is healthy
+docker compose exec sso-manager ldapsearch -x -H ldap://localhost:389 \
+  -D "cn=admin,$LDAP_BASE_DN" -W -b "$LDAP_BASE_DN"
+```
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) → *Troubleshooting* for LDAP-specific errors.
