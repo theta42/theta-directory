@@ -1,0 +1,23 @@
+# theta42 custom schema — dateOfBirth (ISO 8601 YYYY-MM-DD) + the theta42Person
+# auxiliary objectClass that carries it.
+#
+# This mirrors the cn=config LDIF that ops/ldap-setup.sh section 5 loads on
+# bare-metal deployments, in slapd.conf .schema form so the all-in-one Docker
+# image (which uses a static slapd.conf) can `include` it. The app
+# (nodejs/models/user_ldap.js) adds objectClass theta42Person when a user has a
+# dateOfBirth, so the directory must know this objectClass or user
+# create/update fails with LDAP 0x15 (objectClass: value invalid per syntax).
+
+attributetype ( 1.3.6.1.4.1.99999.1.1
+	NAME 'dateOfBirth'
+	DESC 'Date of birth in ISO 8601 format YYYY-MM-DD'
+	EQUALITY caseExactMatch
+	SUBSTR caseExactSubstringsMatch
+	SYNTAX 1.3.6.1.4.1.1466.115.121.1.15
+	SINGLE-VALUE )
+
+objectclass ( 1.3.6.1.4.1.99999.2.1
+	NAME 'theta42Person'
+	DESC 'Theta42 SSO extended person attributes'
+	AUXILIARY
+	MAY ( dateOfBirth ) )
