@@ -11,3 +11,4 @@ require('./token');
 require('./verification');
 require('./oauth_client');
 require('./oauth_code');
+require('./api_token');

@@ -54,6 +54,21 @@ Then `docker compose up -d --build`.
 - OIDC discovery: `http://localhost:3001/.well-known/openid-configuration`
 - LDAPS (legacy apps / direct binds): `ldaps://<host>:636`
 
+### API tokens (personal access tokens)
+
+Any logged-in user can mint a long-lived bearer token to call the management
+API from scripts/CI without a browser session. Self-service; authenticates
+**as the creator** (carries their LDAP group permissions, re-resolved live).
+
+Create one under **API Tokens** in the UI (shown once), then:
+
+```bash
+curl -H "Authorization: Bearer sso_<id>_<secret>" https://sso.example.com/api/user
+```
+
+Rotate/revoke from the same page (immediate effect). Optional expiry at
+creation. Tokens persist in Redis (AOF) and survive rebuilds.
+
 ### Logs
 
 The all-in-one image runs the Node app and slapd (OpenLDAP) in one container,

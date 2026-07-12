@@ -108,6 +108,31 @@ bare-metal / advanced standalone use; most deployments should use the file.
 - LDAP (internal, app↔slapd): `ldap://localhost:389` (not mapped to the host)
 - LDAPS (for legacy apps / direct binds): `ldaps://<host>:636` (TLS)
 
+### API tokens (personal access tokens)
+
+Any logged-in user can mint a long-lived bearer token to call the management
+API from scripts/CI/other services, without a browser session. Tokens are
+self-service and authenticate **as their creator** — a token carries the
+creator's LDAP group permissions, so the same `permission.byGroup` checks apply
+(group membership is re-resolved from LDAP live on each request).
+
+Create one in the UI under **API Tokens** (the token string is shown **once**),
+then use it as a bearer token:
+
+```bash
+curl -H "Authorization: Bearer sso_<id>_<secret>" https://sso.example.com/api/user
+```
+
+Format: `sso_<id>_<secret>` — the `id` is the lookup key, the `secret` is
+bcrypt-hashed and never stored in plaintext. Rotate or revoke a token from the
+same UI page; revocation takes effect immediately. Optional expiry (in days) at
+creation. API tokens persist in the bundled Redis, so they survive rebuilds
+(Redis is persisted via AOF — see *Backups and restore*).
+
+The token has the same access as a browser session for that user — an
+`app_sso_admin`'s token can manage users/groups; a non-admin's token is limited
+to what they could do in the UI.
+
 ### Logs
 
 The all-in-one image runs the Node app and slapd (OpenLDAP) in one container,

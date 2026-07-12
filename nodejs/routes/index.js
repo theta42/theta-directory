@@ -82,6 +82,10 @@ router.get('/oauth-clients', function(req, res, next) {
   res.render('oauth_clients', {...values, issuer, discoveryUrl: `${issuer}/.well-known/openid-configuration`});
 });
 
+router.get('/api-tokens', function(req, res, next) {
+  res.render('api_tokens', {...values});
+});
+
 
 
 router.get('/users/:uid', function(req, res, next) {

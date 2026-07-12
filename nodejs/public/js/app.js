@@ -287,6 +287,40 @@ app.oauthClient = (function(app){
 	return { list, add, remove, update, rotateSecret };
 })(app);
 
+app.apiToken = (function(app){
+	function list(callback){
+		return app.api.get('api-token/', function(error, data){
+			if(callback) callback(error, data);
+		});
+	}
+
+	function add(args, callback){
+		app.api.post('api-token/', args, function(error, data){
+			callback(error, data);
+		});
+	}
+
+	function update(args, callback){
+		app.api.put('api-token/' + args.id, args, function(error, data){
+			callback(error, data);
+		});
+	}
+
+	function remove(args, callback){
+		app.api.delete('api-token/' + args.id, function(error, data){
+			callback(error, data);
+		});
+	}
+
+	function rotate(args, callback){
+		app.api.post('api-token/' + args.id + '/rotate', {}, function(error, data){
+			callback(error, data);
+		});
+	}
+
+	return { list, add, update, remove, rotate };
+})(app);
+
 app.impersonate = (function(app){
 	function create(uid, callack){
 		app.api.post('auth/impersonate/' + uid, {}, function(error, data){

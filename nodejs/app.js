@@ -67,6 +67,9 @@ app.use('/api/token', middleware.auth, require('./routes/token'));
 app.use('/api/group', middleware.auth, require('./routes/group'));
 app.use('/api/notification', middleware.auth, require('./routes/notification'));
 
+// Self-service API tokens (PATs) — owner-scoped, no admin group required.
+app.use('/api/api-token', middleware.auth, require('./routes/api_token'));
+
 // OAuth 2.0 / OpenID Connect
 app.use('/oauth', oauthRouter);
 app.use('/api/oauth/client', middleware.auth, require('./routes/oauth_client'));
