@@ -1,0 +1,86 @@
+# sudo LDAP schema (sudoUser / sudoHost / sudoCommand / sudoOption / etc. +
+# the sudoRole objectClass), based on the canonical schema shipped with sudo
+# (doc/schema.OpenLDAP, OIDs under 1.3.6.1.4.1.15953.9).
+#
+# ONE DEVIATION from upstream: sudoRole is AUXILIARY here, not STRUCTURAL.
+# The SSO app (nodejs/models/user_ldap.js addPosixAccount) attaches sudoRole
+# directly onto each user entry, which is already inetOrgPerson — a STRUCTURAL
+# class. RFC 4512 forbids two unrelated structural object classes on one entry,
+# and OpenLDAP rejects that with objectClassViolation (65). Making sudoRole
+# AUXILIARY lets it coexist with inetOrgPerson on the user entry, which is the
+# app's per-user-sudoers model. This does not affect sudo's LDAP backend: it
+# searches by (objectClass=sudoRole) + sudoUser/sudoHost/sudoCommand, which work
+# the same regardless of structural vs auxiliary.
+
+attributetype ( 1.3.6.1.4.1.15953.9.1.1
+	NAME 'sudoUser'
+	DESC 'User(s) who may run sudo'
+	EQUALITY caseExactMatch
+	SUBSTR caseExactSubstringsMatch
+	SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )
+
+attributetype ( 1.3.6.1.4.1.15953.9.1.2
+	NAME 'sudoHost'
+	DESC 'Host(s) who may run sudo'
+	EQUALITY caseExactMatch
+	SUBSTR caseExactSubstringsMatch
+	SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )
+
+attributetype ( 1.3.6.1.4.1.15953.9.1.3
+	NAME 'sudoCommand'
+	DESC 'Command(s) to be executed by sudo'
+	EQUALITY caseExactMatch
+	SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )
+
+attributetype ( 1.3.6.1.4.1.15953.9.1.4
+	NAME 'sudoRunAs'
+	DESC 'User(s) impersonated by sudo (deprecated; use sudoRunAsUser)'
+	EQUALITY caseExactMatch
+	SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )
+
+attributetype ( 1.3.6.1.4.1.15953.9.1.5
+	NAME 'sudoOption'
+	DESC 'Options(s) followed by sudo'
+	EQUALITY caseExactMatch
+	SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )
+
+attributetype ( 1.3.6.1.4.1.15953.9.1.6
+	NAME 'sudoRunAsUser'
+	DESC 'User(s) impersonated by sudo'
+	EQUALITY caseExactMatch
+	SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )
+
+attributetype ( 1.3.6.1.4.1.15953.9.1.7
+	NAME 'sudoRunAsGroup'
+	DESC 'Group(s) impersonated by sudo'
+	EQUALITY caseExactMatch
+	SYNTAX 1.3.6.1.4.1.1466.115.121.1.15 )
+
+attributetype ( 1.3.6.1.4.1.15953.9.1.8
+	NAME 'sudoNotBefore'
+	DESC 'Start of time interval for which the entry is valid'
+	EQUALITY generalizedTimeMatch
+	ORDERING generalizedTimeOrderingMatch
+	SYNTAX 1.3.6.1.4.1.1466.115.121.1.24 )
+
+attributetype ( 1.3.6.1.4.1.15953.9.1.9
+	NAME 'sudoNotAfter'
+	DESC 'End of time interval for which the entry is valid'
+	EQUALITY generalizedTimeMatch
+	ORDERING generalizedTimeOrderingMatch
+	SYNTAX 1.3.6.1.4.1.1466.115.121.1.24 )
+
+attributetype ( 1.3.6.1.4.1.15953.9.1.10
+	NAME 'sudoOrder'
+	DESC 'An integer to order the sudoRole entries'
+	EQUALITY integerMatch
+	ORDERING integerOrderingMatch
+	SYNTAX 1.3.6.1.4.1.1466.115.121.1.27 )
+
+objectclass ( 1.3.6.1.4.1.15953.9.2.1
+	NAME 'sudoRole'
+	DESC 'Authorization Class for sudo'
+	SUP top AUXILIARY
+	MAY ( sudoUser $ sudoHost $ sudoCommand $ sudoRunAs $ sudoRunAsUser $
+	      sudoRunAsGroup $ sudoOption $ sudoOrder $ sudoNotBefore $
+	      sudoNotAfter $ description ) )

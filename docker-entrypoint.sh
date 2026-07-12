@@ -79,6 +79,8 @@ include         /etc/openldap/schema/cosine.schema
 include         /etc/openldap/schema/inetorgperson.schema
 include         /etc/openldap/schema/nis.schema
 include         /etc/openldap/schema/theta42.schema
+include         /etc/openldap/schema/sudo.schema
+include         /etc/openldap/schema/openssh-lpk.schema
 
 # Module loading (pw-sha2 provides {SSHA512} used by the app for user passwords;
 # ppolicy/memberof/refint are the overlays the app depends on). On OpenLDAP 2.5+
