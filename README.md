@@ -1,195 +1,172 @@
-# SSO manager
+# SSO Manager
 
-## API docs
-[API docs](API.md)
+A self-hosted **OpenID Connect provider** with a bundled **OpenLDAP directory**
+and a web management UI — for home labs and small businesses that want their own
+identity provider instead of a hosted one.
 
-## Server set up
+It gives you one place to manage your users and groups, one login (OIDC) that
+your modern apps can use, and one LDAP directory your older or odder apps can
+bind to directly. Everything runs on your own hardware; there is no
+phone-home, no hosted control plane, and no per-user pricing.
 
-### Recommended: Docker or install.sh
+> Setting up the whole stack (this SSO + the [theta42/proxy](https://github.com/theta42/proxy)
+> in front of it) with one command? Skip to [theta-env](https://github.com/theta42/theta-env)
+> — its `setup.sh` wires the two together and generates the config for you.
 
-The supported, tested deployment paths are **Docker** (an all-in-one image
-bundling the app + OpenLDAP + Redis) and the **`install.sh`** bare-metal
-installer for Debian/Ubuntu. Most users should start there:
+## Features
 
-- [Deployment Guide](DEPLOYMENT.md) — Docker + bare metal, configuration
-  layers, backups, troubleshooting.
-- [docs/index.md](docs/index.md) — documentation home (also published as a
-  GitHub Pages site), with links to configuration, LDAP, and OAuth/OIDC docs.
+- **OpenID Connect / OAuth 2.0 provider** — issue your own access, refresh, and
+  ID tokens; protect your apps with standard OIDC login. Discovery document at
+  `/.well-known/openid-configuration`.
+- **Bundled OpenLDAP directory** — users, groups, POSIX accounts
+  (`posixAccount`/`inetOrgPerson`), SSH public keys, and sudo roles, with
+  `memberOf` + referential-integrity overlays. This is your single source of
+  truth for identity, not a sidecar.
+- **Web management UI** — manage users, groups, and OAuth clients from a
+  browser; invite and password-reset flows over email; user self-service for
+  profile and API tokens.
+- **LDAPS for legacy apps** — apps that bind LDAP directly (Gitea, Emby, and
+  anything else that speaks LDAP) use LDAPS (636) or StartTLS against the same
+  directory, so you don't maintain a second user database for them.
+- **Personal access tokens** — any user can mint a long-lived bearer token to
+  drive the management API from scripts or CI, scoped to their own permissions.
+- **All-in-one Docker image** — app + OpenLDAP + Redis in one container, or run
+  the pieces separately against your own LDAP/Redis via `app_*` env config.
 
-### Manual / advanced: raw OpenLDAP setup
+## Why this over the alternatives
 
-The rest of this section walks through configuring OpenLDAP by hand. This is
-the **manual/advanced path** — useful if you're pointing the app at an
-existing LDAP server, or want to understand exactly what `install.sh` and the
-Docker entrypoint automate for you. Most deployments should use Docker or
-`install.sh` above instead.
+Tools like Keycloak, Authentik, Authelia, or Zitadel are OIDC providers, but
+LDAP is either a paid feature, a federation target you have to run separately,
+or absent. If your stack already has apps that speak LDAP directly (or you just
+want one real directory as the source of truth), you end up running *two*
+identity systems and keeping them in sync.
 
-The server requires:
-* NodeJS 20.x
-* LDAP server
+SSO Manager bundles the OpenLDAP directory with the OIDC provider, so OIDC
+apps and LDAP apps read from the same users and groups. The trade-off is
+scope: it is intentionally small and self-hosted, not an enterprise IAM suite
+— no fancy workflow engine, no hosted SaaS. If you want a lightweight,
+self-contained identity provider with a real LDAP backend, that is the niche.
 
-> Setting up the whole stack (Docker) or want the secrets-file layout? See
-> [DEPLOYMENT.md](DEPLOYMENT.md) — your domain is entered **once**, as the LDAP
-> base DN (`stack.ldapBaseDn`); the LDAP DNs (`bindDN`/`userBase`/`groupBase`)
-> and `oauth.issuer` all derive from it and must stay consistent. Running the
-> unified `theta-env` stack, `setup.sh` fills those in for you from `setup.env`.
+## Quick start
 
-### OpenLDAP configuration
+Three ways to run it, in order of how much it sets up for you:
 
-#### Password hashing (required)
+### 1. As part of the unified stack (recommended)
 
-Passwords are stored using `{SSHA512}` (salted SHA-512). The `pw-sha2` module must be loaded in slapd before creating or resetting any passwords.
-
-```bash
-ldapadd -Y EXTERNAL -H ldapi:/// << 'EOF'
-dn: cn=module{0},cn=config
-changetype: modify
-add: olcModuleLoad
-olcModuleLoad: pw-sha2
-EOF
-```
-
-Verify the module is working:
-
-```bash
-slappasswd -h {SSHA512} -s testpassword
-```
-
-Existing `{MD5}` password hashes continue to work after the module is loaded — users are migrated to SSHA512 the next time they change their password.
-
-#### Account locking (required for active/inactive toggle)
-
-User activation and deactivation uses the OpenLDAP `ppolicy` overlay. When a user is marked inactive, `pwdAccountLockedTime` is set on their entry, which causes all LDAP binds to fail — including logins to Emby, Gitea, and any other LDAP-backed service.
-
-> **The easy way:** run [`ops/ldap-setup.sh`](ops/ldap-setup.sh) on the LDAP server. It is idempotent, auto-detects the correct user database, applies everything below (pw-sha2, ppolicy module/overlay/schema, custom schema, policy entry, SSO groups) and verifies ppolicy is active at the end:
->
-> ```bash
-> sudo ./ops/ldap-setup.sh -p <admin-password>
-> ```
->
-> If the app returns `503 OpenLDAP ppolicy overlay is not configured` on `PUT /api/user/<uid>/active`, run this script — it means the overlay is not attached to the database holding your users. The manual steps below are equivalent and kept for reference.
-
-**1. Load the ppolicy module:**
+[theta-env](https://github.com/theta42/theta-env) composes this SSO Manager with
+the [theta42/proxy](https://github.com/theta42/proxy) (an OIDC-protected reverse
+proxy) and generates all the config from a single `setup.env` — you enter your
+domain once and it fills in the LDAP DNs, hostnames, OAuth issuer, and random
+secrets consistently:
 
 ```bash
-ldapadd -Y EXTERNAL -H ldapi:/// << 'EOF'
-dn: cn=module{0},cn=config
-changetype: modify
-add: olcModuleLoad
-olcModuleLoad: ppolicy
-EOF
+git clone --recursive https://github.com/theta42/theta-env.git
+cd theta-env
+cp setup.env.example setup.env   # set CFG_DOMAIN to your domain
+./setup.sh                       # generates ./config/, builds + bootstraps + starts both
 ```
 
-**2. Add the overlay to your user database:**
+See the [theta-env README](https://github.com/theta42/theta-env) for the full
+first-run flow, DNS/port requirements, and backups.
 
-> Warning: The database index below (`{1}mdb`) is **not** the same on every install. Confirm yours first — the overlay must go on the database whose `olcSuffix` is your base DN, or account locking silently won't apply to your users:
->
-> ```bash
-> ldapsearch -Q -Y EXTERNAL -H ldapi:/// -b cn=config \
->   '(&(objectClass=olcDatabaseConfig)(olcSuffix=dc=example,dc=com))' dn
-> ```
+### 2. Standalone, in Docker
+
+The all-in-one image bundles the app, OpenLDAP, and Redis. Copy the example
+secrets file, fill in your values, and build:
 
 ```bash
-ldapadd -Y EXTERNAL -H ldapi:/// << 'EOF'
-dn: olcOverlay=ppolicy,olcDatabase={1}mdb,cn=config
-objectClass: olcOverlayConfig
-objectClass: olcPPolicyConfig
-olcOverlay: ppolicy
-olcPPolicyDefault: cn=ppolicy,ou=policies,dc=example,dc=com
-olcPPolicyUseLockout: TRUE
-olcPPolicyHashCleartext: FALSE
-EOF
+git clone https://github.com/theta42/sso-manager-node.git
+cd sso-manager-node
+mkdir -p config && chmod 700 config
+cp secrets.js.example config/sso-secrets.js
+$EDITOR config/sso-secrets.js     # set ldap.bindPassword, oauth.jwtSecret, ...
+docker compose up -d --build
 ```
 
-**3. Create the policies container and default policy:**
+The web UI comes up at `http://localhost:3001`. To kick the tires with no
+config file at all, the entrypoint falls back to safe defaults
+(`dc=example,dc=com`, admin password `admin`, an auto-generated JWT) — fine for
+a local test, not for production.
+
+Your domain is entered once, as the LDAP base DN (`stack.ldapBaseDn`); the other
+LDAP DNs and the OAuth issuer derive from it and must stay consistent. See
+[DEPLOYMENT.md](DEPLOYMENT.md) for the full config reference, the `app_*` env
+vars, LDAPS/TLS, and backups.
+
+### 3. Bare metal on Debian/Ubuntu
+
+`install.sh` is an idempotent installer: it installs Node.js 20.x and OpenLDAP,
+configures the directory (modules, overlays, schema, the SSO groups), deploys
+the app to `/opt/sso-manager`, and creates a systemd unit.
+
+The only thing it requires is the LDAP admin password; the domain (base DN)
+defaults to `dc=example,dc=com` if you don't pass one:
 
 ```bash
-ldapadd -x -D "cn=admin,dc=example,dc=com" -W << 'EOF'
-dn: ou=policies,dc=example,dc=com
-objectClass: organizationalUnit
-ou: policies
-
-dn: cn=ppolicy,ou=policies,dc=example,dc=com
-objectClass: top
-objectClass: organizationalRole
-objectClass: pwdPolicy
-cn: ppolicy
-pwdAttribute: 2.5.4.35
-pwdLockout: FALSE
-pwdMustChange: FALSE
-pwdAllowUserChange: TRUE
-EOF
+sudo ./install.sh -p 'your-ldap-password' -b 'dc=yourdomain,dc=com'
+sudo systemctl enable --now sso-manager
+curl http://localhost:3001/health    # -> {"status":"ok"}
 ```
 
-Verify by locking a test account and confirming bind fails:
+Run `sudo ./install.sh -h` for all flags (`-n` org name, `-o` port, `-j` JWT
+secret, `-s` SMTP, `--skip-ldap` to use an existing LDAP, `--dry-run`). Re-run
+it to update. Full details in [DEPLOYMENT.md](DEPLOYMENT.md) under *Method 2:
+Bare metal*.
+
+## Architecture
+
+```
+┌─────────────┐
+│  Browser /  │
+│  OIDC apps  │
+└──────┬──────┘
+       │ HTTP/HTTPS
+       ▼
+┌────────────────────────┐      ┌─────────────┐
+│  Express SSO Manager   │◄────►│   Redis     │
+│  - OIDC provider       │      │ - sessions  │
+│  - web UI (:3001)      │      │ - models    │
+│  - management API      │      └─────────────┘
+└────────┬───────────────┘
+         │ ldapi/ldap (localhost)
+         ▼
+┌────────────────────────┐
+│  OpenLDAP (slapd)      │
+│  - users / groups      │
+│  - LDAPS :636          │─── legacy apps bind directly
+│  - StartTLS :389       │
+└────────────────────────┘
+```
+
+## Documentation
+
+The nitty LDAP details (overlay setup, the custom `theta42Person` schema, the
+required groups, LDAPS/TLS, direct-bind service accounts) live in:
+
+- [DEPLOYMENT.md](DEPLOYMENT.md) — Docker + bare metal, the config layers, the
+  `app_*` env reference, LDAPS/TLS, backups, troubleshooting.
+- [API.md](API.md) — the management API.
+- [docs/](docs/) (GitHub Pages) — the same content broken into
+  [deployment](docs/deployment.md), [configuration](docs/configuration.md),
+  [OAuth/OIDC](docs/oauth.md), and [LDAP](docs/ldap.md).
+
+If you are pointing the app at your own existing LDAP server, see
+*LDAP requirements* in [DEPLOYMENT.md](DEPLOYMENT.md) — the directory needs the
+`pw-sha2`, `ppolicy`, `memberof`, and `refint` modules plus a small custom
+schema. The bundled Docker image and `install.sh` set all of that up for you.
+Required groups: `app_sso_admin` (full admin), `app_sso_oauth_admin` (manage
+OAuth clients only), `app_sso_invite` (invitation management) — see
+DEPLOYMENT.md for the full setup.
+
+## Development
 
 ```bash
-ldapmodify -x -D "cn=admin,dc=example,dc=com" -W << 'EOF'
-dn: cn=testuser,ou=people,dc=example,dc=com
-changetype: modify
-replace: pwdAccountLockedTime
-pwdAccountLockedTime: 000001010000Z
-EOF
+cd nodejs
+npm install
+npm run dev      # nodemon auto-reload
+npm test         # jest test suite
 ```
 
-#### Custom schema (required for date of birth)
+## License
 
-User accounts store a `dateOfBirth` field (ISO 8601 `YYYY-MM-DD`) for age verification. This requires a custom attribute type and auxiliary objectClass to be loaded into the OpenLDAP schema before any accounts are created.
-
-**Load the schema:**
-
-```bash
-ldapadd -Y EXTERNAL -H ldapi:/// << 'EOF'
-dn: cn=theta42,cn=schema,cn=config
-objectClass: olcSchemaConfig
-cn: theta42
-olcAttributeTypes: ( 1.3.6.1.4.1.99999.1.1
-  NAME 'dateOfBirth'
-  DESC 'Date of birth in ISO 8601 format YYYY-MM-DD'
-  EQUALITY caseExactMatch
-  SUBSTR caseExactSubstringsMatch
-  SYNTAX 1.3.6.1.4.1.1466.115.121.1.15
-  SINGLE-VALUE )
-olcObjectClasses: ( 1.3.6.1.4.1.99999.2.1
-  NAME 'theta42Person'
-  DESC 'Theta42 SSO extended person attributes'
-  AUXILIARY
-  MAY ( dateOfBirth ) )
-EOF
-```
-
-Verify the schema loaded:
-
-```bash
-ldapsearch -Y EXTERNAL -H ldapi:/// -b "cn=theta42,cn=schema,cn=config" olcAttributeTypes olcObjectClasses
-```
-
-> **Note:** The OID prefix `1.3.6.1.4.1.99999` is used for internal/private schemas. If this deployment is ever connected to a federated directory, register a proper PEN at https://www.iana.org/assignments/enterprise-numbers and update the OIDs.
-
-#### Required LDAP groups
-
-| Group | Purpose |
-|-------|---------|
-| `app_sso_admin` | Full admin access: manage users, groups, OAuth clients |
-| `app_sso_oauth_admin` | Manage OAuth clients only |
-| `app_sso_invite` | Invitation management |
-
-## Logs (Docker)
-
-The all-in-one image runs the Node app and slapd (OpenLDAP) in one container,
-both writing to the container's stdout/stderr, so `docker compose logs` is the
-primary view (slapd runs with `-d 0`, so LDAP output is there too).
-
-```bash
-docker compose logs -f sso-manager          # app + slapd (stdout/stderr)
-# or, by container name:
-docker logs -f sso-manager
-
-docker compose logs --tail=200 --since=10m sso-manager   # recent context
-
-# Query the directory directly to confirm LDAP is healthy
-docker compose exec sso-manager ldapsearch -x -H ldap://localhost:389 \
-  -D "cn=admin,$LDAP_BASE_DN" -W -b "$LDAP_BASE_DN"
-```
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) → *Troubleshooting* for LDAP-specific errors.
+MIT — see [LICENSE](LICENSE).

@@ -54,7 +54,7 @@ with one command via [theta-env](https://github.com/theta42/theta-env):
 
 ```bash
 git clone --recursive https://github.com/theta42/theta-env.git
-cd theta-env && cp .env.example .env   # edit, then:
+cd theta-env && cp setup.env.example setup.env   # set CFG_DOMAIN to your domain, then:
 ./setup.sh
 ```
 
