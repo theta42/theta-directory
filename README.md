@@ -9,6 +9,12 @@ The server requires:
 * NodeJS 13.x
 * LDAP server
 
+> Setting up the whole stack (Docker) or want the secrets-file layout? See
+> [DEPLOYMENT.md](DEPLOYMENT.md) — your domain is entered **once**, as the LDAP
+> base DN (`stack.ldapBaseDn`); the LDAP DNs (`bindDN`/`userBase`/`groupBase`)
+> and `oauth.issuer` all derive from it and must stay consistent. Running the
+> unified `theta-env` stack, `setup.sh` fills those in for you from `setup.env`.
+
 ### OpenLDAP configuration
 
 #### Password hashing (required)

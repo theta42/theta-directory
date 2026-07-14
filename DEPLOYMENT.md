@@ -62,9 +62,21 @@ admin password, org, domain, cert CN, JWT secret) out of the same file. No
 `app_*` env is passed — `app_*` env would override `secrets.js` (env beats the
 file in `@simpleworkjs/conf`), so the file is kept authoritative.
 
-> Running the unified `theta-env` stack? Its `setup.sh` generates
-> `./config/sso-secrets.js` (+ `./config/proxy-secrets.js`) for you with random
-> secrets and snapshots state before rebuilds — see the theta-env README.
+> **Your domain is entered once, as the LDAP base DN.** Set `stack.ldapBaseDn`
+> (e.g. `dc=718it,dc=biz`) and keep the LDAP DNs consistent with it — they all
+> derive from that one value: `ldap.bindDN` = `cn=admin,<dn>`,
+> `ldap.userBase` = `ou=people,<dn>`, `ldap.groupBase` = `ou=groups,<dn>`,
+> and `stack.ldapDomain` = the dotted form (`718it.biz`). `oauth.issuer` is the
+> public SSO URL (`https://<ssoHost>`). Drifting these apart (e.g. leaving
+> `ldap.bindDN` at `dc=example,dc=com` while `stack.ldapBaseDn` is your real
+> domain) makes the SSO bind against a non-existent root DN and every login
+> fails with `Invalid Credentials`.
+>
+> Running the unified `theta-env` stack? You don't hand-edit these DNs at all
+> — its `setup.sh` generates `./config/sso-secrets.js` (+ `./config/proxy-secrets.js`)
+> from a single `setup.env` (where the domain is asked once, as the base DN) with
+> random secrets, and snapshots state before rebuilds — so the DNs can't drift.
+> See the theta-env README.
 
 **Quick test (defaults):** with no `./config/sso-secrets.js` the entrypoint
 falls back to env-mode with safe defaults (`dc=example,dc=com`, admin password
