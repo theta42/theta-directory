@@ -38,6 +38,7 @@ auth-token: <token>
 |-------|--------|
 | `app_sso_admin` | Full user/group/notification management |
 | `app_sso_oauth_admin` | Register and manage OAuth clients |
+| `app_sso_invite` | Invitation management |
 | Group owner | Manage membership of that specific group |
 
 Self-service: users can always read and modify their own account without admin membership.
@@ -116,7 +117,7 @@ Returns available username suggestions based on name and optional date of birth.
 
 **Response:**
 ```json
-{ "message": "If the emaill address is in our system, you will receive a message." }
+{ "message": "If the email address is in our system, you will receive a message." }
 ```
 
 The same response is returned whether or not the email exists. Reset tokens expire after 24 hours.
@@ -506,11 +507,90 @@ When an admin changes another user's password, `password_must_change` is set on 
 
 ### Generate Invite Token
 
-**`POST /api/user/invite`** — Any authenticated user
+Create an invite token, optionally emailing it to the invitee and pre-assigning
+LDAP groups the new account should be added to on signup.
+
+**`POST /api/user/invite`** — `app_sso_admin` or `app_sso_invite` required
+
+**Request:**
+```json
+{ "mail": "invitee@example.com", "groups": ["group_name"] }
+```
+
+`mail` and `groups` are both optional. If `mail` is provided, a verification
+email is sent to that address.
 
 **Response:**
 ```json
-{ "token": "invite_token_string" }
+{
+  "token": "invite_token_string",
+  "link": "https://your-domain.com/login/invite/invite_token_string",
+  "mail_sent": true
+}
+```
+
+---
+
+### List Invite Tokens
+
+**`GET /api/user/invite`** — `app_sso_admin` or `app_sso_invite` required
+
+Admins (`app_sso_admin`) see all invite tokens; non-admin `app_sso_invite`
+members see only invites they created.
+
+**Response:**
+```json
+{
+  "results": [
+    {
+      "token": "invite_token_string",
+      "created_by": "username",
+      "created_on": 1234567890000,
+      "is_valid": true,
+      "mail": "invitee@example.com",
+      "groups": "[\"group_name\"]"
+    }
+  ]
+}
+```
+
+---
+
+### Update Invite Token
+
+Update the groups an invite will assign, or change/clear the invitee's email
+(re-sends verification if a new email is set).
+
+**`PUT /api/user/invite/:token`** — `app_sso_admin`, or the `app_sso_invite`
+member who created the invite
+
+**URL Parameters:** `token` — invite token
+
+**Request:** Any subset of:
+```json
+{ "groups": ["group_name"], "mail": "newinvitee@example.com" }
+```
+
+Set `mail` to `null`/empty to clear it. Fails with `400` if the token is no
+longer valid.
+
+**Response:**
+```json
+{ "results": { "token": "invite_token_string", "is_valid": true, "...": "..." } }
+```
+
+---
+
+### Revoke Invite Token
+
+**`DELETE /api/user/invite/:token`** — `app_sso_admin`, or the `app_sso_invite`
+member who created the invite
+
+**URL Parameters:** `token` — invite token
+
+**Response:**
+```json
+{ "results": true }
 ```
 
 ---
@@ -831,7 +911,44 @@ Returns the OIDC discovery document with endpoint URLs, supported scopes, and si
 - `code_challenge` — PKCE challenge (SHA-256 of code_verifier, base64url-encoded)
 - `code_challenge_method` — Must be `S256`
 
-Renders the consent screen. On approval, redirects to `redirect_uri?code=<code>&state=<state>`.
+Renders the consent screen.
+
+---
+
+### Authorize (Issue Code)
+
+Issues the authorization code after the user approves the consent form shown
+by the Authorization Endpoint above. This is called by the consent page itself
+(an authenticated request, via `auth-token`), not by the OAuth client
+directly.
+
+**`POST /api/oauth/authorize`** — Auth required (`auth-token` header)
+
+**Request:**
+```json
+{
+  "response_type": "code",
+  "client_id": "uuid",
+  "redirect_uri": "https://ha.example.com/auth/external/callback",
+  "scope": "openid profile email",
+  "state": "opaque-state-value",
+  "code_challenge": "pkce-challenge",
+  "code_challenge_method": "S256"
+}
+```
+
+Only scopes the client is actually registered for are granted, even if more
+are requested. If the client has `allowed_groups` set, the authenticated user
+must be a member of at least one of those groups or the request is rejected
+with `403`.
+
+**Response:**
+```json
+{ "redirect_url": "https://ha.example.com/auth/external/callback?code=<code>&state=<state>" }
+```
+
+The caller (the consent page) redirects the browser to `redirect_url`, which
+completes the flow described in the Authorization Endpoint section above.
 
 ---
 
@@ -916,6 +1033,7 @@ All endpoints require authentication and `app_sso_oauth_admin` membership.
       "description": "Home automation",
       "redirect_uris": ["https://ha.example.com/auth/external/callback"],
       "scopes": ["openid", "profile", "email"],
+      "allowed_groups": [],
       "token_lifetime": { "access_token": 3600, "refresh_token": 2592000 },
       "created_by": "wmantly",
       "created_on": 1234567890000
@@ -937,11 +1055,13 @@ All endpoints require authentication and `app_sso_oauth_admin` membership.
   "description": "Home automation dashboard",
   "redirect_uris": ["https://ha.example.com/auth/external/callback"],
   "scopes": ["openid", "profile", "email"],
+  "allowed_groups": [],
   "token_lifetime": { "access_token": 3600, "refresh_token": 2592000 }
 }
 ```
 
 `redirect_uris` may also be a newline-separated string. `scopes` may also be a space-separated string.
+`allowed_groups` restricts the client to members of the listed SSO groups (empty/omitted = any valid user).
 
 **Response:**
 ```json
@@ -968,7 +1088,7 @@ The `client_secret` is shown **only once**. Store it immediately.
 
 **`PUT /api/oauth/client/:client_id`**
 
-**Request:** Any subset of `name`, `description`, `redirect_uris`, `scopes`, `token_lifetime`, `is_valid`.
+**Request:** Any subset of `name`, `description`, `redirect_uris`, `scopes`, `allowed_groups`, `token_lifetime`, `is_valid`.
 
 **Response:** `{ "results": { <updated client> }, "message": "..." }`
 
