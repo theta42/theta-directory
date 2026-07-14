@@ -66,7 +66,7 @@ router.post('/resetpassword', rateLimit.passwordReset, async function(req, res, 
 		console.info('resetpassword for', req.body.mail, 'sent')
 
 		return res.json({
-			message: 'If the emaill address is in our system, you will receive a message.'
+			message: 'If the email address is in our system, you will receive a message.'
 		});
 	}catch(error){
 		next(error);

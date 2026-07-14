@@ -1,12 +1,31 @@
 # SSO manager
 
 ## API docs
-[API docs](api.md)
+[API docs](API.md)
 
 ## Server set up
 
+### Recommended: Docker or install.sh
+
+The supported, tested deployment paths are **Docker** (an all-in-one image
+bundling the app + OpenLDAP + Redis) and the **`install.sh`** bare-metal
+installer for Debian/Ubuntu. Most users should start there:
+
+- [Deployment Guide](DEPLOYMENT.md) — Docker + bare metal, configuration
+  layers, backups, troubleshooting.
+- [docs/index.md](docs/index.md) — documentation home (also published as a
+  GitHub Pages site), with links to configuration, LDAP, and OAuth/OIDC docs.
+
+### Manual / advanced: raw OpenLDAP setup
+
+The rest of this section walks through configuring OpenLDAP by hand. This is
+the **manual/advanced path** — useful if you're pointing the app at an
+existing LDAP server, or want to understand exactly what `install.sh` and the
+Docker entrypoint automate for you. Most deployments should use Docker or
+`install.sh` above instead.
+
 The server requires:
-* NodeJS 13.x
+* NodeJS 20.x
 * LDAP server
 
 > Setting up the whole stack (Docker) or want the secrets-file layout? See
@@ -63,11 +82,11 @@ EOF
 
 **2. Add the overlay to your user database:**
 
-> ⚠️ The database index below (`{1}mdb`) is **not** the same on every install. Confirm yours first — the overlay must go on the database whose `olcSuffix` is your base DN, or account locking silently won't apply to your users:
+> Warning: The database index below (`{1}mdb`) is **not** the same on every install. Confirm yours first — the overlay must go on the database whose `olcSuffix` is your base DN, or account locking silently won't apply to your users:
 >
 > ```bash
 > ldapsearch -Q -Y EXTERNAL -H ldapi:/// -b cn=config \
->   '(&(objectClass=olcDatabaseConfig)(olcSuffix=dc=theta42,dc=com))' dn
+>   '(&(objectClass=olcDatabaseConfig)(olcSuffix=dc=example,dc=com))' dn
 > ```
 
 ```bash
@@ -76,7 +95,7 @@ dn: olcOverlay=ppolicy,olcDatabase={1}mdb,cn=config
 objectClass: olcOverlayConfig
 objectClass: olcPPolicyConfig
 olcOverlay: ppolicy
-olcPPolicyDefault: cn=ppolicy,ou=policies,dc=theta42,dc=com
+olcPPolicyDefault: cn=ppolicy,ou=policies,dc=example,dc=com
 olcPPolicyUseLockout: TRUE
 olcPPolicyHashCleartext: FALSE
 EOF
@@ -85,12 +104,12 @@ EOF
 **3. Create the policies container and default policy:**
 
 ```bash
-ldapadd -x -D "cn=admin,dc=theta42,dc=com" -W << 'EOF'
-dn: ou=policies,dc=theta42,dc=com
+ldapadd -x -D "cn=admin,dc=example,dc=com" -W << 'EOF'
+dn: ou=policies,dc=example,dc=com
 objectClass: organizationalUnit
 ou: policies
 
-dn: cn=ppolicy,ou=policies,dc=theta42,dc=com
+dn: cn=ppolicy,ou=policies,dc=example,dc=com
 objectClass: top
 objectClass: organizationalRole
 objectClass: pwdPolicy
@@ -105,8 +124,8 @@ EOF
 Verify by locking a test account and confirming bind fails:
 
 ```bash
-ldapmodify -x -D "cn=admin,dc=theta42,dc=com" -W << 'EOF'
-dn: cn=testuser,ou=people,dc=theta42,dc=com
+ldapmodify -x -D "cn=admin,dc=example,dc=com" -W << 'EOF'
+dn: cn=testuser,ou=people,dc=example,dc=com
 changetype: modify
 replace: pwdAccountLockedTime
 pwdAccountLockedTime: 000001010000Z
@@ -153,6 +172,7 @@ ldapsearch -Y EXTERNAL -H ldapi:/// -b "cn=theta42,cn=schema,cn=config" olcAttri
 |-------|---------|
 | `app_sso_admin` | Full admin access: manage users, groups, OAuth clients |
 | `app_sso_oauth_admin` | Manage OAuth clients only |
+| `app_sso_invite` | Invitation management |
 
 ## Logs (Docker)
 

@@ -2,8 +2,8 @@
 
 Two supported deployment methods:
 
-1. **Docker** — a single all-in-one image bundling the app + OpenLDAP (`docker compose up`).
-2. **Bare metal** — `install.sh` on Debian/Ubuntu (installs Node.js, OpenLDAP, the app, and a systemd unit).
+1. **Docker** — a single all-in-one image bundling the app + OpenLDAP + Redis (`docker compose up`).
+2. **Bare metal** — `install.sh` on Debian/Ubuntu (installs Node.js, OpenLDAP, Redis, the app, and a systemd unit).
 
 ## How configuration works
 
@@ -39,7 +39,7 @@ as raw strings otherwise. Examples:
 
 ## Method 1: Docker (all-in-one)
 
-The image (`Dockerfile.openldap`) bundles OpenLDAP and the app in one container.
+The image (`Dockerfile.openldap`) bundles OpenLDAP, Redis, and the app in one container.
 The app connects to the bundled slapd over `localhost:389` automatically; you only
 need to set a few secrets.
 
