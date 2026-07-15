@@ -22,6 +22,9 @@
 				<div class="mb-3">
 					<label class="form-label">Redirect URIs <small class="text-muted">(one per line)</small></label>
 					<textarea id="edit-redirect_uris" class="form-control shadow font-monospace" rows="3"></textarea>
+					<small class="field-help text-muted d-block">
+						<code>*</code> matches one hostname label, <code>**</code> matches any number of labels.
+					</small>
 				</div>
 				<div class="mb-3">
 					<label class="form-label">Scopes</label>
@@ -271,6 +274,12 @@
 						<label class="form-label">Redirect URIs <small class="text-muted">(one per line)</small></label>
 						<textarea class="form-control shadow font-monospace" name="redirect_uris" rows="3"
 							placeholder="https://ha.example.com/auth/external/callback" validate=":1"></textarea>
+						<small class="field-help text-muted d-block">
+							<code>*</code> matches one hostname label and <code>**</code> matches any
+							number of labels, e.g. <code>https://*.example.com/__proxy_auth/callback</code>
+							covers every host theta42/proxy fronts under example.com without registering
+							each one individually.
+						</small>
 					</div>
 					<div class="mb-3">
 						<label class="form-label">Scopes</label>

@@ -36,7 +36,11 @@ An OAuth client represents an app that authenticates against the SSO. Each has:
 - `client_id` (UUID) + `client_secret` (bcrypt-hashed; the **raw secret is
   shown once** when the client is created or rotated — save it immediately).
 - `name`, `description`, `created_by` (the admin uid that created it).
-- `redirect_uris` — allowed callback URLs (must match exactly).
+- `redirect_uris` — allowed callback URLs. Each entry matches exactly, or may
+  use `*` (one hostname label) / `**` (any number of labels) as a wildcard —
+  e.g. `https://*.example.com/__proxy_auth/callback` covers every host
+  theta42/proxy fronts under `example.com`, so you don't have to register
+  each proxied host's callback individually.
 - `scopes` — requested scopes (default `openid profile email groups`).
 - `allowed_groups` — restrict the client to members of specific SSO groups
   (empty = any valid user).
