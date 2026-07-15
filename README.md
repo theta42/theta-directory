@@ -19,11 +19,11 @@ phone-home, no hosted control plane, and no per-user pricing.
 
 | Dashboard | Users |
 | --- | --- |
-| ![Dashboard](docs/images/dashboard.png) | ![User list](docs/images/users.png) |
+| [![Dashboard](docs/images/dashboard.png)](docs/images/dashboard.png) | [![User list](docs/images/users.png)](docs/images/users.png) |
 
 | Groups | OAuth Apps |
 | --- | --- |
-| ![Groups](docs/images/groups.png) | ![OAuth clients](docs/images/oauth-clients.png) |
+| [![Groups](docs/images/groups.png)](docs/images/groups.png) | [![OAuth clients](docs/images/oauth-clients.png)](docs/images/oauth-clients.png) |
 
 ## Features
 
