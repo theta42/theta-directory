@@ -13,6 +13,18 @@ phone-home, no hosted control plane, and no per-user pricing.
 > in front of it) with one command? Skip to [theta-env](https://github.com/theta42/theta-env)
 > — its `setup.sh` wires the two together and generates the config for you.
 
+**Documentation:** [https://theta42.github.io/sso-manager-node/](https://theta42.github.io/sso-manager-node/)
+
+## Screenshots
+
+| Dashboard | Users |
+| --- | --- |
+| ![Dashboard](docs/images/dashboard.png) | ![User list](docs/images/users.png) |
+
+| Groups | OAuth Apps |
+| --- | --- |
+| ![Groups](docs/images/groups.png) | ![OAuth clients](docs/images/oauth-clients.png) |
+
 ## Features
 
 - **OpenID Connect / OAuth 2.0 provider** — issue your own access, refresh, and
