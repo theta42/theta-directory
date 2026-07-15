@@ -1,0 +1,155 @@
+<%- include('top') %>
+
+<script type="text/javascript">
+	app.auth.forceLogin('app_sso_admin');
+
+	function copyField(id, btn){
+		var el = document.getElementById(id);
+		if(!el) return;
+		el.select(); el.setSelectionRange(0, 99999); document.execCommand('copy');
+		if(btn){ var $i = $(btn).find('i'), prev = $i.attr('class');
+			$i.attr('class', 'fa-solid fa-check'); setTimeout(function(){ $i.attr('class', prev); }, 1200); }
+	}
+</script>
+
+<h4><i class="fa-solid fa-network-wired"></i> LDAP Info</h4>
+<p class="text-muted">
+	Everything a 3rd-party app or host needs to bind this directory, filled in
+	for <b><%= ssoUrl %></b>.
+</p>
+
+<div class="row g-3">
+	<div class="col-lg-6">
+		<div class="card shadow-lg">
+			<div class="card-header shadow">
+				<i class="fa-solid fa-circle-info"></i> Connection details
+			</div>
+			<div class="card-body">
+				<p class="text-muted small">
+					For a single app's own "LDAP authentication" settings — see
+					<a href="https://theta42.github.io/sso-manager-node/ldap.html#connecting-a-3rd-party-app-or-container" target="_blank">Connecting a 3rd-party app or container</a>
+					for a field-by-field walkthrough (Gitea, generic Docker <code>LDAP_*</code> env vars, …).
+				</p>
+				<dl class="row mb-0">
+					<dt class="col-sm-4">LDAPS URL</dt>
+					<dd class="col-sm-8">
+						<div class="input-group input-group-sm">
+							<input type="text" id="f-ldapsUrl" class="form-control font-monospace" readonly value="<%= ldapsUrl %>">
+							<button class="btn btn-outline-secondary" type="button" onclick="copyField('f-ldapsUrl', this)" title="Copy"><i class="fa-solid fa-copy"></i></button>
+						</div>
+					</dd>
+
+					<dt class="col-sm-4">Base DN</dt>
+					<dd class="col-sm-8">
+						<div class="input-group input-group-sm">
+							<input type="text" id="f-baseDn" class="form-control font-monospace" readonly value="<%= baseDn %>">
+							<button class="btn btn-outline-secondary" type="button" onclick="copyField('f-baseDn', this)" title="Copy"><i class="fa-solid fa-copy"></i></button>
+						</div>
+					</dd>
+
+					<dt class="col-sm-4">User search base</dt>
+					<dd class="col-sm-8">
+						<div class="input-group input-group-sm">
+							<input type="text" id="f-userBase" class="form-control font-monospace" readonly value="<%= userBase %>">
+							<button class="btn btn-outline-secondary" type="button" onclick="copyField('f-userBase', this)" title="Copy"><i class="fa-solid fa-copy"></i></button>
+						</div>
+					</dd>
+
+					<dt class="col-sm-4">Group search base</dt>
+					<dd class="col-sm-8">
+						<div class="input-group input-group-sm">
+							<input type="text" id="f-groupBase" class="form-control font-monospace" readonly value="<%= groupBase %>">
+							<button class="btn btn-outline-secondary" type="button" onclick="copyField('f-groupBase', this)" title="Copy"><i class="fa-solid fa-copy"></i></button>
+						</div>
+					</dd>
+
+					<dt class="col-sm-4">User filter</dt>
+					<dd class="col-sm-8">
+						<div class="input-group input-group-sm">
+							<input type="text" id="f-userFilter" class="form-control font-monospace" readonly value="<%= userFilter %>">
+							<button class="btn btn-outline-secondary" type="button" onclick="copyField('f-userFilter', this)" title="Copy"><i class="fa-solid fa-copy"></i></button>
+						</div>
+					</dd>
+
+					<dt class="col-sm-4">Username attribute</dt>
+					<dd class="col-sm-8">
+						<div class="input-group input-group-sm">
+							<input type="text" id="f-userNameAttribute" class="form-control font-monospace" readonly value="<%= userNameAttribute %>">
+							<button class="btn btn-outline-secondary" type="button" onclick="copyField('f-userNameAttribute', this)" title="Copy"><i class="fa-solid fa-copy"></i></button>
+						</div>
+					</dd>
+
+					<dt class="col-sm-4">Example bind DN</dt>
+					<dd class="col-sm-8">
+						<div class="input-group input-group-sm">
+							<input type="text" id="f-bindDn" class="form-control font-monospace" readonly value="<%= exampleBindDn %>">
+							<button class="btn btn-outline-secondary" type="button" onclick="copyField('f-bindDn', this)" title="Copy"><i class="fa-solid fa-copy"></i></button>
+						</div>
+						<small class="field-help text-muted d-block">
+							A read-only bind account — create it as a plain user via
+							<a href="/users">Users</a> (don't put it in <code>app_sso_admin</code>
+							or any other privileged group).
+						</small>
+					</dd>
+				</dl>
+			</div>
+		</div>
+	</div>
+
+	<div class="col-lg-6">
+		<div class="card shadow-lg">
+			<div class="card-header shadow">
+				<i class="fa-solid fa-terminal"></i> Set up a Linux host (ldap-client)
+			</div>
+			<div class="card-body">
+				<p class="text-muted small">
+					For full host login, SSH keys, and sudo via LDAP (not just one app) —
+					clone <a href="https://github.com/theta42/ldap-client" target="_blank">theta42/ldap-client</a>
+					and run this on the host. Fill in the bind account's password and,
+					if you want this host's access/sudo groups auto-registered, an
+					<a href="/">API token</a> from your Profile.
+				</p>
+				<div class="input-group">
+					<textarea id="f-bashSnippet" class="form-control font-monospace" rows="16" readonly style="font-size:.8rem"></textarea>
+				</div>
+				<button class="btn btn-outline-secondary btn-sm mt-2" type="button" onclick="copyField('f-bashSnippet', this)">
+					<i class="fa-solid fa-copy"></i> Copy
+				</button>
+			</div>
+		</div>
+	</div>
+</div>
+
+<script type="text/javascript">
+	(function(){
+		var lines = [
+			'git clone https://github.com/theta42/ldap-client.git',
+			'cd ldap-client',
+			'cat > ldap.vars << \'EOF\'',
+			'export ldap_host="<%= ldapHost %>"',
+			'export ldap_base_dn="<%= baseDn %>"',
+			'',
+			'# A read-only service account -- create it via Users (a plain user,',
+			'# not the admin DN), then fill in its password below.',
+			'export ldap_bind_dn="<%= exampleBindDn %>"',
+			'export ldap_bind_password="CHANGE-ME"',
+			'',
+			'# Optional: auto-register this host\'s access/sudo groups in the SSO',
+			'# Manager. Create a personal access token under Profile > API Tokens',
+			'# and paste it here; leave blank to skip.',
+			'export sso_url="<%= ssoUrl %>"',
+			'export sso_token=""',
+			'',
+			'# Optional: set this if you run ldap-client against more than one site.',
+			'export ldap_location=""',
+			'',
+			'ldap_access_groups=( "${ldap_location}_access" "${ldap_location}_host_$(hostname)_access" )',
+			'EOF',
+			'',
+			'sudo ./index.sh',
+		];
+		document.getElementById('f-bashSnippet').value = lines.join('\n');
+	})();
+</script>
+
+<%- include('bottom') %>
