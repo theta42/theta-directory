@@ -95,7 +95,10 @@ The entrypoint leaves existing certs untouched (idempotent).
 For apps that bind LDAP directly, create a dedicated **service account** under
 `ou=people` (e.g. `cn=ldapclient,ou=people,<base>`) with a strong password —
 **don't reuse the admin DN**. The theta-env bootstrap creates this account
-automatically (`cn=ldapclient`) and the proxy binds as it.
+automatically (`cn=ldapclient`) and the proxy binds as it. For anything else,
+create a normal user via the Users page (or `POST /api/user`) and just don't
+put it in `app_sso_admin` or any other privileged group — a plain
+`posixAccount` with a strong password is all a read-only bind account needs.
 
 Example bind test:
 
@@ -104,6 +107,71 @@ ldapsearch -x -H ldaps://sso.example.com:636 \
   -D "cn=ldapclient,ou=people,dc=yourdomain,dc=com" -W \
   -b "ou=people,dc=yourdomain,dc=com" '(objectClass=posixAccount)' cn mail
 ```
+
+## Connecting a 3rd-party app or container
+
+Most self-hosted apps with an "LDAP authentication" settings page — Gitea,
+Nextcloud, Grafana, Emby, Jenkins, etc. — or containers configured via
+`LDAP_*` env vars, all ask for the same handful of values. These are the
+`conf.ldap` values from [Configuration](configuration.html), applied to
+*your* domain:
+
+| Field the app asks for | Value |
+|---|---|
+| Host / URL | `ldaps://<your-sso-host>:636` (preferred), or `ldap://<host>:389` + StartTLS |
+| Bind DN | a dedicated service account — e.g. `cn=ldapclient,ou=people,<base>` (see above) |
+| Bind password | that service account's password |
+| User search base | `ou=people,<base>` |
+| User search filter | `(objectClass=posixAccount)` |
+| Username attribute | `uid` |
+| Email attribute | `mail` |
+| Group search base | `ou=groups,<base>` |
+| Group membership attribute | `memberOf` (on the user entry — populated by the `memberof` overlay) |
+| TLS | required for 636 (LDAPS); if using the bundled self-signed cert, either trust it (see *TLS* above) or set the app's "don't verify cert" option for LAN-only use |
+
+### Worked example: Gitea
+
+Gitea's **Admin → Authentication Sources → Add Authentication Source** (type
+LDAP, "Bind DN/Password") maps directly:
+
+- Security Protocol: `LDAPS`
+- Host / Port: your SSO host / `636`
+- Bind DN: `cn=ldapclient,ou=people,dc=yourdomain,dc=com`
+- Bind Password: the service account's password
+- User Search Base: `ou=people,dc=yourdomain,dc=com`
+- User Filter: `(&(objectClass=posixAccount)(uid=%s))`
+- Username Attribute: `uid`
+- E-mail Attribute: `mail`
+
+Other apps with an LDAP settings UI follow the same shape — the field names
+above are the constants; only the base DN and hostname change per deployment.
+
+### Generic Docker container (`LDAP_*` env vars)
+
+For images that take a flat env-var LDAP config (there's no single standard,
+but most look like this):
+
+```yaml
+environment:
+  LDAP_URL: ldaps://sso.example.com:636
+  LDAP_BIND_DN: cn=ldapclient,ou=people,dc=yourdomain,dc=com
+  LDAP_BIND_PASSWORD: <service-account-password>
+  LDAP_USER_BASE: ou=people,dc=yourdomain,dc=com
+  LDAP_USER_FILTER: (objectClass=posixAccount)
+  LDAP_GROUP_BASE: ou=groups,dc=yourdomain,dc=com
+```
+
+Check the specific image's docs for its actual variable names — the values
+you plug in are still the ones from the table above.
+
+### Full Linux host auth (SSH, sudo, login) instead of a single app
+
+If you want a *host* (not just one app) to authenticate logins, SSH keys, and
+sudo against this LDAP directory — not just one application — that's a
+different integration (SSSD + PAM + NSS, not a single bind). See
+[theta42/ldap-client](https://github.com/theta42/ldap-client): a script that
+configures SSSD on Ubuntu/Debian hosts against this directory, including
+group-based access control and SSH public key retrieval from LDAP.
 
 ## Modules + overlays (external LDAP servers)
 
