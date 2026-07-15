@@ -29,6 +29,8 @@ raw strings otherwise.
 | `app_ldap__url=ldap://host:389` | `conf.ldap.url` | string |
 | `app_ldap__bindPassword=secret` | `conf.ldap.bindPassword` | string |
 | `app_ldap__userBase=ou=people,dc=…` | `conf.ldap.userBase` | string |
+| `app_ldap__uidGidMin=1500` | `conf.ldap.uidGidMin` | number (new-user id floor) |
+| `app_ldap__uidGidReservedFloor=9000` | `conf.ldap.uidGidReservedFloor` | number (ids at/above this are ignored when allocating) |
 | `app_oauth__jwtSecret=...` | `conf.oauth.jwtSecret` | string |
 | `app_oauth__issuer=https://sso.example.com` | `conf.oauth.issuer` | string |
 | `app_oauth__token_lifetime__access_token=3600` | `conf.oauth.token_lifetime.access_token` | number |

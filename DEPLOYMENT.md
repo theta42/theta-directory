@@ -23,6 +23,7 @@ as raw strings otherwise. Examples:
 |---------|------|------|
 | `app_ldap__url=ldap://host:389` | `conf.ldap.url` | string |
 | `app_ldap__bindPassword=secret` | `conf.ldap.bindPassword` | string |
+| `app_ldap__uidGidMin=1500` | `conf.ldap.uidGidMin` | number (new-user id floor) |
 | `app_oauth__jwtSecret=...` | `conf.oauth.jwtSecret` | string |
 | `app_smtp__secure=false` | `conf.smtp.secure` | boolean |
 | `app_oauth__token_lifetime__access_token=3600` | `conf.oauth.token_lifetime.access_token` | number |

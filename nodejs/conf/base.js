@@ -20,7 +20,16 @@ module.exports = {
 		userBase: 'ou=people,dc=example,dc=com',
 		groupBase: 'ou=groups,dc=example,dc=com',
 		userFilter: '(objectClass=posixAccount)',
-		userNameAttribute: 'uid'
+		userNameAttribute: 'uid',
+		// New users/personal groups (see addPosixAccount/addPosixGroup in
+		// models/user_ldap.js) get the next uid/gidNumber >= uidGidMin.
+		// Existing entries >= uidGidReservedFloor are ignored when computing
+		// that "next available" number, so a deliberately high, easily
+		// recognizable id (e.g. the bootstrap admin at 10000 — see
+		// theta-env's bootstrap.js) doesn't drag every real user's id up
+		// into that same range.
+		uidGidMin: 1500,
+		uidGidReservedFloor: 9000,
 	},
 	oauth: {
 		issuer: '', // falls back to the request host at runtime (routes/index.js)

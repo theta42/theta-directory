@@ -45,6 +45,23 @@ function escapeLDAPSearchValue(val) {
               .replace(/\0/g, '\\00');
 }
 
+// Compute the next available uid/gidNumber: the highest existing value below
+// conf.uidGidReservedFloor, plus one -- or conf.uidGidMin if there are no
+// such entries yet. Entries at/above the reserved floor (e.g. a bootstrap
+// admin deliberately given a high, easily-recognizable id -- see
+// theta-env's bootstrap.js) are ignored, so they don't drag every real
+// user's id up into that same range. Math.max() on an empty array is
+// -Infinity in JS, not 0 -- without the explicit floor here, a fresh
+// directory with zero existing entries produces an invalid ("-Infinity")
+// LDAP attribute value and the add fails with InvalidSyntaxError.
+function nextPosixId(entries, key){
+	const existing = entries
+		.map(i => Number(i[key]))
+		.filter(n => Number.isFinite(n) && n < conf.uidGidReservedFloor);
+
+	return String(Math.max(conf.uidGidMin - 1, ...existing) + 1);
+}
+
 async function addPosixGroup(client, data){
 
   try{
@@ -53,7 +70,7 @@ async function addPosixGroup(client, data){
 	  filter: '(&(objectClass=posixGroup))',
 	})).searchEntries;
 
-	data.gidNumber = (Math.max(...groups.map(i => i.gidNumber))+1)+'';
+	data.gidNumber = nextPosixId(groups, 'gidNumber');
 
 	await client.add(`cn=${data.cn},${conf.groupBase}`, {
 	  cn: data.cn,
@@ -75,7 +92,7 @@ async function addPosixAccount(client, data){
 		filter: conf.userFilter,
 	})).searchEntries;
 
-	data.uidNumber = (Math.max(...people.map(i => i.uidNumber))+1)+'';
+	data.uidNumber = nextPosixId(people, 'uidNumber');
 
 	const entry = {
 		cn: data.cn,
@@ -742,7 +759,7 @@ User.login = async function(data){
 };
 
 
-module.exports = {User, hashPasswordSSHA512};
+module.exports = {User, hashPasswordSSHA512, nextPosixId};
 
 
 // (async function(){
