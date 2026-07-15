@@ -82,6 +82,34 @@ router.get('/oauth-clients', function(req, res, next) {
   res.render('oauth_clients', {...values, issuer, discoveryUrl: `${issuer}/.well-known/openid-configuration`});
 });
 
+// Everything a 3rd-party app or the ldap-client host script needs to bind
+// this directory, derived from the running config + request host rather than
+// hardcoded in a doc -- so it's always right for *this* deployment.
+router.get('/ldap-info', function(req, res, next) {
+  const issuer = ((conf.oauth && conf.oauth.issuer) || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+  const ldapHost = issuer.replace(/^https?:\/\//, '').replace(/:\d+$/, '');
+
+  const userBase = (conf.ldap && conf.ldap.userBase) || 'ou=people,dc=example,dc=com';
+  const groupBase = (conf.ldap && conf.ldap.groupBase) || 'ou=groups,dc=example,dc=com';
+  // The base DN isn't stored as its own config value -- derive it by
+  // stripping the leading "ou=...," off userBase (ou=people,dc=example,dc=com
+  // -> dc=example,dc=com).
+  const baseDn = userBase.replace(/^ou=[^,]+,/i, '');
+
+  res.render('ldap_info', {
+    ...values,
+    ldapHost,
+    ldapsUrl: `ldaps://${ldapHost}:636`,
+    baseDn,
+    userBase,
+    groupBase,
+    userFilter: (conf.ldap && conf.ldap.userFilter) || '(objectClass=posixAccount)',
+    userNameAttribute: (conf.ldap && conf.ldap.userNameAttribute) || 'uid',
+    exampleBindDn: `cn=ldapclient,${userBase}`,
+    ssoUrl: issuer,
+  });
+});
+
 // API Tokens is now a section on the Profile page (own profile only).
 router.get('/api-tokens', (req, res) => res.redirect(301, '/'));
 
