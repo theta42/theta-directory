@@ -1,7 +1,6 @@
 'use strict';
 
 const crypto = require('crypto');
-const { execSync } = require('child_process');
 const jwt = require('jsonwebtoken');
 const express = require('express');
 const conf = require('@simpleworkjs/conf');
@@ -9,22 +8,17 @@ const { OAuthClient } = require('../models/oauth_client');
 const { OAuthCode, OAuthAccessToken, OAuthRefreshToken } = require('../models/oauth_code');
 const { User } = require('../models/user');
 const { Group } = require('../models/group_ldap');
+const buildInfo = require('../utils/build_info');
 
 const oauthConf = conf.oauth || {};
 const issuer = oauthConf.issuer || `http://localhost:${conf.port || 3000}`;
 const jwtSecret = oauthConf.jwtSecret || 'change-me-in-secrets';
 
-const { version: buildVersion } = require('../package.json');
-let buildHash = 'unknown';
-try { buildHash = execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch(_) {}
-
 const pageLocals = {
 	title: conf.environment !== 'production' ? 'dev' : '',
 	titleIcon: conf.environment !== 'production' ? '<i class="fa-brands fa-dev"></i>' : '',
 	name: conf.name,
-	buildVersion,
-	buildHash,
-	buildYear: new Date().getFullYear(),
+	...buildInfo,
 };
 
 // --- helpers ---

@@ -2,26 +2,21 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 var express = require('express');
 var router = express.Router();
 const moment = require('moment');
 const {marked} = require('marked');
 const {InviteToken, PasswordResetToken} = require('./../models/token');
 const conf = require('@simpleworkjs/conf');
+const buildInfo = require('../utils/build_info');
 
 const tosHtml = marked(fs.readFileSync(path.join(__dirname, '../../tos.md'), 'utf8'));
-const { version: buildVersion } = require('../package.json');
-let buildHash = 'unknown';
-try { buildHash = execSync('git rev-parse --short HEAD', { cwd: __dirname }).toString().trim(); } catch(_) {}
 
 const values ={
   title: conf.environment !== 'production' ? `dev` : '',
   titleIcon: conf.environment !== 'production' ? `<i class="fa-brands fa-dev"></i>` : '',
   name: conf.name,
-  buildVersion,
-  buildHash,
-  buildYear: new Date().getFullYear(),
+  ...buildInfo,
 }
 
 // List of front end node modules to be served
