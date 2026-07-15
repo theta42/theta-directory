@@ -3,6 +3,7 @@
 const path = require('path');
 const ejs = require('ejs')
 const express = require('express');
+const compression = require('compression');
 
 // Set up the express app.
 const app = express();
@@ -40,8 +41,15 @@ app.onListen.push(function(){
   });
 }); 
 
+// Gzip text responses (HTML/JS/CSS/JSON). The admin UI loads ~13 separate,
+// uncompressed vendor JS/CSS files on every full page navigation (a
+// traditional multi-page app, not an SPA) — this alone meaningfully cuts
+// bytes-over-the-wire and perceived load time on a real network, where it
+// matters far more than on localhost.
+app.use(compression());
+
 // load the JSON parser middleware. Express will parse JSON into native objects
-// for any request that has JSON in its content type. 
+// for any request that has JSON in its content type.
 app.use(express.json());
 app.set('trust proxy', 1);
 
@@ -50,8 +58,9 @@ app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'ejs');
 
 // Have express server static content( images, CSS, browser JS) from the public
-// local folder.
-app.use('/static', express.static(path.join(__dirname, 'public')))
+// local folder. maxAge is short since this is the app's own JS/CSS, which
+// changes on every deploy and isn't cache-busted/fingerprinted.
+app.use('/static', express.static(path.join(__dirname, 'public'), {maxAge: '1h'}))
 
 // Routes for front end content.
 app.use('/', require('./routes/index'));

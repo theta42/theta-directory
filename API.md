@@ -905,7 +905,9 @@ Returns the OIDC discovery document with endpoint URLs, supported scopes, and si
 **Query Parameters:**
 - `response_type` — Must be `code`
 - `client_id` — Registered OAuth client ID
-- `redirect_uri` — Must exactly match a URI registered for the client
+- `redirect_uri` — Must match a URI registered for the client, either exactly
+  or against a registered wildcard pattern (`*` = one hostname label, `**` =
+  any number of labels)
 - `scope` — Space-separated: `openid`, `profile`, `email`
 - `state` — Opaque value returned unchanged in the redirect
 - `code_challenge` — PKCE challenge (SHA-256 of code_verifier, base64url-encoded)
