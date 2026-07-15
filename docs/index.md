@@ -9,6 +9,16 @@ A self-hosted **OpenID Connect provider** with a bundled **OpenLDAP directory**
 and a web management UI — for home labs and small businesses that want their
 own identity provider instead of a hosted one.
 
+## Screenshots
+
+| Dashboard | Users |
+| --- | --- |
+| ![Dashboard](images/dashboard.png) | ![User list](images/users.png) |
+
+| Groups | OAuth Apps |
+| --- | --- |
+| ![Groups](images/groups.png) | ![OAuth clients](images/oauth-clients.png) |
+
 ## Features
 
 - **OpenID Connect / OAuth 2.0 provider** — issue your own access/refresh/id
