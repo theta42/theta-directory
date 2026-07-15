@@ -9,33 +9,54 @@ A self-hosted **OpenID Connect provider** with a bundled **OpenLDAP directory**
 and a web management UI — for home labs and small businesses that want their
 own identity provider instead of a hosted one.
 
+One place to manage your users and groups, one login (OIDC) your modern apps
+can use, and one LDAP directory your older or odder apps can bind to directly.
+Everything runs on your own hardware; no phone-home, no hosted control plane,
+no per-user pricing.
+
+Part of the theta42 self-hosted identity stack, alongside
+[Proxy](https://theta42.github.io/proxy/) (an OIDC + LDAP-aware reverse proxy)
+and [theta-env](https://theta42.github.io/theta-env/) (the two composed with
+one command).
+
 ## Screenshots
 
-| Dashboard | Users |
-| --- | --- |
-| ![Dashboard](images/dashboard.png) | ![User list](images/users.png) |
+<a href="images/dashboard.png" target="_blank"><img src="images/dashboard.png" alt="Dashboard" width="49%"></a>
+<a href="images/users.png" target="_blank"><img src="images/users.png" alt="User list" width="49%"></a>
+<a href="images/groups.png" target="_blank"><img src="images/groups.png" alt="Groups" width="49%"></a>
+<a href="images/oauth-clients.png" target="_blank"><img src="images/oauth-clients.png" alt="OAuth clients" width="49%"></a>
 
-| Groups | OAuth Apps |
-| --- | --- |
-| ![Groups](images/groups.png) | ![OAuth clients](images/oauth-clients.png) |
+*(click any screenshot to view full size)*
+
+## Why this over the alternatives
+
+Tools like Keycloak, Authentik, Authelia, or Zitadel are OIDC providers, but
+LDAP is either a paid feature, a federation target you have to run
+separately, or absent. If your stack already has apps that speak LDAP
+directly — or you just want one real directory as the source of truth — you
+end up running *two* identity systems and keeping them in sync.
+
+SSO Manager bundles the OpenLDAP directory with the OIDC provider, so OIDC
+apps and LDAP apps read from the same users and groups. The trade-off is
+scope: it's intentionally small and self-hosted, not an enterprise IAM suite.
+If you want a lightweight, self-contained identity provider with a real LDAP
+backend, that's the niche.
 
 ## Features
 
-- **OpenID Connect / OAuth 2.0 provider** — issue your own access/refresh/id
-  tokens; protect your apps with OIDC login.
-- **OpenLDAP directory** — users, groups, POSIX accounts (`posixAccount`/
-  `inetOrgPerson`), SSH public keys, and sudo roles, with `memberOf` +
-  referential-integrity overlays.
-- **Web management UI** — manage users, groups, and OAuth clients from a
-  browser; invite/password-reset flows over email.
-- **LDAPS for legacy apps** — apps that bind LDAP directly (Gitea, Emby, …)
-  can use LDAPS (636) / StartTLS.
+- **OpenID Connect / OAuth 2.0 provider** — your own access/refresh/ID
+  tokens; standard discovery document at `/.well-known/openid-configuration`.
+- **Bundled OpenLDAP directory** — users, groups, POSIX accounts, SSH public
+  keys, and sudo roles, with `memberOf` + referential-integrity overlays.
+- **Web management UI** — users, groups, and OAuth clients from a browser;
+  invite and password-reset flows over email; self-service profile + API
+  tokens.
+- **LDAPS for legacy apps** — anything that binds LDAP directly (Gitea,
+  Emby, …) uses LDAPS/StartTLS against the same directory.
 - **All-in-one Docker image** — app + OpenLDAP + Redis in one container, or
-  run each piece separately via `app_*` env config.
+  run the pieces separately via `app_*` env config.
 
-## Quick Start
-
-### Docker (all-in-one)
+## Get it
 
 ```bash
 git clone https://github.com/theta42/sso-manager-node.git
@@ -44,72 +65,14 @@ cp secrets.js.example nodejs/conf/secrets.js   # edit it, or use app_* env
 docker compose up -d --build
 ```
 
-The web UI comes up at `http://localhost:3001`. See the
-[Deployment Guide](deployment.html) for the full set of `app_*` env vars.
+That's the standalone quick start. For the full set of install options
+(Docker, bare-metal, or as part of the combined SSO + proxy stack), the
+`app_*` env reference, and the OAuth/LDAP internals, see the
+**[GitHub repository](https://github.com/theta42/sso-manager-node)**.
 
-### Bare metal (Debian/Ubuntu)
+## Related projects
 
-```bash
-sudo ./install.sh
-```
-
-Idempotent installer — installs Node.js, OpenLDAP, Redis, configures the app,
-and starts a systemd unit. Re-run to update.
-
-### Run it together with the proxy
-
-The proxy ([theta42/proxy](https://github.com/theta42/proxy)) fronts this SSO
-under TLS and protects it with OIDC, while also binding LDAP directly. Run both
-with one command via [theta-env](https://github.com/theta42/theta-env):
-
-```bash
-git clone --recursive https://github.com/theta42/theta-env.git
-cd theta-env && cp setup.env.example setup.env   # set CFG_DOMAIN to your domain, then:
-./setup.sh
-```
-
-## Documentation
-
-- [Deployment Guide](deployment.html) — Docker + bare metal, the config layers,
-  the `app_*` env reference, backups.
-- [Configuration](configuration.html) — every `app_*` env var and the conf
-  merge order.
-- [OAuth / OIDC](oauth.html) — the provider: discovery, client management,
-  token lifetimes, scopes.
-- [LDAP](ldap.html) — directory layout, TLS, overlays, schema, direct-bind
-  service accounts.
-
-## Architecture
-
-```
-┌─────────────┐
-│  Browser /  │
-│  OIDC apps  │
-└──────┬──────┘
-       │ HTTP/HTTPS
-       ▼
-┌────────────────────────┐      ┌─────────────┐
-│  Express SSO Manager   │◄────►│   Redis     │
-│  - OIDC provider       │      │ - sessions  │
-│  - web UI (:3001)      │      │ - models    │
-│  - management API      │      └─────────────┘
-└────────┬───────────────┘
-         │ ldapi/ldap (localhost)
-         ▼
-┌────────────────────────┐
-│  OpenLDAP (slapd)      │
-│  - users / groups      │
-│  - LDAPS :636          │─── legacy apps bind directly
-│  - StartTLS :389       │
-└────────────────────────┘
-```
-
-## Community
-
-- [GitHub Repository](https://github.com/theta42/sso-manager-node)
-- [Issue Tracker](https://github.com/theta42/sso-manager-node/issues)
-- [Pull Requests](https://github.com/theta42/sso-manager-node/pulls)
-
-## License
-
-MIT License — see the repository for details.
+- **[Proxy](https://theta42.github.io/proxy/)** — an OIDC + LDAP-aware
+  reverse proxy, designed to sit in front of this SSO.
+- **[theta-env](https://theta42.github.io/theta-env/)** — runs this SSO
+  Manager and the proxy together with one command.
