@@ -77,15 +77,11 @@ router.get('/login', async function(req, res, next) {
   res.render('login', {...values, redirect: req.query.redirect});
 });
 
-router.get('/oauth-clients', function(req, res, next) {
-  const issuer = ((conf.oauth && conf.oauth.issuer) || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
-  res.render('oauth_clients', {...values, issuer, discoveryUrl: `${issuer}/.well-known/openid-configuration`});
-});
-
-// Everything a 3rd-party app or the ldap-client host script needs to bind
-// this directory, derived from the running config + request host rather than
-// hardcoded in a doc -- so it's always right for *this* deployment.
-router.get('/ldap-info', function(req, res, next) {
+// OAuth client management and LDAP connection info, merged into one page
+// (tabs) -- both are "how do other apps/hosts plug into this SSO" concerns.
+// LDAP values are derived from the running config + request host rather than
+// hardcoded in a doc, so they're always right for *this* deployment.
+router.get('/integrations', function(req, res, next) {
   const issuer = ((conf.oauth && conf.oauth.issuer) || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
   const ldapHost = issuer.replace(/^https?:\/\//, '').replace(/:\d+$/, '');
 
@@ -96,8 +92,10 @@ router.get('/ldap-info', function(req, res, next) {
   // -> dc=example,dc=com).
   const baseDn = userBase.replace(/^ou=[^,]+,/i, '');
 
-  res.render('ldap_info', {
+  res.render('integrations', {
     ...values,
+    issuer,
+    discoveryUrl: `${issuer}/.well-known/openid-configuration`,
     ldapHost,
     ldapsUrl: `ldaps://${ldapHost}:636`,
     baseDn,
@@ -109,6 +107,8 @@ router.get('/ldap-info', function(req, res, next) {
     ssoUrl: issuer,
   });
 });
+router.get('/oauth-clients', (req, res) => res.redirect(301, '/integrations'));
+router.get('/ldap-info', (req, res) => res.redirect(301, '/integrations'));
 
 // API Tokens is now a section on the Profile page (own profile only).
 router.get('/api-tokens', (req, res) => res.redirect(301, '/'));
