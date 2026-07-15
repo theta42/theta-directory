@@ -456,6 +456,13 @@ netstat -tlnp | grep 389
    set `JWT_SECRET`, issued tokens invalidate on container recreation.
 4. **Don't expose the UI's HTTP port to the internet** — terminate TLS at a front
    proxy and keep `3001` on the Docker network / localhost only.
-5. The all-in-one image runs slapd as the `ldap` user but the app process as root
+5. **Don't port-forward LDAPS (636) to the internet either.** It's mapped to the
+   host by default for LAN/VPN clients that bind LDAP directly (other hosts
+   running `ldap-client`, apps with their own LDAP auth settings) — not for
+   exposure through your router/firewall. LDAP simple-bind is a brute-force
+   target with no rate limiting in front of it the way the HTTP login endpoints
+   have. If a remote host needs to bind LDAP, put it behind a VPN (Tailscale,
+   WireGuard, …) instead of forwarding 636 publicly.
+6. The all-in-one image runs slapd as the `ldap` user but the app process as root
    (matches the bare-metal systemd unit). Harden the app to a non-root user for
    production if needed.
