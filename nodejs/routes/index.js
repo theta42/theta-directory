@@ -44,13 +44,14 @@ router.get('/tos', function(req, res) {
   res.render('tos', {...values, tosHtml});
 });
 
-router.get('/admin', function(req, res) {
-  res.render('admin', {...values});
+// Admin dashboard (stats + recent/inactive users) and Notifications
+// (broadcast + history) merged into one page.
+router.get('/dashboard', function(req, res) {
+  res.render('dashboard', {...values});
 });
 
-router.get('/notifications', function(req, res) {
-  res.render('notifications', {...values});
-});
+router.get('/admin', (req, res) => res.redirect(301, '/dashboard'));
+router.get('/notifications', (req, res) => res.redirect(301, '/dashboard'));
 
 router.get('/invites', function(req, res) {
   res.render('invites', {...values});
@@ -77,9 +78,8 @@ router.get('/oauth-clients', function(req, res, next) {
   res.render('oauth_clients', {...values, issuer, discoveryUrl: `${issuer}/.well-known/openid-configuration`});
 });
 
-router.get('/api-tokens', function(req, res, next) {
-  res.render('api_tokens', {...values});
-});
+// API Tokens is now a section on the Profile page (own profile only).
+router.get('/api-tokens', (req, res) => res.redirect(301, '/'));
 
 
 
