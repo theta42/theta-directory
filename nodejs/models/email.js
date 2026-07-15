@@ -7,6 +7,16 @@ const conf = require('@simpleworkjs/conf');
 var Mail = {};
 
 Mail.send = function(to, subject, message, from){
+	// Never let the automated test suite deliver real mail — tests run against
+	// this app's real routes (notification broadcast, password reset, invite,
+	// OTP-by-email, …) with NODE_ENV=test, and any of them resolving a real
+	// recipient list must not actually hit SMTP. Tests already tolerate this
+	// (see e.g. tests/misc.test.js: "SMTP failure is non-fatal") since none
+	// assert on real delivery.
+	if(conf.environment === 'test'){
+		return Promise.resolve({accepted: [], rejected: [], response: 'skipped: NODE_ENV=test'});
+	}
+
 	return new Promise(function(resolve, reject){
 		var transportOpts = {
 			host: conf.smtp.host || 'localhost',

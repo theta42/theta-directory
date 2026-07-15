@@ -83,26 +83,41 @@
 	}
 
 	function toggleFilterInputs() {
-		const type = document.querySelector('input[name="notif-filter"]:checked').value;
+		// No radio is checked by default (see f-all-active below) — a "send to
+		// everyone" option must be a deliberate choice, not whatever happens to
+		// be pre-selected when someone's just trying the form out.
+		const checked = document.querySelector('input[name="notif-filter"]:checked');
+		const type = checked ? checked.value : null;
 		document.getElementById('notif-group-row').style.display  = type === 'group'  ? '' : 'none';
 		document.getElementById('notif-users-row').style.display  = type === 'users'  ? '' : 'none';
 		document.getElementById('notif-active-row').style.display = (type === 'group' || type === 'all') ? '' : 'none';
 	}
 
 	async function sendNotification() {
-		const subject    = document.getElementById('notif-subject').value.trim();
-		const message    = document.getElementById('notif-message').value.trim();
-		const filterType = document.querySelector('input[name="notif-filter"]:checked').value;
-		const groupValue = document.getElementById('notif-group').value.trim();
-		const usersValue = document.getElementById('notif-users').value.trim();
-		const activeOnly = document.getElementById('notif-active-only').checked;
-		const msgEl      = document.getElementById('notif-result');
+		const subject     = document.getElementById('notif-subject').value.trim();
+		const message     = document.getElementById('notif-message').value.trim();
+		const filterCheck = document.querySelector('input[name="notif-filter"]:checked');
+		const groupValue  = document.getElementById('notif-group').value.trim();
+		const usersValue  = document.getElementById('notif-users').value.trim();
+		const activeOnly  = document.getElementById('notif-active-only').checked;
+		const msgEl       = document.getElementById('notif-result');
+		const $compose    = $('#notif-subject').closest('.card-body');
 
 		if (!subject || !message) { alert('Subject and message are required.'); return; }
+		if (!filterCheck) { alert('Choose who to send this to.'); return; }
+		const filterType = filterCheck.value;
 
 		let filter_value = '';
 		if (filterType === 'group') filter_value = groupValue;
 		if (filterType === 'users') filter_value = JSON.stringify(usersValue.split(',').map(s => s.trim()).filter(Boolean));
+
+		// Broadcasting to everyone is easy to trigger by accident while just
+		// trying the form out — make it a deliberate, confirmed action.
+		if (filterType === 'all' || filterType === 'all_active') {
+			const label = filterType === 'all' ? 'ALL users (including inactive)' : 'all ACTIVE users';
+			const confirmed = await app.util.actionConfirm(`Send this notification to ${label}?`, $compose, 'warning');
+			if (!confirmed) return;
+		}
 
 		msgEl.className = 'alert alert-info mt-2';
 		msgEl.textContent = 'Sending…';
@@ -267,6 +282,7 @@
 			<div class="card-header shadow">
 				<i class="fa-solid fa-pencil"></i> Compose
 			</div>
+			<div class="card-header shadow actionMessage" style="display:none"></div>
 			<div class="card-body">
 				<div class="mb-3">
 					<label class="form-label">Subject</label>
@@ -279,7 +295,7 @@
 				<div class="mb-3">
 					<label class="form-label">Send to</label>
 					<div class="form-check">
-						<input class="form-check-input" type="radio" name="notif-filter" id="f-all-active" value="all_active" checked onchange="toggleFilterInputs()">
+						<input class="form-check-input" type="radio" name="notif-filter" id="f-all-active" value="all_active" onchange="toggleFilterInputs()">
 						<label class="form-check-label" for="f-all-active">All active users</label>
 					</div>
 					<div class="form-check">
