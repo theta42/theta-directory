@@ -40,18 +40,6 @@
   	  </button>
   	  <div class="collapse navbar-collapse justify-content-end" id="navbarSupportedContent">
   	    <ul class="navbar-nav top-nav">
-  	      <li class="nav-item">
-  	        <a class="nav-link active" href="/">
-  	          <i class="fa-regular fa-id-card"></i>
-  	          Profile
-  	        </a>
-  	      </li>
-  	      <li class="nav-item">
-  	        <a class="nav-link" href="/api-tokens">
-  	          <i class="fa-solid fa-code"></i>
-  	          API Tokens
-  	        </a>
-  	      </li>
   	      <li class="nav-item group-required group-required-app_sso_admin">
   	        <a class="nav-link" href="/users"><i class="fa-solid fa-users"></i>
   	          Users
@@ -75,19 +63,16 @@
   	        </a>
   	      </li>
   	      <li class="nav-item group-required group-required-app_sso_admin">
-  	        <a class="nav-link" href="/notifications">
-  	          <i class="fa-solid fa-paper-plane"></i>
-  	          Notifications
-  	        </a>
-  	      </li>
-  	      <li class="nav-item group-required group-required-app_sso_admin">
-  	        <a class="nav-link" href="/admin">
-  	          <i class="fa-solid fa-screwdriver-wrench"></i>
-  	          Admin
+  	        <a class="nav-link" href="/dashboard">
+  	          <i class="fa-solid fa-gauge-high"></i>
+  	          Dashboard
   	        </a>
   	      </li>
   	    </ul>
   	    <div class="form-inline mt-2 mt-md-0">
+  	      <a id="cl-username" class="navbar-text text-light me-3" href="/" style="display: none;">
+  	        <i class="fa-solid fa-user me-1"></i><span id="cl-username-text"></span>
+  	      </a>
   	      <a id="cl-login-button" class="btn btn-outline-danger my-2 my-sm-0" onclick="app.auth.forceLogin()" style="display: none;">
   	        <i class="fas fa-sign-out"></i>
   	        Login
@@ -112,10 +97,18 @@
   	      }
   	    })
 
-  	    // Set the correct login/logout button
-
-	      if(await app.auth.isLoggedIn()) $('#cl-logout-button').show();
-	      else $('#cl-login-button').show();
+  	    // Set the correct login/logout button, and reveal the current user's
+  	    // name (linking to their profile) once we know who they are.
+  	    var me = await app.auth.isLoggedIn();
+  	    if(me){
+  	      $('#cl-logout-button').show();
+  	      if(me.uid){
+  	        $('#cl-username-text').text(me.uid);
+  	        $('#cl-username').css('display', '');
+  	      }
+  	    }else{
+  	      $('#cl-login-button').show();
+  	    }
 
   	  });
   	</script>
