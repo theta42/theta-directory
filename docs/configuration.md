@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Configuration
+description: SSO Manager's config layers — conf/base.js defaults, secrets.js overrides, and app_* environment variables.
 ---
 
 # Configuration

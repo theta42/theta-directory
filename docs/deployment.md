@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Deployment
+description: Deploying SSO Manager — the all-in-one Docker image, bare-metal install, config layers, and backups.
 ---
 
 # Deployment Guide

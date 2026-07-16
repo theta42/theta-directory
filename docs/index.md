@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Home
+description: A self-hosted OpenID Connect provider with a bundled OpenLDAP directory and a web management UI. One login for your modern apps, one LDAP directory for the rest, no phone-home.
 ---
 
 # SSO Manager
