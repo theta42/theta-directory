@@ -6,6 +6,11 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-07-16
+
+### Fixed
+- Bumped `jq-repeat` 2.0.1 -> 2.1.0. `update()` is now trailing-edge throttled (~50ms) even on the first call; `profile.ejs`'s edit-profile flow updated a scope and immediately slid the same element into view, which could briefly show stale/empty data. Deferred the slide by 60ms.
+
 ## [1.1.4] - 2026-07-16
 
 ### Added
@@ -44,7 +49,8 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 - Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
 - Merged OAuth Apps + LDAP Info into a single Integrations page.
 
-[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.4...HEAD
+[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.5...HEAD
+[1.1.5]: https://github.com/theta42/sso-manager-node/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/theta42/sso-manager-node/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/theta42/sso-manager-node/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/theta42/sso-manager-node/compare/v1.1.1...v1.1.2
