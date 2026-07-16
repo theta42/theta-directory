@@ -84,6 +84,7 @@ COPY nodejs/controller ./controller
 COPY nodejs/middleware ./middleware
 COPY nodejs/models ./models
 COPY nodejs/routes ./routes
+COPY nodejs/services ./services
 COPY nodejs/utils ./utils
 COPY nodejs/views ./views
 COPY nodejs/public ./public

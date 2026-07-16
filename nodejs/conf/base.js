@@ -52,4 +52,11 @@ module.exports = {
 		pass: '__in secrets file__',
 		from: 'SSO Manager <noreply@example.com>',
 	},
+	service: {
+		updateCheck: {
+			enabled: true,
+			initial: 30000,      // first check 30s after start
+			interval: 86400000,  // then every 24h
+		},
+	},
 };

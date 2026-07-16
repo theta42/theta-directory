@@ -85,7 +85,25 @@
   	    </div>
   	  </div>
   	</nav>
+
+  	<div id="update-banner" class="alert alert-info alert-dismissible mb-0 rounded-0 text-center" style="display:none; position:fixed; left:0; right:0; z-index:1029;">
+  	  <span id="update-banner-text"></span>
+  	  <button type="button" class="btn-close" onclick="dismissUpdateBanner()"></button>
+  	</div>
+
   	<script type="text/javascript">
+  	  function showUpdateBanner(){
+  	    let $nav = $('nav.fixed-top');
+  	    let $banner = $('#update-banner');
+  	    $banner.css('top', $nav.outerHeight() + 'px').show();
+  	    $('#spa-shell').css('margin-top', ($nav.outerHeight() + $banner.outerHeight()) + 'px');
+  	  }
+  	  function dismissUpdateBanner(){
+  	    $('#update-banner').hide();
+  	    $('#spa-shell').css('margin-top', '');
+  	    sessionStorage.setItem('update-banner-dismissed', '1');
+  	  }
+
   	  $(document).ready(async function(){
 
   	    // Set the correct link to active in the top nav bar
@@ -105,6 +123,18 @@
   	      if(me.uid){
   	        $('#cl-username-text').text(me.uid);
   	        $('#cl-username').css('display', '');
+  	      }
+
+  	      if(await app.auth.memberOf('app_sso_admin', me) && !sessionStorage.getItem('update-banner-dismissed')){
+  	        app.api.get('update-check', function(error, info){
+  	          if(error || !info || !info.updateAvailable) return;
+  	          $('#update-banner-text').html(
+  	            'A newer version of SSO Manager is available: <b>v' + info.latestVersion + '</b> ' +
+  	            '(running v' + info.currentVersion + ') — ' +
+  	            '<a href="' + info.releaseUrl + '" target="_blank" class="alert-link">see what changed</a>.'
+  	          );
+  	          showUpdateBanner();
+  	        });
   	      }
   	    }else{
   	      $('#cl-login-button').show();
