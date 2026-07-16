@@ -212,6 +212,11 @@ active/inactive toggle depends on).
 
 ## Backups and restore
 
+`ops/backup.sh` automates this (LDAP + Redis + `./config/`, with retention)
+for standalone deployments — see the *Backups and restore* section of
+`DEPLOYMENT.md`. The manual LDAP-only steps below are what it does under the
+hood, useful if you want just the directory without Redis/config.
+
 **Backup** (while slapd is running):
 
 ```bash
