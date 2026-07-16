@@ -287,6 +287,22 @@ app.oauthClient = (function(app){
 	return { list, add, remove, update, rotateSecret };
 })(app);
 
+app.tos = (function(app){
+	function get(callback){
+		return app.api.get('tos/', function(error, data){
+			if(callback) callback(error, data);
+		});
+	}
+
+	function update(args, callback){
+		app.api.put('tos/', args, function(error, data){
+			callback(error, data);
+		});
+	}
+
+	return { get, update };
+})(app);
+
 app.apiToken = (function(app){
 	function list(callback){
 		return app.api.get('api-token/', function(error, data){

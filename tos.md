@@ -1,14 +1,10 @@
 # Terms of Service
 
-*Last updated: June 2026*
-
-> **This is a template.** SSO Manager ships this file as a starting point for
-> operators to adapt to their own deployment, organization name, and
-> jurisdiction. Replace the placeholder text below (or the whole document)
-> with terms reviewed by your own admin/legal before relying on it. See
-> [issue #39](https://github.com/theta42/sso-manager-node/issues/39) for the
-> planned admin UI that will let operators edit this document without a code
-> change.
+> **This is a template.** SSO Manager ships this file as the initial seed for
+> a new deployment's Terms of Service. Edit it from the admin Dashboard's
+> "Terms of Service" card (no code change or redeploy needed) to adapt it to
+> your own organization and jurisdiction before relying on it — this file
+> itself is only read once, to seed that first version.
 
 Welcome. By creating an account and using any services on this system, you agree to the following terms. Please read them carefully — they're short and written in plain English.
 
