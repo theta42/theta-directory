@@ -272,8 +272,10 @@ pwdMustChange: FALSE
 pwdAllowUserChange: TRUE
 EOF
 
-    # Required SSO groups. The app gates admin/invite/oauth-admin on these.
-    for group in app_sso_admin app_sso_invite app_sso_oauth_admin; do
+    # Required SSO groups. The app gates admin/invite/oauth-admin on these;
+    # app_sso_service_account is a marker (not a permission gate) for
+    # non-person accounts -- see the Users page.
+    for group in app_sso_admin app_sso_invite app_sso_oauth_admin app_sso_service_account; do
         ldapadd -x -D "$LDAP_BIND_DN" -w "$LDAP_ADMIN_PASS" -H ldap://localhost:389 << EOF || true
 dn: cn=${group},ou=groups,${LDAP_BASE_DN}
 objectClass: groupOfNames

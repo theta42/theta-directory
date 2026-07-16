@@ -163,6 +163,7 @@
 						</td>
 						<td>
 							<a href='/users/{{uid}}'>{{givenName}} {{sn}}</a>
+							{{#isServiceAccount}}<span class="badge bg-secondary" title="Service account — not a person"><i class="fa-solid fa-gears"></i> service</span>{{/isServiceAccount}}
 						</td>
 						<td>
 							{{mail}}

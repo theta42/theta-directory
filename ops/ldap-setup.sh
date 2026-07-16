@@ -244,7 +244,7 @@ fi
 # ── 8. Required SSO groups ────────────────────────────────────────────────────
 info "required SSO groups"
 
-for group in app_sso_admin app_sso_invite app_sso_oauth_admin; do
+for group in app_sso_admin app_sso_invite app_sso_oauth_admin app_sso_service_account; do
     dn="cn=${group},${GROUP_BASE}"
     if dir_search -b "$dn" -s base "(objectClass=*)" dn 2>/dev/null | grep -q "dn:"; then
         skip "${dn} already exists"

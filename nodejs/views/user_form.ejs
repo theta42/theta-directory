@@ -43,17 +43,63 @@ async function fetchUsernameSuggestions() {
 	} catch(e) {}
 }
 </script>
+<% if (locals.adminMode) { %>
+<script>
+	// A service account (a Unix-style account something runs as -- a media
+	// manager, a torrent client, ...) isn't a person: no birthday, nothing to
+	// agree to, and it gets one name (a username), not a first/last name.
+	// Toggling this swaps the person-shaped fields for a single account-name
+	// field instead of asking for throwaway values.
+	function toggleServiceAccountFields(el){
+		var checked = el.checked;
+		var $form = $(el).closest('form');
+
+		$form.find('[name=dob]').prop('required', !checked).closest('.mb-3').toggle(!checked);
+		$form.find('#tosAgree').prop('required', !checked).closest('.mb-3').toggle(!checked);
+		$form.find('#personNameFields').toggle(!checked);
+		$form.find('#serviceAccountNameField').toggle(checked);
+
+		if(checked){
+			// Filler values so the LDAP schema (inetOrgPerson requires sn) is
+			// satisfied; not shown anywhere, the account name is what matters.
+			$form.find('[name=givenName]').val('Service');
+			$form.find('[name=sn]').val('Account');
+			document.getElementById('selectedUid').value = '';
+		}else{
+			$form.find('[name=givenName]').val('');
+			$form.find('[name=sn]').val('');
+			document.getElementById('usernameSelector').style.display = 'none';
+			document.getElementById('serviceAccountName').value = '';
+		}
+	}
+</script>
+<% } %>
 <form action="user/" method="post" onsubmit="formAJAX(this)">
 	<input type="hidden" class="form-control" name="delete" value="false" />
-	<div class="mb-3">
-		<label class="form-label">First name</label>
-		<input type="text" class="form-control shadow" name="givenName" placeholder="John" validate=":3" onblur="fetchUsernameSuggestions()" />
-		<div class="invalid-feedback"></div>
+	<% if (locals.adminMode) { %>
+	<div class="mb-3 form-check">
+		<input type="checkbox" class="form-check-input" id="isServiceAccount" name="isServiceAccount" onchange="toggleServiceAccountFields(this)">
+		<label class="form-check-label" for="isServiceAccount">
+			This is a service account <small class="text-muted">(not a person — e.g. a Unix account an app/service runs as)</small>
+		</label>
 	</div>
+	<div class="mb-3" id="serviceAccountNameField" style="display:none">
+		<label class="form-label">Account name</label>
+		<input type="text" class="form-control shadow" id="serviceAccountName" placeholder="stuff_manager"
+			oninput="document.getElementById('selectedUid').value = this.value.trim()" />
+	</div>
+	<% } %>
+	<div id="personNameFields">
+		<div class="mb-3">
+			<label class="form-label">First name</label>
+			<input type="text" class="form-control shadow" name="givenName" placeholder="John" validate=":3" onblur="fetchUsernameSuggestions()" />
+			<div class="invalid-feedback"></div>
+		</div>
 
-	<div class="mb-3">
-		<label class="form-label">Last name</label>
-		<input type="text" class="form-control shadow" name="sn" placeholder="smith" validate=":3" onblur="fetchUsernameSuggestions()" />
+		<div class="mb-3">
+			<label class="form-label">Last name</label>
+			<input type="text" class="form-control shadow" name="sn" placeholder="smith" validate=":3" onblur="fetchUsernameSuggestions()" />
+		</div>
 	</div>
 
 	<div class="mb-3">
