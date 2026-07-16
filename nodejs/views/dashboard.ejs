@@ -148,10 +148,45 @@
 		}
 	}
 
+	// ── Terms of Service ──────────────────────────────────────────────────
+	async function loadTos() {
+		try {
+			const tos = await app.tos.get();
+			document.getElementById('tos-content').value = tos.content;
+			document.getElementById('tos-meta').textContent =
+				'Last updated ' + moment(tos.updated_on, 'x').fromNow() + ' by ' + tos.updated_by;
+		} catch(e) {
+			console.error('Failed to load ToS:', e);
+		}
+	}
+
+	function saveTos() {
+		const content = document.getElementById('tos-content').value.trim();
+		const resetAcceptance = document.getElementById('tos-reset-acceptance').checked;
+		const msgEl = document.getElementById('tos-result');
+
+		if (!content) { alert('Terms of Service text cannot be empty.'); return; }
+
+		app.tos.update({content, resetAcceptance}, function(error, data) {
+			if (error) {
+				msgEl.className = 'alert alert-danger mt-2';
+				msgEl.textContent = 'Failed: ' + ((data && data.message) || error);
+				msgEl.style.display = '';
+				return;
+			}
+			msgEl.className = 'alert alert-success mt-2';
+			msgEl.textContent = 'Saved.' + (data.resetCount ? ' ' + data.resetCount + ' user(s) will be asked to re-accept.' : '');
+			msgEl.style.display = '';
+			document.getElementById('tos-reset-acceptance').checked = false;
+			loadTos();
+		});
+	}
+
 	$(document).ready(function() {
 		loadDashboard();
 		loadHistory();
 		toggleFilterInputs();
+		loadTos();
 	});
 </script>
 
@@ -368,6 +403,39 @@
 		</div>
 	</div>
 
+</div>
+
+<div class="row mt-4">
+	<div class="col-12">
+		<h5 class="mb-3"><i class="fa-solid fa-file-contract"></i> Terms of Service</h5>
+	</div>
+</div>
+
+<div class="row g-3">
+	<div class="col-12">
+		<div class="card shadow-lg">
+			<div class="card-header shadow">
+				<i class="fa-solid fa-pencil"></i> Editor
+				<small class="text-muted float-end" id="tos-meta"></small>
+			</div>
+			<div class="card-body">
+				<div class="mb-3">
+					<label class="form-label">Content <small class="text-muted">(Markdown)</small></label>
+					<textarea class="form-control shadow" id="tos-content" rows="16"></textarea>
+				</div>
+				<div class="form-check mb-3">
+					<input class="form-check-input" type="checkbox" id="tos-reset-acceptance">
+					<label class="form-check-label" for="tos-reset-acceptance">
+						Require all users to re-accept these terms
+					</label>
+				</div>
+				<button class="btn btn-primary shadow" onclick="saveTos()">
+					<i class="fa-solid fa-floppy-disk"></i> Save
+				</button>
+				<div id="tos-result" style="display:none" class="mt-2"></div>
+			</div>
+		</div>
+	</div>
 </div>
 
 <%- include('impersonate_modal') %>

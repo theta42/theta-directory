@@ -1,16 +1,14 @@
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
 var express = require('express');
 var router = express.Router();
 const moment = require('moment');
 const {marked} = require('marked');
 const {InviteToken, PasswordResetToken} = require('./../models/token');
+const {Tos} = require('../models/tos');
 const conf = require('@simpleworkjs/conf');
 const buildInfo = require('../utils/build_info');
-
-const tosHtml = marked(fs.readFileSync(path.join(__dirname, '../../tos.md'), 'utf8'));
 
 const values ={
   title: conf.environment !== 'production' ? `dev` : '',
@@ -44,8 +42,13 @@ router.get('/health', function(req, res) {
   res.json({ status: 'ok' });
 });
 
-router.get('/tos', function(req, res) {
-  res.render('tos', {...values, tosHtml});
+router.get('/tos', async function(req, res, next) {
+  try {
+    const tos = await Tos.getCurrent();
+    res.render('tos', {...values, tosHtml: marked(tos.content), tosUpdatedOnFmt: moment(tos.updated_on, 'x').format('MMMM YYYY')});
+  } catch (error) {
+    next(error);
+  }
 });
 
 // Admin dashboard (stats + recent/inactive users) and Notifications
@@ -61,8 +64,13 @@ router.get('/invites', function(req, res) {
   res.render('invites', {...values});
 });
 
-router.get('/onboarding', function(req, res) {
-  res.render('onboarding', {...values, tosHtml});
+router.get('/onboarding', async function(req, res, next) {
+  try {
+    const tos = await Tos.getCurrent();
+    res.render('onboarding', {...values, tosHtml: marked(tos.content)});
+  } catch (error) {
+    next(error);
+  }
 });
 
 router.get('/', async function(req, res, next) {
