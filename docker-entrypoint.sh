@@ -267,7 +267,7 @@ objectClass: organizationalRole
 objectClass: pwdPolicy
 cn: ppolicy
 pwdAttribute: 2.5.4.35
-pwdLockout: FALSE
+pwdLockout: TRUE
 pwdMustChange: FALSE
 pwdAllowUserChange: TRUE
 EOF

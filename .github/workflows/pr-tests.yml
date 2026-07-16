@@ -1,0 +1,154 @@
+name: Pull Request Tests
+
+# Run tests on pull requests to master and when pushing to PRs
+on:
+  pull_request:
+    branches:
+      - master
+  push:
+    branches-ignore:
+      - master
+
+jobs:
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        node-version: [18.x, 20.x, 22.x]
+
+    # A dedicated, GHA-managed Redis -- NOT the bundled image's own Redis,
+    # which only binds to loopback *inside* its container (redis-server's
+    # default with no --bind override), so Docker's -p port-forward can
+    # never actually reach it from the runner. This service container binds
+    # correctly and is reachable at localhost:6379, matching model-redis's
+    # createClient({}) default when conf.redis has no explicit host/port.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # The test suite (require('../app')) also needs a real LDAP directory
+      # seeded with the schema/groups the app expects -- the bundled image
+      # already does exactly that (docker-entrypoint.sh), so build and run
+      # it here rather than reimplementing LDAP setup as a separate
+      # CI-only script. Its own bundled Redis is unused (see services above).
+      - name: Build LDAP test image
+        run: docker build -f Dockerfile.openldap -t sso-test:latest .
+
+      - name: Start LDAP test container
+        run: |
+          mkdir -p /tmp/sso-test-config
+          cp secrets.js.example /tmp/sso-test-config/sso-secrets.js
+          docker run -d --name sso-test \
+            -p 389:389 -p 3001:3001 \
+            -v /tmp/sso-test-config:/config:ro \
+            sso-test:latest
+          for i in $(seq 1 30); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' sso-test 2>/dev/null || echo starting)
+            [ "$status" = "healthy" ] && break
+            sleep 2
+          done
+          docker inspect --format='{{.State.Health.Status}}' sso-test
+
+      # tests/setup.js logs in as uid 'test'; several suites (group/otp/
+      # impersonate/cache) assume a second, non-admin user 'wmantly' already
+      # exists (documented in those test files: "wmantly is always present
+      # in the test LDAP"). Seed both here so CI matches that assumption.
+      - name: Seed test fixtures
+        run: |
+          HASH_TEST=$(timeout 20 docker exec sso-test node -e "console.log(require('/app/models/user_ldap.js').hashPasswordSSHA512('MyTestPassword!2'))" | tail -1)
+          HASH_WMANTLY=$(timeout 20 docker exec sso-test node -e "console.log(require('/app/models/user_ldap.js').hashPasswordSSHA512('WmantlyPass!2'))" | tail -1)
+          cat > /tmp/seed.ldif <<EOF
+          dn: cn=test,ou=people,dc=example,dc=com
+          objectClass: inetOrgPerson
+          objectClass: posixAccount
+          objectClass: theta42Person
+          cn: test
+          sn: Test
+          mail: test@example.com
+          uid: test
+          uidNumber: 10000
+          gidNumber: 10000
+          homeDirectory: /home/test
+          userPassword: ${HASH_TEST}
+          dateOfBirth: 2000-01-01
+
+          dn: cn=app_sso_admin,ou=groups,dc=example,dc=com
+          changetype: modify
+          add: member
+          member: cn=test,ou=people,dc=example,dc=com
+
+          dn: cn=app_sso_oauth_admin,ou=groups,dc=example,dc=com
+          changetype: modify
+          add: member
+          member: cn=test,ou=people,dc=example,dc=com
+
+          dn: cn=app_sso_invite,ou=groups,dc=example,dc=com
+          changetype: modify
+          add: member
+          member: cn=test,ou=people,dc=example,dc=com
+
+          dn: cn=wmantly,ou=people,dc=example,dc=com
+          objectClass: inetOrgPerson
+          objectClass: posixAccount
+          objectClass: theta42Person
+          cn: wmantly
+          sn: Mantly
+          mail: wmantly@example.com
+          uid: wmantly
+          uidNumber: 10001
+          gidNumber: 10001
+          homeDirectory: /home/wmantly
+          userPassword: ${HASH_WMANTLY}
+          dateOfBirth: 2000-01-01
+          EOF
+          docker cp /tmp/seed.ldif sso-test:/tmp/seed.ldif
+          docker exec sso-test ldapmodify -x -D "cn=admin,dc=example,dc=com" -w 'your-ldap-password' -a -f /tmp/seed.ldif
+
+      - name: Setup Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+          cache-dependency-path: nodejs/package-lock.json
+
+      - name: Install dependencies
+        working-directory: ./nodejs
+        run: npm ci
+
+      - name: Run tests
+        working-directory: ./nodejs
+        env:
+          NODE_ENV: test
+          # conf/base.js's ldap.* defaults already match secrets.js.example's
+          # directory layout (dc=example,dc=com) -- only the admin password
+          # (normally supplied via a gitignored secrets.js) needs setting.
+          app_ldap__bindPassword: your-ldap-password
+        run: npm test
+
+  test-summary:
+    name: Test Summary
+    runs-on: ubuntu-latest
+    needs: test
+    if: always()
+
+    steps:
+      - name: Check test results
+        run: |
+          if [ "${{ needs.test.result }}" != "success" ]; then
+            echo "Tests failed. PR cannot be merged."
+            exit 1
+          fi
+          echo "All tests passed successfully!"

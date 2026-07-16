@@ -228,6 +228,19 @@ info "default ppolicy entry"
 
 if dir_search -b "cn=ppolicy,${POLICY_BASE}" -s base "(objectClass=*)" dn 2>/dev/null | grep -q "dn:"; then
     skip "cn=ppolicy,${POLICY_BASE} already exists"
+
+    # Existing deployments may still carry pwdLockout: FALSE from before this
+    # was fixed -- that silently made "deactivate user" a no-op (the account's
+    # pwdAccountLockedTime got set, but OpenLDAP never actually rejected its
+    # bind). Correct the drift on re-run rather than only fixing it for new
+    # deployments.
+    if dir_search -b "cn=ppolicy,${POLICY_BASE}" -s base "(objectClass=*)" pwdLockout 2>/dev/null | grep -qi "pwdLockout: FALSE"; then
+        dir_add "dn: cn=ppolicy,${POLICY_BASE}
+changetype: modify
+replace: pwdLockout
+pwdLockout: TRUE"
+        ok "cn=ppolicy,${POLICY_BASE}: pwdLockout corrected FALSE -> TRUE"
+    fi
 else
     dir_add "dn: cn=ppolicy,${POLICY_BASE}
 objectClass: top
@@ -235,7 +248,7 @@ objectClass: organizationalRole
 objectClass: pwdPolicy
 cn: ppolicy
 pwdAttribute: 2.5.4.35
-pwdLockout: FALSE
+pwdLockout: TRUE
 pwdMustChange: FALSE
 pwdAllowUserChange: TRUE"
     ok "default ppolicy created"
