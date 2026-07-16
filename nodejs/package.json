@@ -31,7 +31,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "extend": "^3.0.2",
-    "jq-repeat": "^2.0.1",
+    "jq-repeat": "^2.1.0",
     "jquery": "^3.7.1",
     "jsonwebtoken": "^9.0.3",
     "ldapts": "^8.1.2",

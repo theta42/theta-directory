@@ -40,15 +40,24 @@
 		var $editCard = $('#editProfile');
 
 		$.scope.editProfile.update(user);
-		$profileCard.slideUp();
-		$editCard.slideDown();
+		// jq-repeat's update() is trailing-edge throttled (~50ms) as of 2.1.0 --
+		// wait for the throttle tick to land before sliding the updated card
+		// into view, or it can briefly show stale/empty data.
+		setTimeout(function(){
+			$profileCard.slideUp();
+			$editCard.slideDown();
+		}, 60);
 	}
 
 	function editUserSeccess(data){
 		currentUser = data.results;
 		renderProfile(currentUser);
-		$('#editProfile').slideUp();
-		$('#userProfile').slideDown()
+		// Same throttle-tick wait as editUser() above -- renderProfile() calls
+		// $.scope.user.update()/passwordReset.update() internally.
+		setTimeout(function(){
+			$('#editProfile').slideUp();
+			$('#userProfile').slideDown()
+		}, 60);
 	}
 
 	async function toggleActive(uid, active){
