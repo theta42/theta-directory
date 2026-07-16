@@ -9,6 +9,7 @@
 // `app_*` env vars — never commit them here.
 module.exports = {
 	name: "SSO Manager", // displayed in the UI and outbound email
+	logo: "/static/img/theta42.svg", // shown in the nav/footer; point at your own file under public/ (or an absolute URL) to white-label
 	userModel: 'ldap', // pam, redis, ldap
 	redis: {
 		prefix: 'sso_manager_'
