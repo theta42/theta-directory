@@ -1,6 +1,7 @@
 ---
 layout: default
 title: LDAP
+description: SSO Manager's bundled OpenLDAP directory — schema, service accounts, TLS, and connecting third-party apps directly.
 ---
 
 # LDAP Directory

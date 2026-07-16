@@ -1,6 +1,7 @@
 ---
 layout: default
 title: OAuth / OIDC
+description: SSO Manager's OpenID Connect / OAuth 2.0 provider — discovery document, client registration, and token endpoints.
 ---
 
 # OAuth 2.0 / OpenID Connect
