@@ -18,24 +18,41 @@ jobs:
       matrix:
         node-version: [18.x, 20.x, 22.x]
 
+    # A dedicated, GHA-managed Redis -- NOT the bundled image's own Redis,
+    # which only binds to loopback *inside* its container (redis-server's
+    # default with no --bind override), so Docker's -p port-forward can
+    # never actually reach it from the runner. This service container binds
+    # correctly and is reachable at localhost:6379, matching model-redis's
+    # createClient({}) default when conf.redis has no explicit host/port.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # The test suite (require('../app')) needs a real LDAP directory +
-      # Redis, seeded with the schema/groups the app expects -- the bundled
-      # all-in-one image already does exactly that (docker-entrypoint.sh),
-      # so build and run it here rather than reimplementing LDAP setup as
-      # a separate CI-only script.
-      - name: Build LDAP+Redis test image
+      # The test suite (require('../app')) also needs a real LDAP directory
+      # seeded with the schema/groups the app expects -- the bundled image
+      # already does exactly that (docker-entrypoint.sh), so build and run
+      # it here rather than reimplementing LDAP setup as a separate
+      # CI-only script. Its own bundled Redis is unused (see services above).
+      - name: Build LDAP test image
         run: docker build -f Dockerfile.openldap -t sso-test:latest .
 
-      - name: Start LDAP+Redis test container
+      - name: Start LDAP test container
         run: |
           mkdir -p /tmp/sso-test-config
           cp secrets.js.example /tmp/sso-test-config/sso-secrets.js
           docker run -d --name sso-test \
-            -p 389:389 -p 6379:6379 -p 3001:3001 \
+            -p 389:389 -p 3001:3001 \
             -v /tmp/sso-test-config:/config:ro \
             sso-test:latest
           for i in $(seq 1 30); do
