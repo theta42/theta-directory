@@ -95,6 +95,14 @@ COPY nodejs/public ./public
 # level above the nodejs/ app dir). Without this the app crashes on startup.
 COPY tos.md /tos.md
 
+# Documentation, served in-app at /docs (routes/docs.js) so it's readable
+# without internet access. Same flattened-path convention as tos.md above.
+COPY README.md /README.md
+COPY DEPLOYMENT.md /DEPLOYMENT.md
+COPY API.md /API.md
+COPY directory_spec.md /directory_spec.md
+COPY docs /docs
+
 # Baked commit hash from the gitinfo stage (see build_info.js).
 COPY --from=gitinfo /commit.txt ./.build_commit
 

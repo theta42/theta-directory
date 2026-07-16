@@ -40,3 +40,11 @@ exports.invite = rateLimit({
 	limit: 20,
 	handler: handler({ name: 'RateLimitError', message: 'Too many requests, try again later.' }),
 });
+
+// Public, unauthenticated, reads from disk on every request -- generous
+// since it's just docs, but still throttled per IP.
+exports.docs = rateLimit({
+	windowMs: 60 * 1000,
+	limit: 120,
+	handler: handler({ name: 'RateLimitError', message: 'Too many requests, try again later.' }),
+});
