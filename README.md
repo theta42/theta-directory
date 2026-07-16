@@ -161,6 +161,9 @@ required groups, LDAPS/TLS, direct-bind service accounts) live in:
 - [docs/](docs/) (GitHub Pages) — the same content broken into
   [deployment](docs/deployment.md), [configuration](docs/configuration.md),
   [OAuth/OIDC](docs/oauth.md), and [LDAP](docs/ldap.md).
+- [CHANGELOG.md](CHANGELOG.md) — what changed in each release.
+- All of the above is also readable from the running app itself at `/docs` —
+  no internet access required.
 
 If you are pointing the app at your own existing LDAP server, see
 *LDAP requirements* in [DEPLOYMENT.md](DEPLOYMENT.md) — the directory needs the
