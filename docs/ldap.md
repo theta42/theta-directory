@@ -55,6 +55,7 @@ The SSO requires three groups (seeded automatically by the entrypoint /
 | `app_sso_admin` | full admin (users, groups, settings) |
 | `app_sso_oauth_admin` | OAuth client management |
 | `app_sso_invite` | invitation management |
+| `app_sso_service_account` | not a permission — marks a `posixAccount` as a non-person service account (see *Service accounts* below) |
 
 ## TLS (LDAPS / StartTLS)
 
@@ -90,17 +91,35 @@ volumes:
 
 The entrypoint leaves existing certs untouched (idempotent).
 
-## Direct-bind service accounts
+## Service accounts
 
-For apps that bind LDAP directly, create a dedicated **service account** under
-`ou=people` (e.g. `cn=ldapclient,ou=people,<base>`) with a strong password —
-**don't reuse the admin DN**. The theta-env bootstrap creates this account
-automatically (`cn=ldapclient`) and the proxy binds as it. For anything else,
-create a normal user via the Users page (or `POST /api/user`) and just don't
-put it in `app_sso_admin` or any other privileged group — a plain
-`posixAccount` with a strong password is all a read-only bind account needs.
+There are two different kinds of "not a real person" account, and which one
+you want depends on what's consuming it:
 
-Example bind test:
+**LDAP bind-only** — for an app that just needs to bind LDAP to look users up
+(its own "LDAP authentication" settings page, or the read-only account
+`theta42/ldap-client` binds as). Not a `posixAccount` — no `uidNumber`, no
+home directory, can't log into this UI. Create one from the
+**Integrations → LDAP** tab's *Service Accounts* section (create, rotate
+password, delete). theta-env's bootstrap creates `cn=ldapclient` this same
+way automatically, and the proxy binds as it — don't reuse the admin DN for
+this.
+
+**Unix/POSIX** — for an account something actually *runs as* on a Linux
+host: a media manager, a torrent client, a service like Emby — anything that
+needs a real `uidNumber`/`gidNumber` to own files or that other accounts join
+via a group for write access (e.g. a `stuff_manager` group granting write
+rights to a media library). Create one from the **Users** page's "Add new
+user" form with **This is a service account** checked — it skips the
+birthday/Terms-of-Service fields a real person's account needs and asks for
+just an account name. It's a normal `posixAccount`, just flagged (via
+membership in the `app_sso_service_account` group) so it's visibly marked in
+the Users list and excluded from "all users" notification broadcasts.
+
+Either way: don't reuse the admin DN, and give it only the group memberships
+it actually needs.
+
+Example bind test (LDAP bind-only account):
 
 ```bash
 ldapsearch -x -H ldaps://sso.example.com:636 \

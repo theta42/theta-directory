@@ -9,7 +9,11 @@ const permission = require('../utils/permission');
 
 async function resolveRecipients(filter_type, filter_value, active_only) {
 	if (filter_type === 'all' || filter_type === 'all_active') {
-		const users = await User.listDetail();
+		// Service accounts (media managers, app service users, ...) aren't
+		// read by anyone -- a broadcast to "all users" shouldn't include them.
+		// Target one explicitly via filter_type=users/group if it ever needs
+		// its own notification.
+		const users = (await User.listDetail()).filter(u => !u.isServiceAccount);
 		const active = filter_type === 'all_active' || active_only;
 		return active ? users.filter(u => !u.pwdAccountLockedTime) : users;
 	}

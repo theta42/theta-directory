@@ -105,7 +105,8 @@ bare-metal / advanced standalone use; most deployments should use the file.
    listening on `ldap:///` (389) and `ldaps:///` (636).
 3. Seeds the directory (base DN, `ou=people`/`ou=groups`/`ou=policies`, a default
    `pwdPolicy`, and the required SSO groups `app_sso_admin`, `app_sso_invite`,
-   `app_sso_oauth_admin`) — idempotently, so container restarts are safe.
+   `app_sso_oauth_admin`, `app_sso_service_account`) — idempotently, so
+   container restarts are safe.
 4. Starts a bundled Redis (the app uses `model-redis` for models/sessions and
    stores OAuth clients there), AOF+RDB persisted to `/data`, unless
    `app_redis__host` is set (then it's expected to be external).
@@ -388,7 +389,9 @@ The app needs these on the LDAP server:
 - **Directory tree:** `ou=people`, `ou=groups`, `ou=policies` under the base DN, a
   default `pwdPolicy` at `cn=ppolicy,ou=policies,<base>`.
 - **Required groups:** `app_sso_admin` (full admin), `app_sso_invite` (invitation
-  management), `app_sso_oauth_admin` (OAuth client management).
+  management), `app_sso_oauth_admin` (OAuth client management),
+  `app_sso_service_account` (not a permission — marks a `posixAccount` as a
+  non-person service account; see docs/ldap.md).
 
 `ops/ldap-setup.sh -p <admin-password>` configures all of the above idempotently
 against a running slapd (auto-detects the database holding your base DN, and

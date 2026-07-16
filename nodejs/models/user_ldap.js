@@ -101,7 +101,6 @@ async function addPosixAccount(client, data){
 		uidNumber: data.uidNumber,
 		gidNumber: data.gidNumber,
 		givenName: data.givenName,
-		mail: data.mail,
 		loginShell: data.loginShell,
 		homeDirectory: data.homeDirectory,
 		userPassword: data.userPassword,
@@ -111,6 +110,14 @@ async function addPosixAccount(client, data){
 		sudoUser: data.uid,
 		objectclass: ['inetOrgPerson', 'sudoRole', 'ldapPublicKey', 'posixAccount', 'top', 'theta42Person'],
 	};
+
+	// mail is optional in the inetOrgPerson schema, but ldapts/slapd reject an
+	// attribute given an explicit undefined value ("no values for attribute
+	// type") rather than just omitting it -- service accounts (a Unix account
+	// an app/service runs as) commonly have no real mailbox.
+	if (data.mail) {
+		entry.mail = data.mail;
+	}
 
 	if (data.mobile) {
 		entry.mobile = data.mobile;
@@ -225,6 +232,16 @@ User.listDetail = async function(){
 			return res.searchEntries;
 		});
 
+		// Members of app_sso_service_account are non-person accounts (media
+		// managers, app service users, ...) -- fetched once here rather than
+		// relying on the memberof overlay's reverse attribute, which isn't
+		// reliably returned by every LDAP server this app might point at.
+		let serviceAccountDNs = new Set();
+		try{
+			const svcGroup = await Group.get('app_sso_service_account');
+			serviceAccountDNs = new Set((svcGroup.member || []).map(dn => dn.toLowerCase()));
+		}catch(error){ /* group not seeded yet on an old deployment -- treat as none */ }
+
 		const users = await Promise.all(searchEntries.map(async (entry) => {
 			const rawPassword = entry.userPassword ? entry.userPassword.toString() : '';
 			const isLegacyMD5 = rawPassword.toUpperCase().startsWith('{MD5}');
@@ -251,6 +268,7 @@ User.listDetail = async function(){
 				passwordMustChange  && 'password',
 			].filter(Boolean);
 			obj.onboardingRequired = obj.onboardingNeeds.length > 0 ? 'yes' : '';
+			obj.isServiceAccount   = serviceAccountDNs.has(String(obj.dn).toLowerCase()) ? 'yes' : '';
 
 			return obj;
 		}));

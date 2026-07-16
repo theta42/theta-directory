@@ -29,6 +29,19 @@ router.post('/', async function(req, res, next){
 		const updates = { password_must_change: true };
 		if (req.body.tosAgree) updates.tos_accepted = true, updates.tos_accepted_at = Date.now();
 		await verif.update(updates);
+
+		// Service accounts (a Unix account an app/service runs as, not a
+		// person) are marked by membership in app_sso_service_account rather
+		// than a schema change -- see models/user_ldap.js User.listDetail.
+		if (req.body.isServiceAccount === true || req.body.isServiceAccount === 'true' || req.body.isServiceAccount === 'on') {
+			try {
+				const group = await Group.get('app_sso_service_account');
+				await group.addMember(user);
+			} catch (error) {
+				console.error(`user.add: failed to mark ${user.uid} as a service account:`, error.message);
+			}
+		}
+
 		return res.json({results: user});
 	}catch(error){
 		next(error);
