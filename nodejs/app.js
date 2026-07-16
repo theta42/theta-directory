@@ -68,6 +68,11 @@ app.use('/static', express.static(path.join(__dirname, 'public'), {maxAge: '1h'}
 // Routes for front end content.
 app.use('/', require('./routes/index'));
 
+// Local, in-app copy of the project's documentation (README, DEPLOYMENT,
+// API.md, docs/*) -- public, no auth, so it's readable even by a locked-out
+// admin or an air-gapped operator with no route to GitHub Pages.
+app.use('/docs', require('./routes/docs'));
+
 // API routes for authentication. 
 app.use('/api/auth',  require('./routes/auth'));
 

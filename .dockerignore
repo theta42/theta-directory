@@ -9,9 +9,15 @@
 .claude
 *.md
 # README.md and tos.md are both read at runtime (tos.md is loaded by
-# routes/index.js at boot), so they must stay in the build context.
+# routes/index.js at boot). DEPLOYMENT.md/API.md/directory_spec.md/docs/*.md
+# are read at runtime too, by routes/docs.js -- all must stay in the build
+# context.
 !README.md
 !tos.md
+!DEPLOYMENT.md
+!API.md
+!directory_spec.md
+!docs/**/*.md
 
 # Tests
 nodejs/tests/
