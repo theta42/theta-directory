@@ -1,0 +1,35 @@
+# Changelog
+
+All notable changes to this project are documented here. Format loosely
+follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
+correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
+
+## [Unreleased]
+
+## [1.1.2] - 2026-07-16
+
+### Fixed
+- Removed a dead IE<9-only `html5shim` script tag pointing at a domain that no longer resolves.
+
+### Added
+- **In-app documentation**: `GET /docs` and `GET /docs/:slug` render this project's own README, DEPLOYMENT, API.md, `docs/{ldap,oauth,configuration}.md`, and `directory_spec.md` server-side — readable from the running app with no dependency on GitHub Pages, which requires internet access to view. Public, no auth, rate-limited.
+
+## [1.1.1] - 2026-07-16
+
+### Added
+- **Terms of Service is now editable at runtime by admins.** `tos.md` used to be baked into the repo and read once at startup, requiring a code change and deploy to update. It's now a Redis-backed singleton, editable from a new "Terms of Service" card on the admin Dashboard, with the bundled `tos.md` used only as a one-time seed for new deployments. Admins can optionally require all users to re-accept the terms after a substantive edit. Closes [#39](https://github.com/theta42/sso-manager-node/issues/39). ([#62](https://github.com/theta42/sso-manager-node/pull/62))
+
+## [1.1.0] - 2026-07-16
+
+First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app update-check banner polls against going forward.
+
+### Added
+- Standalone backup script (`ops/backup.sh`) — snapshots LDAP (`slapcat`), Redis, and `./config`, with retention.
+- Admin-only in-app banner that checks GitHub releases every 24h and surfaces available updates.
+- Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
+- Merged OAuth Apps + LDAP Info into a single Integrations page.
+
+[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/theta42/sso-manager-node/compare/v1.1.1...v1.1.2
+[1.1.1]: https://github.com/theta42/sso-manager-node/compare/v1.1.0...v1.1.1
+[1.1.0]: https://github.com/theta42/sso-manager-node/releases/tag/v1.1.0

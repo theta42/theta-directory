@@ -25,6 +25,7 @@ const values = {
 // already covered by the "deployment" entry.
 const DOCS = {
 	overview:        {title: 'Overview',        file: path.join(__dirname, '../../README.md')},
+	changelog:       {title: 'Changelog',       file: path.join(__dirname, '../../CHANGELOG.md')},
 	deployment:      {title: 'Deployment',      file: path.join(__dirname, '../../DEPLOYMENT.md')},
 	api:             {title: 'API Reference',   file: path.join(__dirname, '../../API.md')},
 	ldap:            {title: 'LDAP',            file: path.join(__dirname, '../../docs/ldap.md')},

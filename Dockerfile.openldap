@@ -98,6 +98,7 @@ COPY tos.md /tos.md
 # Documentation, served in-app at /docs (routes/docs.js) so it's readable
 # without internet access. Same flattened-path convention as tos.md above.
 COPY README.md /README.md
+COPY CHANGELOG.md /CHANGELOG.md
 COPY DEPLOYMENT.md /DEPLOYMENT.md
 COPY API.md /API.md
 COPY directory_spec.md /directory_spec.md
