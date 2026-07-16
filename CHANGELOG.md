@@ -6,6 +6,16 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
 ## [Unreleased]
 
+## [1.1.4] - 2026-07-16
+
+### Added
+- **CI**: GitHub Actions now builds the real bundled image, seeds LDAP fixtures, and runs the full Jest suite on every PR (Node 18/20/22) -- this repo had unit tests but nothing ran them automatically until now.
+- **White-label**: `<title>`, the navbar brand text, and the favicon were hardcoded "SSO - Theta 42"/"SSO Manager" despite `conf.name` already existing (it was never actually rendered). New `conf.logo` key added alongside it. Footer attribution is left as-is. Closes [#6](https://github.com/theta42/sso-manager-node/issues/6).
+
+### Fixed
+- The bundled default ppolicy entry set `pwdLockout: FALSE`, silently making the admin "deactivate user" action not actually block that user's login. Fixed to `TRUE`, with a drift-correction path in `ops/ldap-setup.sh` for already-deployed instances. A separate, deeper ppolicy-overlay issue remains open as [#68](https://github.com/theta42/sso-manager-node/issues/68).
+- `top.ejs` referenced a `/static/favicon.svg` that didn't exist in `public/` (a pre-existing 404) -- now uses the existing logo file via `conf.logo`.
+
 ## [1.1.3] - 2026-07-16
 
 ### Added
@@ -34,7 +44,8 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 - Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
 - Merged OAuth Apps + LDAP Info into a single Integrations page.
 
-[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.3...HEAD
+[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.4...HEAD
+[1.1.4]: https://github.com/theta42/sso-manager-node/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/theta42/sso-manager-node/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/theta42/sso-manager-node/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/theta42/sso-manager-node/compare/v1.1.0...v1.1.1
