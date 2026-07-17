@@ -6,6 +6,12 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
 ## [Unreleased]
 
+## [1.1.10] - 2026-07-17
+
+### Added
+- A help icon (❓) in the top-right header now deep-links to the doc most relevant to the current page (falls back to the docs index elsewhere).
+- The in-app docs viewer (`/docs`) is now searchable — a simple line-substring search over the same local doc set, no new dependency, still works with no internet access.
+
 ## [1.1.9] - 2026-07-17
 
 ### Added
@@ -77,7 +83,8 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 - Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
 - Merged OAuth Apps + LDAP Info into a single Integrations page.
 
-[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.9...HEAD
+[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.10...HEAD
+[1.1.10]: https://github.com/theta42/sso-manager-node/compare/v1.1.9...v1.1.10
 [1.1.9]: https://github.com/theta42/sso-manager-node/compare/v1.1.8...v1.1.9
 [1.1.8]: https://github.com/theta42/sso-manager-node/compare/v1.1.7...v1.1.8
 [1.1.7]: https://github.com/theta42/sso-manager-node/compare/v1.1.6...v1.1.7
