@@ -6,7 +6,12 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
 ## [Unreleased]
 
-## [1.1.10] - 2026-07-17
+## [1.1.11] - 2026-07-17
+
+### Changed
+- Moved the help (❓) link out of the global header and onto each relevant card individually (Invite User, Add new user, User List, Service Accounts, group cards, OAuth/LDAP integration cards, My groups, Members of `<uid>`'s group, New API Token) — each now deep-links straight to the doc that actually covers it, instead of one generic header icon.
+
+Bumps to v1.1.11.
 
 ### Added
 - A help icon (❓) in the top-right header now deep-links to the doc most relevant to the current page (falls back to the docs index elsewhere).
@@ -83,7 +88,8 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 - Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
 - Merged OAuth Apps + LDAP Info into a single Integrations page.
 
-[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.10...HEAD
+[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.11...HEAD
+[1.1.11]: https://github.com/theta42/sso-manager-node/compare/v1.1.10...v1.1.11
 [1.1.10]: https://github.com/theta42/sso-manager-node/compare/v1.1.9...v1.1.10
 [1.1.9]: https://github.com/theta42/sso-manager-node/compare/v1.1.8...v1.1.9
 [1.1.8]: https://github.com/theta42/sso-manager-node/compare/v1.1.7...v1.1.8
