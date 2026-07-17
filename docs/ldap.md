@@ -57,6 +57,19 @@ membership (`memberOf` on the user); `refint` keeps it consistent on
 add/remove. **Admin permission checks read the group's `member` list**, not
 `memberOf` on the user.
 
+### Personal groups
+
+Every user (person or service account) also gets a **personal Unix group**
+at creation — `cn=<uid>,ou=groups,<base>`, `objectClass: posixGroup` (RFC
+2307), holding just `cn` and `gidNumber` (the user's primary GID). This is a
+different schema than the `groupOfNames` groups above — its membership
+attribute is `memberUid` (a bare username, not a DN), and unlike
+`groupOfNames` it's valid with zero members. It's excluded from the
+`/groups` page (which filters on `objectClass=groupOfNames`) and managed
+instead from the owning user's own profile page ("Members of `<uid>`'s
+group", admin-only) — add other accounts as supplementary members, e.g. to
+share write access to files owned by this group.
+
 The SSO requires three groups (seeded automatically by the entrypoint /
 `install.sh`):
 

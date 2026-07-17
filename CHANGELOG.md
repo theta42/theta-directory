@@ -6,6 +6,11 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
 ## [Unreleased]
 
+## [1.1.9] - 2026-07-17
+
+### Added
+- Every account's personal Unix group (its primary GID holder) can now have supplementary members managed from the account's profile page ("Members of `<uid>`'s group", admin-only) — e.g. to share write access to files owned by that group. Uses the standard `memberUid` attribute (RFC 2307 `posixGroup`).
+
 ## [1.1.8] - 2026-07-17
 
 ### Added
@@ -72,7 +77,8 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 - Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
 - Merged OAuth Apps + LDAP Info into a single Integrations page.
 
-[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.8...HEAD
+[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.9...HEAD
+[1.1.9]: https://github.com/theta42/sso-manager-node/compare/v1.1.8...v1.1.9
 [1.1.8]: https://github.com/theta42/sso-manager-node/compare/v1.1.7...v1.1.8
 [1.1.7]: https://github.com/theta42/sso-manager-node/compare/v1.1.6...v1.1.7
 [1.1.6]: https://github.com/theta42/sso-manager-node/compare/v1.1.5...v1.1.6

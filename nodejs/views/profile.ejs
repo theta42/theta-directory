@@ -52,6 +52,43 @@
 		renderUserGroups(currentUser);
 	}
 
+	async function renderPersonalGroupMembers(user){
+		try{
+			let res = await app.api.get('user/' + user.uid + '/group-members');
+			$.scope.personalGroupMembers.empty();
+			$.scope.personalGroupMembers.push(...(res.results || []).map(uid => ({uid})));
+		}catch(error){
+			console.error('renderPersonalGroupMembers error:', error)
+		}
+	}
+
+	async function removePersonalGroupMember(memberUid, btn){
+		const $row = $(btn).closest('tr');
+		const confirmed = await app.util.actionConfirm(`Remove ${memberUid} from ${currentUser.uid}'s group?`, $row, 'warning');
+		if (!confirmed) return;
+		app.api.delete('user/' + encodeURIComponent(currentUser.uid) + '/group-member/' + encodeURIComponent(memberUid), function(error, data){
+			if(error){ app.util.actionMessage((data && data.message) || 'Failed to remove from group', $row, 'danger'); return; }
+			$.scope.personalGroupMembers.remove('uid', memberUid);
+		});
+	}
+
+	var addPersonalGroupMemberSelect;
+	async function addPersonalGroupMembers(btn){
+		const uids = addPersonalGroupMemberSelect.get();
+		if(!uids.length) return;
+		const $card = $(btn).closest('.card-body');
+		for(const uid of uids){
+			await new Promise(function(resolve){
+				app.api.put('user/' + encodeURIComponent(currentUser.uid) + '/group-member/' + encodeURIComponent(uid), {}, function(error, data){
+					if(error) app.util.actionMessage((data && data.message) || `Failed to add "${uid}"`, $card, 'danger');
+					resolve();
+				});
+			});
+		}
+		addPersonalGroupMemberSelect.clear();
+		renderPersonalGroupMembers(currentUser);
+	}
+
 	async function determinUser(){
 		if(location.pathname.includes('/users/')){
 			let uid = location.pathname.replace('/users/', '');
@@ -122,9 +159,14 @@
 
 		renderProfile(currentUser);
 		renderUserGroups(currentUser);
+		renderPersonalGroupMembers(currentUser);
+		$('#personal-group-uid-label').text(currentUser.uid);
 
 		addGroupSelect = app.ui.groupSelect('#add-group-select', {
 			name: 'groups', values: [], placeholder: 'Type a group name…',
+		});
+		addPersonalGroupMemberSelect = app.ui.userSelect('#add-personal-group-member-select', {
+			name: 'members', values: [], placeholder: 'Type a username…',
 		});
 
 		// API Tokens are self-service only — never shown when an admin is
@@ -348,7 +390,52 @@
 				</div>
 			</div>
 		</div>
+
+		<div class="shadow-lg card card-default mb-8 group-required group-required-app_sso_admin">
+			<div class="card-header shadow">
+				<i class="fa-solid fa-people-group"></i>
+				Members of <span id="personal-group-uid-label"></span>'s group
+				<div class="float-end">
+					<i class="fa-solid fa-arrows-up-down"></i>
+				</div>
+			</div>
+			<div class="card-header shadow actionMessage" style="display:none">
+			</div>
+			<div class="card-body">
+				<p class="text-muted small">
+					Every account gets a personal Unix group (its primary GID) — add
+					other accounts here as supplementary members (e.g. to share write
+					access to files owned by this group).
+				</p>
+				<div class="table-responsive">
+					<table class="table">
+						<thead>
+							<th>
+								Username
+							</th>
+							<th class="text-end"></th>
+						</thead>
+						<tbody jq-repeat="personalGroupMembers">
+							<tr>
+								<td>{{uid}}</td>
+								<td class="text-end">
+									<button type="button" class="btn btn-sm btn-outline-danger" title="Remove from group" onclick="removePersonalGroupMember('{{uid}}', this)">
+										<i class="fa-solid fa-xmark"></i>
+									</button>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+				<label class="form-label small">Add member</label>
+				<div class="d-flex gap-2 align-items-start">
+					<div id="add-personal-group-member-select" class="flex-grow-1"></div>
+					<button type="button" class="btn btn-outline-dark" onclick="addPersonalGroupMembers(this)">Add</button>
+				</div>
+			</div>
+		</div>
 	</div>
+</div>
 </div>
 
 <!-- Token modal (shown once on create/rotate) -->
