@@ -794,6 +794,53 @@ User.addSSHkey = async function(data) {
 	return result;
 };
 
+// Every user gets a personal Unix group of the same name at creation (see
+// addPosixGroup) -- just a GID holder, cn always equal to the user's uid.
+// memberUid (RFC 2307, posixGroup) is a bare username, not a DN, unlike
+// groupOfNames' `member` used by app_sso_* groups in group_ldap.js.
+function personalGroupDN(uid){
+	return `cn=${uid},${conf.groupBase}`;
+}
+
+User.getPersonalGroupMembers = async function(uid) {
+	try {
+		return await withClient(async (client) => {
+			const res = await client.search(personalGroupDN(uid), {
+				scope: 'base',
+				filter: '(objectClass=posixGroup)',
+				attributes: ['memberUid'],
+			});
+			const entry = res.searchEntries[0];
+			return [].concat((entry && entry.memberUid) || []).filter(Boolean);
+		});
+	} catch(error) {
+		throw error;
+	}
+};
+
+User.addPersonalGroupMember = async function(uid, memberUid) {
+	await this.get(memberUid); // throws UserNotFound if the target uid doesn't exist
+	await withClient(async (client) => {
+		await client.modify(personalGroupDN(uid), [
+			new Change({
+				operation: 'add',
+				modification: new Attribute({ type: 'memberUid', values: [memberUid] }),
+			}),
+		]);
+	});
+};
+
+User.removePersonalGroupMember = async function(uid, memberUid) {
+	await withClient(async (client) => {
+		await client.modify(personalGroupDN(uid), [
+			new Change({
+				operation: 'delete',
+				modification: new Attribute({ type: 'memberUid', values: [memberUid] }),
+			}),
+		]);
+	});
+};
+
 User.invite = async function(data = {}){
 	try{
 		let token = await InviteToken.create({

@@ -144,6 +144,41 @@ router.put('/:uid/active', async function(req, res, next){
 	}
 });
 
+router.get('/:uid/group-members', async function(req, res, next){
+	try{
+		await permission.byGroup(req.user, ['app_sso_admin']);
+		return res.json({results: await User.getPersonalGroupMembers(req.params.uid)});
+	}catch(error){
+		next(error);
+	}
+});
+
+router.put('/:uid/group-member/:memberUid', async function(req, res, next){
+	try{
+		await permission.byGroup(req.user, ['app_sso_admin']);
+		await User.addPersonalGroupMember(req.params.uid, req.params.memberUid);
+		return res.json({
+			results: true,
+			message: `Added ${req.params.memberUid} to ${req.params.uid}'s group`
+		});
+	}catch(error){
+		next(error);
+	}
+});
+
+router.delete('/:uid/group-member/:memberUid', async function(req, res, next){
+	try{
+		await permission.byGroup(req.user, ['app_sso_admin']);
+		await User.removePersonalGroupMember(req.params.uid, req.params.memberUid);
+		return res.json({
+			results: true,
+			message: `Removed ${req.params.memberUid} from ${req.params.uid}'s group`
+		});
+	}catch(error){
+		next(error);
+	}
+});
+
 router.put('/:uid', async function(req, res, next){
 	try{
 		let user;
