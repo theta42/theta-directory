@@ -25,7 +25,7 @@ router.post('/', async function(req, res, next){
 		req.body.created_by = req.user.uid
 		req.body.manager = [req.user.dn];
 
-		const user = await User.add(req.body);
+		let user = await User.add(req.body);
 		const verif = await UserVerification.getOrCreate(user.uid);
 		const updates = { password_must_change: true };
 		if (req.body.tosAgree) updates.tos_accepted = true, updates.tos_accepted_at = Date.now();
@@ -38,6 +38,12 @@ router.post('/', async function(req, res, next){
 			try {
 				const group = await Group.get('app_sso_service_account');
 				await group.addMember(user);
+				// User.add() already cached `user` (via its own internal
+				// User.get()) before this group membership existed, so the
+				// cached isServiceAccount would be stuck wrong for 5 minutes
+				// (the cache TTL) without this -- re-fetch after clearing.
+				User.clearCache();
+				user = await User.get(user.uid);
 			} catch (error) {
 				console.error(`user.add: failed to mark ${user.uid} as a service account:`, error.message);
 			}

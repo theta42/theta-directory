@@ -210,10 +210,13 @@ const user_parse = function(data){
 	data.isActive   = data.pwdAccountLockedTime ? '' : 'active';
 	data.isInactive = data.pwdAccountLockedTime ? 'inactive' : '';
 
-	// manager (COSINE, SUP distinguishedName) is multi-valued; ldapts returns
-	// a bare string for a single value and an array for multiple -- normalize
-	// to always be an array of DNs.
-	data.manager = [].concat(data.manager || []).filter(Boolean);
+	// manager (COSINE, SUP distinguishedName) and memberOf (from the memberof
+	// overlay) are both multi-valued; ldapts returns a bare string for a
+	// single value and an array for multiple -- normalize both to always be
+	// an array, or app-base.js's `for(let group of user.memberOf)` silently
+	// iterates a single DN string character-by-character instead of once.
+	data.manager   = [].concat(data.manager || []).filter(Boolean);
+	data.memberOf  = [].concat(data.memberOf || []).filter(Boolean);
 
 	return data;
 }
@@ -347,6 +350,13 @@ User.get = async function(data, key) {
         Object.assign(obj, user_parse(user));
 
         const verif = await UserVerification.getOrCreate(obj.uid);
+
+        // Same membership check as User.listDetail() -- see the comment there.
+        try{
+            const svcGroup = await Group.get('app_sso_service_account');
+            const serviceAccountDNs = new Set((svcGroup.member || []).map(dn => dn.toLowerCase()));
+            obj.isServiceAccount = serviceAccountDNs.has(String(obj.dn).toLowerCase()) ? 'yes' : '';
+        }catch(error){ obj.isServiceAccount = ''; }
 
         // Auto-flag legacy MD5 password users — persist so subsequent cache hits see it
         if (isLegacyMD5 && !verif.password_must_change) {

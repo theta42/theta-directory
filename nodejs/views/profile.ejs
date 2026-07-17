@@ -18,10 +18,38 @@
 	async function renderUserGroups(user){
 		try{
 			let res = await app.api.get('group/?detail=true&member='+user.uid);
+			$.scope.mygroups.empty();
 			$.scope.mygroups.push(...res.results);
 		}catch(error){
 			console.error('renderUserGroups error:', error)
 		}
+	}
+
+	async function removeFromGroup(cn, btn){
+		const $row = $(btn).closest('tr');
+		const confirmed = await app.util.actionConfirm(`Remove ${currentUser.uid} from "${cn}"?`, $row, 'warning');
+		if (!confirmed) return;
+		app.api.delete('group/' + encodeURIComponent(cn) + '/' + encodeURIComponent(currentUser.uid), function(error, data){
+			if(error){ app.util.actionMessage((data && data.message) || 'Failed to remove from group', $row, 'danger'); return; }
+			$.scope.mygroups.remove('cn', cn);
+		});
+	}
+
+	var addGroupSelect;
+	async function addToGroups(btn){
+		const cns = addGroupSelect.get();
+		if(!cns.length) return;
+		const $card = $(btn).closest('.card-body');
+		for(const cn of cns){
+			await new Promise(function(resolve){
+				app.api.put('group/' + encodeURIComponent(cn) + '/' + encodeURIComponent(currentUser.uid), {}, function(error, data){
+					if(error) app.util.actionMessage((data && data.message) || `Failed to add to "${cn}"`, $card, 'danger');
+					resolve();
+				});
+			});
+		}
+		addGroupSelect.clear();
+		renderUserGroups(currentUser);
 	}
 
 	async function determinUser(){
@@ -95,6 +123,10 @@
 		renderProfile(currentUser);
 		renderUserGroups(currentUser);
 
+		addGroupSelect = app.ui.groupSelect('#add-group-select', {
+			name: 'groups', values: [], placeholder: 'Type a group name…',
+		});
+
 		// API Tokens are self-service only — never shown when an admin is
 		// viewing someone else's profile via /users/:uid.
 		if(isOwnProfile){
@@ -159,7 +191,7 @@
 			<div class="profile-body" jq-repeat="user">
 				<div class="card-body profile-body-{{uid}}">
 					<h2><i>User Name:</i> <b>{{uid}}</b></h2>
-					<i>Name:</i> <b>{{givenName}} {{sn}}</b><br />
+					{{^isServiceAccount}}<i>Name:</i> <b>{{givenName}} {{sn}}</b><br />{{/isServiceAccount}}
 					<i>Email:</i> <b>{{mail}}</b>
 					{{#emailVerified}}<span class="badge bg-success ms-1"><i class="fa-solid fa-circle-check"></i> Verified</span>{{/emailVerified}}
 					<br />
@@ -247,7 +279,7 @@
 
 						<div class="mb-3">
 							<label class="form-label">Mobile Phone</label>
-							<input type="text" class="form-control" name="mobile" placeholder="9175551234" validate=":9" value="{{mobile}}" />
+							<input type="text" class="form-control" name="mobile" placeholder="9175551234" value="{{mobile}}" />
 						</div>
 						<div class="mb-3">
 							<label class="form-label">Home Directory</label>
@@ -282,7 +314,7 @@
 			</div>
 			<div class="card-header shadow actionMessage" style="display:none">
 			</div>
-			<div class="card-body" style="padding-bottom:0">
+			<div class="card-body">
 				<div class="table-responsive">
 					<table class="table">
 						<thead>
@@ -292,14 +324,27 @@
 							<th>
 								Description
 							</th>
+							<th class="group-required group-required-app_sso_admin"></th>
 						</thead>
 						<tbody jq-repeat="mygroups">
 							<tr>
 								<td>{{cn}}</td>
 								<td>{{description}}</td>
+								<td class="text-end group-required group-required-app_sso_admin">
+									<button type="button" class="btn btn-sm btn-outline-danger" title="Remove from group" onclick="removeFromGroup('{{cn}}', this)">
+										<i class="fa-solid fa-xmark"></i>
+									</button>
+								</td>
 							</tr>
 						</tbody>
 					</table>
+				</div>
+				<div class="group-required group-required-app_sso_admin">
+					<label class="form-label small">Add to group</label>
+					<div class="d-flex gap-2 align-items-start">
+						<div id="add-group-select" class="flex-grow-1"></div>
+						<button type="button" class="btn btn-outline-dark" onclick="addToGroups(this)">Add</button>
+					</div>
 				</div>
 			</div>
 		</div>
