@@ -59,6 +59,14 @@ async function fetchUsernameSuggestions() {
 		$form.find('#personNameFields').toggle(!checked);
 		$form.find('#serviceAccountNameField').toggle(checked);
 
+		// Service accounts aren't a person with a mailbox, and a blank
+		// password is fine (no userPassword attribute set -- the account
+		// simply can't bind). Disabling (not just hiding) keeps disabled
+		// fields out of both form serialization and validation.
+		$form.find('[name=mail]').prop('disabled', checked).closest('.mb-3').toggle(!checked);
+		$form.find('[name=userPassword]').prop('disabled', checked).closest('.mb-3').toggle(!checked);
+		$form.find('[name=passwordMatch]').prop('disabled', checked).closest('.mb-3').toggle(!checked);
+
 		if(checked){
 			// Filler values so the LDAP schema (inetOrgPerson requires sn) is
 			// satisfied; not shown anywhere, the account name is what matters.

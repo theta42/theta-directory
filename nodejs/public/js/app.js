@@ -102,7 +102,15 @@ app.user = (function(app){
 		});
 	}
 
-	return {list, remove, createInvite, setActive};
+	// A user DN's cn is always their uid (see models/user_ldap.js addLdapUser,
+	// `data.cn = data.uid`) -- pulling it straight out of the DN avoids an
+	// extra lookup just to display a manager list.
+	function dnToUid(dn){
+		var m = /^cn=([^,]+)/i.exec(dn || '');
+		return m ? m[1] : dn;
+	}
+
+	return {list, remove, createInvite, setActive, dnToUid};
 
 })(app);
 
@@ -148,6 +156,21 @@ app.ui = (function(app){
 	}
 	// Drop the cache (e.g. after a group is created) so the next selector refetches.
 	function refreshGroups(){ _groupsPromise = null; return loadGroups(); }
+
+	// All usernames, fetched once and shared across every user selector (e.g. manager pickers).
+	var _usersPromise = null;
+	function loadUsers(){
+		if(!_usersPromise){
+			_usersPromise = new Promise(function(resolve){
+				app.user.list(function(error, data){
+					if(error || !data || !data.results){ resolve([]); return; }
+					resolve(data.results.map(function(u){ return u.uid; }).filter(Boolean).sort());
+				});
+			});
+		}
+		return _usersPromise;
+	}
+	function refreshUsers(){ _usersPromise = null; return loadUsers(); }
 
 	// opts: { values, options, freeSolo, placeholder, name, separator }
 	// Returns a handle: { get, set, add, clear, setOptions, element }.
@@ -249,7 +272,25 @@ app.ui = (function(app){
 		return handle;
 	}
 
-	return { tagInput: tagInput, groupSelect: groupSelect, loadGroups: loadGroups, refreshGroups: refreshGroups };
+	// Universal user selector (e.g. picking managers). Preloads all usernames.
+	function userSelect(mount, opts){
+		opts = opts || {};
+		var handle = tagInput(mount, {
+			name: opts.name || 'manager',
+			values: opts.values || [],
+			options: [],
+			freeSolo: opts.freeSolo !== false,
+			separator: opts.separator != null ? opts.separator : '\n',
+			placeholder: opts.placeholder || 'Type a username…',
+		});
+		loadUsers().then(function(users){ handle.setOptions(users); });
+		return handle;
+	}
+
+	return {
+		tagInput: tagInput, groupSelect: groupSelect, loadGroups: loadGroups, refreshGroups: refreshGroups,
+		userSelect: userSelect, loadUsers: loadUsers, refreshUsers: refreshUsers,
+	};
 })(app);
 
 app.oauthClient = (function(app){

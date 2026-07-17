@@ -103,7 +103,6 @@ async function addPosixAccount(client, data){
 		givenName: data.givenName,
 		loginShell: data.loginShell,
 		homeDirectory: data.homeDirectory,
-		userPassword: data.userPassword,
 		description: data.description || ' ',
 		sudoHost: 'ALL',
 		sudoCommand: 'ALL',
@@ -131,6 +130,19 @@ async function addPosixAccount(client, data){
 		entry.dateOfBirth = data.dob;
 	}
 
+	// userPassword is optional -- a service account with no password set
+	// simply can't bind (no special enforcement needed, that's the default
+	// LDAP simple-bind behavior for an entry lacking the attribute).
+	if (data.userPassword) {
+		entry.userPassword = data.userPassword;
+	}
+
+	// manager (COSINE, SUP distinguishedName) is naturally multi-valued --
+	// every account gets at least the DN of whoever created it.
+	if (data.manager && [].concat(data.manager).length) {
+		entry.manager = [].concat(data.manager);
+	}
+
 	await client.add(`cn=${data.cn},${conf.userBase}`, entry);
 
 	return data
@@ -151,9 +163,13 @@ async function addLdapUser(client, data){
 			data.uid = `${data.givenName[0]}${data.sn}`.toLowerCase();
 		}
 		data.cn = data.uid;
-		data.loginShell = '/bin/bash';
-		data.homeDirectory= `/home/${data.uid}`;
-		data.userPassword = hashPasswordSSHA512(data.userPassword);
+		data.loginShell = data.loginShell || '/bin/bash';
+		data.homeDirectory = data.homeDirectory || `/home/${data.uid}`;
+		if (data.userPassword) {
+			data.userPassword = hashPasswordSSHA512(data.userPassword);
+		} else {
+			delete data.userPassword;
+		}
 
 		console.log('addLdapUser', data)
 		group = await addPosixGroup(client, data);
@@ -193,6 +209,11 @@ const user_parse = function(data){
 	// Use truthy strings so jq-repeat section blocks ({{#isActive}}) fire correctly
 	data.isActive   = data.pwdAccountLockedTime ? '' : 'active';
 	data.isInactive = data.pwdAccountLockedTime ? 'inactive' : '';
+
+	// manager (COSINE, SUP distinguishedName) is multi-valued; ldapts returns
+	// a bare string for a single value and an array for multiple -- normalize
+	// to always be an array of DNs.
+	data.manager = [].concat(data.manager || []).filter(Boolean);
 
 	return data;
 }
@@ -242,6 +263,8 @@ User.listDetail = async function(){
 			serviceAccountDNs = new Set((svcGroup.member || []).map(dn => dn.toLowerCase()));
 		}catch(error){ /* group not seeded yet on an old deployment -- treat as none */ }
 
+		const dnToUid = new Map(searchEntries.map(e => [String(e.dn).toLowerCase(), e.uid]));
+
 		const users = await Promise.all(searchEntries.map(async (entry) => {
 			const rawPassword = entry.userPassword ? entry.userPassword.toString() : '';
 			const isLegacyMD5 = rawPassword.toUpperCase().startsWith('{MD5}');
@@ -269,6 +292,7 @@ User.listDetail = async function(){
 			].filter(Boolean);
 			obj.onboardingRequired = obj.onboardingNeeds.length > 0 ? 'yes' : '';
 			obj.isServiceAccount   = serviceAccountDNs.has(String(obj.dn).toLowerCase()) ? 'yes' : '';
+			obj.managerUids        = obj.manager.map(dn => dnToUid.get(String(dn).toLowerCase()) || dn);
 
 			return obj;
 		}));
@@ -421,7 +445,7 @@ User.update = async function(data){
 			}
 		}
 
-		let editableFeilds = ['mobile', 'description'];
+		let editableFeilds = ['mobile', 'description', 'homeDirectory', 'loginShell'];
 
 		await withClient(async (client) => {
 			for(let field of editableFeilds){
@@ -468,6 +492,21 @@ User.update = async function(data){
 					}),
 				]);
 				this.dateOfBirth = data.dateOfBirth;
+			}
+
+			if(data.manager !== undefined){
+				// Client sends uids; resolve each to a DN before writing --
+				// manager (COSINE, SUP distinguishedName) stores DNs, not uids.
+				const uids = [].concat(data.manager || []).filter(Boolean);
+				const managers = await Promise.all(uids.map(uid => User.get(uid)));
+				const dns = managers.map(u => u.dn);
+				await client.modify(this.dn, [
+					new Change({
+						operation: 'replace',
+						modification: new Attribute({ type: 'manager', values: dns }),
+					}),
+				]);
+				this.manager = dns;
 			}
 		});
 		cache.clear();
@@ -536,6 +575,12 @@ User.addByInvite = async function(data){
 		}
 
 		data.mail = token.mail;
+
+		// Default manager: whoever sent the invite.
+		try {
+			const inviter = await this.get(token.created_by);
+			data.manager = [inviter.dn];
+		} catch(e) { /* inviter no longer exists -- leave manager unset */ }
 
 		const suggestions = await this.usernameSuggestions(data.givenName, data.sn, data.dob);
 		if (!data.uid || !suggestions.includes(data.uid)) {

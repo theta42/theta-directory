@@ -23,6 +23,7 @@ router.post('/', async function(req, res, next){
 		await permission.byGroup(req.user, ['app_sso_admin'])
 
 		req.body.created_by = req.user.uid
+		req.body.manager = [req.user.dn];
 
 		const user = await User.add(req.body);
 		const verif = await UserVerification.getOrCreate(user.uid);
@@ -145,7 +146,15 @@ router.put('/:uid', async function(req, res, next){
 			user = req.user;
 		}else{
 			user = await User.get(req.params.uid);
-			await permission.byGroup(req.user, ['app_sso_admin'])
+			const isManager = (user.manager || []).includes(req.user.dn);
+			if(!isManager) await permission.byGroup(req.user, ['app_sso_admin'])
+		}
+
+		// The manager picker is a tag widget backed by a single newline-separated
+		// hidden input (see public/js/app.js app.ui.userSelect), same convention
+		// as oauth_client.js's allowed_groups.
+		if (typeof req.body.manager === 'string') {
+			req.body.manager = req.body.manager.split('\n').map(s => s.trim()).filter(Boolean);
 		}
 
 		return res.json({

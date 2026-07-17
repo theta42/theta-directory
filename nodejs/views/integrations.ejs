@@ -208,40 +208,8 @@
 		});
 	}
 
-	// ── Service accounts ──────────────────────────────────────────────────
-	async function svcTableAJAX(){
-		let data = await app.api.get('service-account');
-		$.scope.serviceAccountCard.empty();
-		$.each(data.results, function(_, acct){
-			$.scope.serviceAccountCard.push(acct);
-		});
-	}
-
-	async function rotateServiceAccountPassword(cn, btn){
-		const $card = $(btn).closest('.card');
-		const confirmed = await app.util.actionConfirm('Rotate the password for "' + cn + '"? Anything still using the old password will stop working immediately.', $card, 'warning');
-		if (!confirmed) return;
-		app.api.put('service-account/' + encodeURIComponent(cn) + '/password', {}, function(error, data){
-			if(error){ app.util.actionMessage('Error: ' + (data && data.message), $card, 'danger'); return; }
-			showSecret(data.results.password, 'Password for ' + cn);
-		});
-	}
-
-	async function deleteServiceAccount(cn, btn){
-		const $card = $(btn).closest('.card');
-		$card.addClass('table-warning');
-		const confirmed = await app.util.actionConfirm('Delete service account "' + cn + '"? Anything binding as it will stop working immediately.', $card, 'warning');
-		$card.removeClass('table-warning');
-		if (!confirmed) return;
-		app.api.delete('service-account/' + encodeURIComponent(cn), function(error, data){
-			if(error){ app.util.actionMessage('Error: ' + (data && data.message), $card, 'danger'); return; }
-			$.scope.serviceAccountCard.remove('cn', cn);
-		});
-	}
-
 	$(document).ready(function(){
 		tableAJAX();
-		svcTableAJAX();
 
 		// Initialise the create-form tag widgets.
 		createScopes = app.ui.tagInput('#create-scopes', {
@@ -255,9 +223,6 @@
 		// After a successful create, reset the widgets too (form reset ignores them).
 		$('form[action="oauth/client/"]').attr('evalAJAX',
 			'showSecret(data.client_secret, "Client Secret"); tableAJAX(); $form.trigger("reset"); createScopes.set(DEFAULT_SCOPES); createGroups.clear();'
-		);
-		$('form[action="service-account/"]').attr('evalAJAX',
-			'showSecret(data.password, "Password for " + data.cn); svcTableAJAX(); $form.trigger("reset");'
 		);
 	});
 </script>
@@ -509,8 +474,9 @@
 								<button class="btn btn-outline-secondary" type="button" onclick="copyField('f-bindDn', this)" title="Copy"><i class="fa-solid fa-copy"></i></button>
 							</div>
 							<small class="field-help text-muted d-block">
-								A read-only bind account — create one below under
-								<b>Service Accounts</b> (don't reuse a real person's login or the admin DN).
+								A read-only bind account — create one from
+								<a href="/users">Users &gt; Service Accounts</a> (don't reuse a real
+								person's login or the admin DN).
 							</small>
 						</dd>
 					</dl>
@@ -527,9 +493,10 @@
 					<p class="text-muted small">
 						For full host login, SSH keys, and sudo via LDAP (not just one app) —
 						clone <a href="https://github.com/theta42/ldap-client" target="_blank">theta42/ldap-client</a>
-						and run this on the host. Fill in a service account's password (create
-						one below) and, if you want this host's access/sudo groups
-						auto-registered, an <a href="/">API token</a> from your Profile.
+						and run this on the host. Fill in a service account's password
+						(create one from <a href="/users">Users &gt; Service Accounts</a>) and,
+						if you want this host's access/sudo groups auto-registered, an
+						<a href="/">API token</a> from your Profile.
 					</p>
 					<div class="input-group">
 						<textarea id="f-bashSnippet" class="form-control font-monospace" rows="16" readonly style="font-size:.8rem"></textarea>
@@ -541,65 +508,6 @@
 			</div>
 		</div>
 
-		<div class="col-12">
-			<div class="card shadow-sm border-info">
-				<div class="card-header bg-info bg-opacity-10">
-					<i class="fa-solid fa-user-gear"></i> Service Accounts
-				</div>
-				<div class="card-body">
-					<p class="text-muted small mb-3">
-						Bind-only LDAP identities for apps and hosts — not real people, can't log
-						into this UI, no home directory. theta-env's <code>cn=ldapclient</code>
-						bootstrap account (used by theta42/proxy) shows up here too, since it's
-						the same kind of account.
-						<br>
-						Need an account something actually <i>runs as</i> on a Linux host instead
-						(a media manager, a torrent client, ...) — with a real <code>uidNumber</code>
-						and a group other accounts join for write access? That's a Unix account, not
-						a bind-only one — create it from <a href="/users">Users</a> with
-						<b>This is a service account</b> checked.
-					</p>
-					<div class="row g-3">
-						<div class="col-md-4">
-							<form action="service-account/" method="post" onsubmit="formAJAX(this)">
-								<div class="mb-2">
-									<label class="form-label">Name</label>
-									<input type="text" class="form-control shadow" name="cn" placeholder="ldapclient" validate=":1">
-								</div>
-								<div class="mb-2">
-									<label class="form-label">Description <small class="text-muted">(optional)</small></label>
-									<input type="text" class="form-control shadow" name="description" placeholder="Bind account for gitea.example.com">
-								</div>
-								<button type="submit" class="btn btn-outline-dark btn-sm">
-									<i class="fa-solid fa-plus"></i> Create
-								</button>
-							</form>
-						</div>
-						<div class="col-md-8">
-							<div class="table-responsive">
-								<table class="table table-sm mb-0">
-									<thead><tr><th>Name</th><th>Description</th><th></th></tr></thead>
-									<tbody jq-repeat="serviceAccountCard">
-										<tr>
-											<td><code>cn={{cn}},<%= userBase %></code></td>
-											<td>{{description}}</td>
-											<td class="text-end">
-												<button type="button" class="btn btn-sm btn-outline-warning" title="Rotate password" onclick="rotateServiceAccountPassword('{{cn}}', this)">
-													<i class="fa-solid fa-key"></i>
-												</button>
-												<button type="button" class="btn btn-sm btn-outline-danger" title="Delete" onclick="deleteServiceAccount('{{cn}}', this)">
-													<i class="fa-solid fa-trash"></i>
-												</button>
-											</td>
-										</tr>
-									</tbody>
-								</table>
-							</div>
-						</div>
-					</div>
-				</div>
-			</div>
-		</div>
 	</div>
 </div>
 </div>
@@ -613,8 +521,8 @@
 			'export ldap_host="<%= ldapHost %>"',
 			'export ldap_base_dn="<%= baseDn %>"',
 			'',
-			'# A read-only service account -- create one under Service Accounts',
-			'# above, then fill in its password below.',
+			'# A read-only service account -- create one under Users > Service',
+			'# Accounts, then fill in its password below.',
 			'export ldap_bind_dn="<%= exampleBindDn %>"',
 			'export ldap_bind_password="CHANGE-ME"',
 			'',

@@ -6,6 +6,13 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
 ## [Unreleased]
 
+## [1.1.7] - 2026-07-17
+
+### Changed
+- **Service accounts unified to one kind.** Removed the LDAP bind-only service account type (the Integrations → LDAP "Service Accounts" card, and its `/api/service-account` routes) -- every service account is now a real Unix/POSIX account with a UID, created from the new **Users → Service Accounts** tab. Email and password are both optional for service accounts; a blank password means no `userPassword` is set at all (the account simply can't bind).
+- **Added a `manager` field to every account.** Multi-valued (a list of usernames), defaults to whoever created the account (the admin who added it, or whoever sent the invite), and reassignable from the account's Edit form. Anyone listed as a manager can edit that account -- same fields an admin can (mobile, description, SSH key, date of birth, home directory, login shell, manager list) -- without needing `app_sso_admin`.
+- `homeDirectory` and `loginShell` are now editable from the Edit Profile form (previously view-only).
+
 ## [1.1.6] - 2026-07-16
 
 ### Changed
@@ -54,7 +61,8 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 - Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
 - Merged OAuth Apps + LDAP Info into a single Integrations page.
 
-[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.6...HEAD
+[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.7...HEAD
+[1.1.7]: https://github.com/theta42/sso-manager-node/compare/v1.1.6...v1.1.7
 [1.1.6]: https://github.com/theta42/sso-manager-node/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/theta42/sso-manager-node/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/theta42/sso-manager-node/compare/v1.1.3...v1.1.4
