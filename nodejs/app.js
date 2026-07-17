@@ -82,7 +82,6 @@ app.use('/api/user', middleware.auth, require('./routes/user'));
 app.use('/api/token', middleware.auth, require('./routes/token'));
 
 app.use('/api/group', middleware.auth, require('./routes/group'));
-app.use('/api/service-account', middleware.auth, require('./routes/service_account'));
 app.use('/api/notification', middleware.auth, require('./routes/notification'));
 app.use('/api/update-check', middleware.auth, require('./routes/update_check'));
 app.use('/api/tos', middleware.auth, require('./routes/tos'));

@@ -35,6 +35,15 @@ User entries are `cn=<uid>,ou=people,<base>` and carry the objectClasses:
 - `sudoRole` — per-user sudo rules (`sudoCommand`, `sudoHost`, `sudoUser`).
 - `theta42Person` (custom auxiliary; `dateOfBirth`).
 
+Every user (person or service account) also carries a `manager` attribute
+(the standard COSINE `manager`, `SUP distinguishedName`) — one or more DNs of
+the people who created/administer that account. Set automatically to the
+creator's DN on signup (whoever an admin was logged in as, or whoever sent
+the invite), and reassignable later from the account's Edit form. Anyone
+listed as a `manager` can edit that account (same fields an admin can:
+mobile, description, SSH key, date of birth, home directory, login shell,
+and the manager list itself) without needing `app_sso_admin`.
+
 Passwords are stored as `{SSHA512}` (8-byte salt, sha512(pass+salt), base64),
 verified by the `pw-sha2` module. The app's `hashPasswordSSHA512` is the
 canonical hasher; if you provision users out-of-band, hash passwords the same
@@ -94,33 +103,39 @@ The entrypoint leaves existing certs untouched (idempotent).
 
 ## Service accounts
 
-There are two different kinds of "not a real person" account, and which one
-you want depends on what's consuming it:
+A service account is a normal `posixAccount` for something that isn't a
+person: a media manager, a torrent client, a service like Emby, or a
+read-only bind account an app uses to look users up — anything that needs a
+real `uidNumber`/`gidNumber` to own files, or that other accounts join via a
+group for write access (e.g. a `stuff_manager` group granting write rights
+to a media library). There's only one kind — every account, person or
+service, is a real `posixAccount` with a UID.
 
-**LDAP bind-only** — for an app that just needs to bind LDAP to look users up
-(its own "LDAP authentication" settings page, or the read-only account
-`theta42/ldap-client` binds as). Not a `posixAccount` — no `uidNumber`, no
-home directory, can't log into this UI. Create one from the
-**Integrations → LDAP** tab's *Service Accounts* section (create, rotate
-password, delete). theta-env's bootstrap creates `cn=ldapclient` this same
-way automatically, and the proxy binds as it — don't reuse the admin DN for
-this.
+Create one from the **Users → Service Accounts** tab's "Add new user" form
+with **This is a service account** checked — it skips the birthday/
+Terms-of-Service fields a real person's account needs and asks for just an
+account name. It's flagged (via membership in the `app_sso_service_account`
+group) so it's listed separately from real people and excluded from "all
+users" notification broadcasts.
 
-**Unix/POSIX** — for an account something actually *runs as* on a Linux
-host: a media manager, a torrent client, a service like Emby — anything that
-needs a real `uidNumber`/`gidNumber` to own files or that other accounts join
-via a group for write access (e.g. a `stuff_manager` group granting write
-rights to a media library). Create one from the **Users** page's "Add new
-user" form with **This is a service account** checked — it skips the
-birthday/Terms-of-Service fields a real person's account needs and asks for
-just an account name. It's a normal `posixAccount`, just flagged (via
-membership in the `app_sso_service_account` group) so it's visibly marked in
-the Users list and excluded from "all users" notification broadcasts.
+Email and password are both optional for a service account:
 
-Either way: don't reuse the admin DN, and give it only the group memberships
-it actually needs.
+- No `mail` is set unless you give it one (it never needs a mailbox).
+- Leaving the password blank is fine — no `userPassword` attribute is set at
+  all, and an entry with no `userPassword` simply can't bind with any
+  password (standard LDAP simple-bind behavior). Only set a password if the
+  account actually needs to authenticate as itself (e.g. a bind-only account
+  an app uses to look users up).
 
-Example bind test (LDAP bind-only account):
+theta-env's bootstrap creates its own `cn=ldapclient` bind account directly
+against LDAP (independent of this app), and the proxy binds as it — that
+account won't show up in the Service Accounts tab since it isn't managed
+through this app, but it keeps working unchanged.
+
+Either way: don't reuse the admin DN, and give a service account only the
+group memberships and `manager`s it actually needs.
+
+Example bind test (a service account with a password set):
 
 ```bash
 ldapsearch -x -H ldaps://sso.example.com:636 \

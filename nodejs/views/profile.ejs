@@ -9,6 +9,7 @@
 		// data.photo = unescape(encodeURIComponent(data.jpegPhoto));
 		user.createTimestamp = moment(user.createTimestamp, "YYYYMMDDHHmmssZ").fromNow();
 		user.modifyTimestamp = moment(user.modifyTimestamp, "YYYYMMDDHHmmssZ").fromNow();
+		user.managerUids = (user.manager || []).map(app.user.dnToUid);
 
 		$.scope.user.update(user);
 		$.scope.passwordReset.update(user);
@@ -42,8 +43,15 @@
 		$.scope.editProfile.update(user);
 		// jq-repeat's update() is trailing-edge throttled (~50ms) as of 2.1.0 --
 		// wait for the throttle tick to land before sliding the updated card
-		// into view, or it can briefly show stale/empty data.
+		// into view, or it can briefly show stale/empty data. The manager
+		// picker is a JS widget, not a mustache-bound input, so it also has to
+		// wait for update() to (re-)render its empty mount div before attaching.
 		setTimeout(function(){
+			app.ui.userSelect('#edit-manager', {
+				name: 'manager',
+				values: user.managerUids || [],
+				placeholder: 'Type a username…',
+			});
 			$profileCard.slideUp();
 			$editCard.slideDown();
 		}, 60);
@@ -161,6 +169,9 @@
 					<i>LDAP DN:</i> <b>{{dn}} </b><br />
 					<i>Home Directory:</i> <b>{{homeDirectory}} </b><br />
 					<i>Login Shell:</i> <b>{{loginShell}} </b><br />
+					<i>Manager(s):</i>
+					{{#managerUids}}<span class="badge bg-secondary me-1">{{.}}</span>{{/managerUids}}
+					<br />
 					<i>Status:</i>
 					{{#isActive}}<span class="badge bg-success">Active</span>{{/isActive}}
 					{{#isInactive}}<span class="badge bg-danger">Inactive</span>{{/isInactive}}
@@ -237,6 +248,18 @@
 						<div class="mb-3">
 							<label class="form-label">Mobile Phone</label>
 							<input type="text" class="form-control" name="mobile" placeholder="9175551234" validate=":9" value="{{mobile}}" />
+						</div>
+						<div class="mb-3">
+							<label class="form-label">Home Directory</label>
+							<input type="text" class="form-control" name="homeDirectory" placeholder="/home/jsmith" value="{{homeDirectory}}" />
+						</div>
+						<div class="mb-3">
+							<label class="form-label">Login Shell</label>
+							<input type="text" class="form-control" name="loginShell" placeholder="/bin/bash" value="{{loginShell}}" />
+						</div>
+						<div class="mb-3">
+							<label class="form-label">Manager(s)</label>
+							<div id="edit-manager"></div>
 						</div>
 						<div class="mb-3">
 							<label class="form-label">User Description (Optional)</label>
