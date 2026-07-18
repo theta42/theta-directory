@@ -6,7 +6,12 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
 ## [Unreleased]
 
-## [1.1.12] - 2026-07-17
+## [1.1.13] - 2026-07-17
+
+### Fixed
+- The new concept docs' cross-links (`concepts-accounts.html` etc.) are the correct, working URL on the Jekyll/GitHub Pages build (where the page's URL is its filename stem) but didn't resolve in the in-app docs viewer, which serves docs at a separate short slug (`/docs/accounts`). The in-app renderer now also resolves a doc's real filename as a fallback, so one link written in a doc works on both targets.
+
+Bumps to v1.1.13.
 
 ### Added
 - Three new plain-language docs aimed at less technical readers, replacing the schema-level LDAP/OAuth/API docs as the target of most card help links: **Accounts, Groups & Managers**, **Connecting Apps (SSO)**, and **API Tokens**. Each links onward to the deeper technical reference for readers who want it; the technical docs link back the other way too. The personal-access-token card (previously missed) now links to its own doc.
@@ -96,7 +101,8 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 - Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
 - Merged OAuth Apps + LDAP Info into a single Integrations page.
 
-[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.12...HEAD
+[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.13...HEAD
+[1.1.13]: https://github.com/theta42/sso-manager-node/compare/v1.1.12...v1.1.13
 [1.1.12]: https://github.com/theta42/sso-manager-node/compare/v1.1.11...v1.1.12
 [1.1.11]: https://github.com/theta42/sso-manager-node/compare/v1.1.10...v1.1.11
 [1.1.10]: https://github.com/theta42/sso-manager-node/compare/v1.1.9...v1.1.10

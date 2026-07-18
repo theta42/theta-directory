@@ -60,10 +60,22 @@ function fixImagePaths(html) {
 // at /docs/<slug> with no .html suffix. Rewrite known doc links to the
 // in-app route, same idea as fixImagePaths() above. Only touches slugs that
 // actually exist, so an unrelated "foo.html" link is left alone.
+// Docs are also linked by their real filename stem (e.g. "concepts-accounts.html"
+// for docs/concepts-accounts.md) -- the correct, working link on the Jekyll/
+// GitHub Pages build, where the URL IS the filename stem. That doesn't match
+// this viewer's own short slugs (DOCS keys, e.g. "accounts"), so also resolve
+// by filename as a fallback -- one link written in a doc works correctly on
+// both targets, rather than needing two different link forms.
+const slugByFilename = Object.fromEntries(
+	Object.entries(DOCS).map(([slug, d]) => [path.basename(d.file, '.md'), slug])
+);
 function fixDocLinks(html) {
 	return html
 		.replace(/href="index\.html"/g, 'href="/docs"')
-		.replace(/href="([a-z0-9-]+)\.html"/g, (match, slug) => DOCS[slug] ? `href="/docs/${slug}"` : match);
+		.replace(/href="([a-z0-9-]+)\.html"/g, (match, name) => {
+			const slug = DOCS[name] ? name : slugByFilename[name];
+			return slug ? `href="/docs/${slug}"` : match;
+		});
 }
 
 // docs/*.md files (not the repo-root README/CHANGELOG/API.md) carry Jekyll
