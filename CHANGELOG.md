@@ -6,7 +6,15 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
 ## [Unreleased]
 
-## [1.1.11] - 2026-07-17
+## [1.1.12] - 2026-07-17
+
+### Added
+- Three new plain-language docs aimed at less technical readers, replacing the schema-level LDAP/OAuth/API docs as the target of most card help links: **Accounts, Groups & Managers**, **Connecting Apps (SSO)**, and **API Tokens**. Each links onward to the deeper technical reference for readers who want it; the technical docs link back the other way too. The personal-access-token card (previously missed) now links to its own doc.
+
+### Fixed
+- The in-app docs viewer rendered every `docs/*.md` page with a garbled heading and a stray horizontal rule at the top — Jekyll front matter (meant only for the GitHub Pages build) was never stripped before being handed to the markdown renderer. Also fixed: cross-doc links (`ldap.html`, `index.html`, etc.) never resolved in-app, since this viewer serves docs at `/docs/<slug>` with no `.html` suffix — they're now rewritten to the correct in-app URL, the same way image paths already were.
+
+Bumps to v1.1.12.
 
 ### Changed
 - Moved the help (❓) link out of the global header and onto each relevant card individually (Invite User, Add new user, User List, Service Accounts, group cards, OAuth/LDAP integration cards, My groups, Members of `<uid>`'s group, New API Token) — each now deep-links straight to the doc that actually covers it, instead of one generic header icon.
@@ -88,7 +96,8 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 - Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
 - Merged OAuth Apps + LDAP Info into a single Integrations page.
 
-[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.11...HEAD
+[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.12...HEAD
+[1.1.12]: https://github.com/theta42/sso-manager-node/compare/v1.1.11...v1.1.12
 [1.1.11]: https://github.com/theta42/sso-manager-node/compare/v1.1.10...v1.1.11
 [1.1.10]: https://github.com/theta42/sso-manager-node/compare/v1.1.9...v1.1.10
 [1.1.9]: https://github.com/theta42/sso-manager-node/compare/v1.1.8...v1.1.9

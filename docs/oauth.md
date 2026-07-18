@@ -8,6 +8,10 @@ description: SSO Manager's OpenID Connect / OAuth 2.0 provider — discovery doc
 
 [← Back to Home](index.html)
 
+> Looking for a plainer explanation of clients/scopes/redirect URIs instead
+> of endpoint-level detail? See
+> [Connecting Apps (Single Sign-On)](concepts-oauth-apps.html).
+
 SSO Manager is an **OpenID Connect / OAuth 2.0 provider**: it issues its own
 access, refresh, and ID tokens that your apps can consume to authenticate
 users and authorize API calls. It also runs a full OpenLDAP directory, so it

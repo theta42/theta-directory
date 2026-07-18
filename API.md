@@ -1,5 +1,10 @@
 # SSO Manager API Documentation
 
+> Looking for a plainer explanation of what API tokens are and when you'd
+> want one, instead of a full endpoint reference? See
+> [API Tokens](/docs/api-tokens) (in-app) or
+> [concepts-api-tokens.md](docs/concepts-api-tokens.md) (repo).
+
 ## Overview
 
 API documentation for the SSO Manager Node application. Provides endpoints for authentication, user management, group management, token management, notifications, and OAuth 2.0 / OpenID Connect.
