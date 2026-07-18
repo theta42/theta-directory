@@ -6,6 +6,16 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
 ## [Unreleased]
 
+## [1.1.15] - 2026-07-18
+
+### Changed
+- Rewrote `install.sh` as an idempotent git-clone installer, replacing the old flag-driven, copy-based one — `wget -O - .../install.sh | sudo bash` now works the same way it does for theta42/proxy. Installs to `/opt/theta42/sso-manager` (was `/opt/sso-manager`). First run only: bootstraps OpenLDAP with a generated admin password + JWT secret and seeds `/etc/sso-manager/secrets.js` (was `/opt/sso-manager/conf/secrets.js`, hand-filled from CLI flags); later runs never touch LDAP or the secrets file again. `ops/systemd/sso-manager.service` sets `CONF_SECRETS=/etc/sso-manager/secrets.js` to match.
+- `install.sh` now prints the version it's updating from/to (or "Already up to date") on every run.
+
+### Fixed
+- `install.sh` could hang indefinitely on a fresh host if a base package pulled in `tzdata` as a new dependency (no TTY for the interactive timezone prompt), or if the debconf `slapd/domain` value was malformed (a raw DN fragment instead of a dotted domain) — slapd's postinst hangs rather than failing cleanly on a bad domain. Both fixed.
+- `ops/ldap-setup.sh`'s ppolicy-overlay checks used an LDAP substring filter against an attribute that doesn't support substring matching, so they always reported the overlay as unconfigured even when it was correctly set up (stored as `{0}ppolicy`) — the final verification step always failed as a result. Fixed to filter on `(objectClass=olcOverlayConfig)` instead, matching every other check in that script.
+
 ## [1.1.14] - 2026-07-17
 
 ### Changed
@@ -106,7 +116,8 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 - Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
 - Merged OAuth Apps + LDAP Info into a single Integrations page.
 
-[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.14...HEAD
+[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.15...HEAD
+[1.1.15]: https://github.com/theta42/sso-manager-node/compare/v1.1.14...v1.1.15
 [1.1.14]: https://github.com/theta42/sso-manager-node/compare/v1.1.13...v1.1.14
 [1.1.13]: https://github.com/theta42/sso-manager-node/compare/v1.1.12...v1.1.13
 [1.1.12]: https://github.com/theta42/sso-manager-node/compare/v1.1.11...v1.1.12
