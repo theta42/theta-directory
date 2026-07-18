@@ -6,12 +6,12 @@
 # production, run a dedicated LDAP server and point the app at it via app_*
 # env vars (or a mounted conf/secrets.js) using the app-only image.
 #
-# The app reads its configuration from conf/base.js + conf/secrets.js, deep-merged
-# by @simpleworkjs/conf, with `app_*` environment variables as the
-# highest-precedence override layer. This entrypoint exports those `app_*`
-# vars so the app connects to the bundled slapd without any mounted secrets
-# file. Any `app_*` var already set in the environment wins (the values below
-# are defaults/fallbacks only).
+# The app reads its configuration from conf/base.js + a secrets file, deep-merged
+# by @simpleworkjs/conf (requires >= 1.2.0, pinned in nodejs/package-lock.json),
+# with `app_*` environment variables as the highest-precedence override layer.
+# This entrypoint exports those `app_*` vars so the app connects to the bundled
+# slapd without any mounted secrets file. Any `app_*` var already set in the
+# environment wins (the values below are defaults/fallbacks only).
 
 set -e
 
@@ -33,14 +33,15 @@ error() { echo "[ERROR] $*" >&2; }
 # ── Optional: load operational config from a mounted secrets.js ──────────────
 # The unified theta-env stack mounts ./config/sso-secrets.js at /config and
 # treats it as the authoritative source for the SSO's config (LDAP base, admin
-# password, org name, JWT secret, ...). When present, symlink it into
-# /app/conf/secrets.js so @simpleworkjs/conf reads it, and override the
-# env-derived operational vars below with the file's values. When absent
-# (standalone / env-var deployments) the env vars set above stay in effect and
-# the app_* exports further down are emitted as before.
+# password, org name, JWT secret, ...). When present, point CONF_SECRETS at it
+# so @simpleworkjs/conf reads it directly (no write access to /app/conf
+# needed), and override the env-derived operational vars below with the
+# file's values. When absent (standalone / env-var deployments) the env vars
+# set above stay in effect and the app_* exports further down are emitted as
+# before.
 SECRETS_JS_MODE=0
 if [[ -f /config/sso-secrets.js ]]; then
-    ln -sf /config/sso-secrets.js /app/conf/secrets.js
+    export CONF_SECRETS=/config/sso-secrets.js
     SECRETS_JS_MODE=1
     # Pull the entrypoint's operational vars out of secrets.js in one node call.
     # Node emits `KEY<TAB>base64(value)` lines; we decode each with base64 -d and
