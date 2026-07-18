@@ -129,7 +129,7 @@ fi
 # ── 3. ppolicy overlay ────────────────────────────────────────────────────────
 info "ppolicy overlay"
 
-if config_search -b "$DB_DN" "(olcOverlay=*ppolicy*)" dn | grep -qi "^dn:.*ppolicy"; then
+if config_search -b "$DB_DN" "(objectClass=olcOverlayConfig)" dn | grep -qi "^dn:.*ppolicy"; then
     skip "ppolicy overlay already configured on ${DB_DN}"
 else
     config_add "dn: olcOverlay=ppolicy,${DB_DN}
@@ -280,7 +280,7 @@ info "verifying ppolicy is active on ${DB_DN}"
 
 VERIFY_FAILED=0
 
-if config_search -b "$DB_DN" "(olcOverlay=*ppolicy*)" dn | grep -qi "^dn:.*ppolicy"; then
+if config_search -b "$DB_DN" "(objectClass=olcOverlayConfig)" dn | grep -qi "^dn:.*ppolicy"; then
     ok "ppolicy overlay is attached to the user database"
 else
     warn "ppolicy overlay is NOT attached to ${DB_DN} — active/inactive toggle will fail"
