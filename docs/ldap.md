@@ -8,6 +8,10 @@ description: SSO Manager's bundled OpenLDAP directory — schema, service accoun
 
 [← Back to Home](index.html)
 
+> Looking for a plainer explanation of accounts, groups, and managers
+> instead of schema/attribute detail? See
+> [Accounts, Groups & Managers](concepts-accounts.html).
+
 SSO Manager runs an OpenLDAP directory holding your users and groups. The app
 authenticates against it over `localhost:389` (inside the all-in-one container)
 and exposes **LDAPS** (`ldaps://…:636`, TLS) for legacy apps that bind LDAP
