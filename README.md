@@ -107,23 +107,24 @@ vars, LDAPS/TLS, and backups.
 
 ### 3. Bare metal on Debian/Ubuntu
 
-`install.sh` is an idempotent installer: it installs Node.js 20.x and OpenLDAP,
-configures the directory (modules, overlays, schema, the SSO groups), deploys
-the app to `/opt/sso-manager`, and creates a systemd unit.
-
-The only thing it requires is the LDAP admin password; the domain (base DN)
-defaults to `dc=example,dc=com` if you don't pass one:
+An automated installer installs Node.js, Redis, and (on first run) OpenLDAP —
+configuring the directory (modules, overlays, schema, the SSO groups) and
+seeding `/etc/sso-manager/secrets.js` with a generated admin password and JWT
+secret — then deploys the app to `/opt/theta42/sso-manager` and starts a
+systemd service:
 
 ```bash
-sudo ./install.sh -p 'your-ldap-password' -b 'dc=yourdomain,dc=com'
-sudo systemctl enable --now sso-manager
-curl http://localhost:3001/health    # -> {"status":"ok"}
+wget -O - https://raw.githubusercontent.com/theta42/sso-manager-node/master/install.sh | sudo bash
 ```
 
-Run `sudo ./install.sh -h` for all flags (`-n` org name, `-o` port, `-j` JWT
-secret, `-s` SMTP, `--skip-ldap` to use an existing LDAP, `--dry-run`). Re-run
-it to update. Full details in [DEPLOYMENT.md](DEPLOYMENT.md) under *Method 2:
-Bare metal*.
+That's it — LDAP and the app are both live afterward. Edit
+`/etc/sso-manager/secrets.js` (org name, SMTP, a non-default base DN, ...) and
+restart the service to customize. It's idempotent and safe to re-run —
+re-running it updates the app in place (never touching LDAP or the secrets
+file again) and prints the version you're updating from and to (e.g. `Updated
+v1.1.13 -> v1.1.14`), or `Already up to date` if there's nothing new. Full
+details, including env var overrides (`LDAP_BASE_DN`, `SKIP_LDAP`, ...), in
+[DEPLOYMENT.md](DEPLOYMENT.md) under *Method 2: Bare metal*.
 
 ## Architecture
 

@@ -332,10 +332,17 @@ OAuth clients live in SSO Redis and are preserved by the volume.
 
 ## Method 2: Bare metal (Debian/Ubuntu)
 
-`install.sh` is an idempotent installer: it installs Node.js 20.x, installs and
-configures OpenLDAP (modules + overlays + custom schema + directory tree +
-required groups), deploys the app to `/opt/sso-manager`, and creates a systemd
-unit. Configuration is written to `/opt/sso-manager/conf/secrets.js` (file-based).
+`install.sh` is an idempotent installer: it installs Node.js 22.x and Redis,
+force-syncs the repo to `/opt/theta42/sso-manager`, and symlinks the systemd
+config from the repo. Re-run it to update — it prints the version you're
+updating from and to (or "Already up to date" if there's nothing new).
+
+On the **first run only** it also installs and configures OpenLDAP (modules +
+overlays + custom schema + directory tree + required groups — see
+`ops/ldap-setup.sh`) and seeds `/etc/sso-manager/secrets.js` with a generated
+LDAP admin password and JWT secret (SMTP is left as a placeholder). Once that
+file exists it's never touched again, and LDAP is never re-bootstrapped —
+edit the file and restart the service to change anything.
 
 ### Prerequisites
 
@@ -346,47 +353,50 @@ unit. Configuration is written to `/opt/sso-manager/conf/secrets.js` (file-based
 ### Install
 
 ```bash
-sudo ./install.sh \
-  -p 'your-ldap-password' \
-  -b 'dc=yourdomain,dc=com' \
-  -n 'Your Org' \
-  -o 3001
+wget -O - https://raw.githubusercontent.com/theta42/sso-manager-node/master/install.sh | sudo bash
 ```
 
-| Flag | Env var | Description |
-|------|---------|-------------|
-| `-p, --admin-pass` | `LDAP_ADMIN_PASS` | LDAP admin password (required) |
-| `-b, --base-dn` | `LDAP_BASE_DN` | Base DN (default `dc=example,dc=com`) |
-| `-n, --org-name` | `ORG_NAME` | Org name (default `SSO Manager`) |
-| `-o, --port` | `PORT` | HTTP port (default `3001`) |
-| `-j, --jwt-secret` | `JWT_SECRET` | JWT secret (default auto-generated) |
-| `-s, --smtp-config` | `SMTP_*` | SMTP as `host:port:user:pass` |
-| `--skip-ldap` | `SKIP_LDAP` | Skip LDAP setup (use existing) |
-| `--skip-app` | `SKIP_APP` | LDAP setup only |
-| `--dry-run` | `DRY_RUN` | Show actions without making changes |
+or, if you already have the repo checked out:
+
+```bash
+sudo ./install.sh
+```
+
+| Env var | Description |
+|---------|-------------|
+| `LDAP_BASE_DN` | Base DN (default `dc=example,dc=com`) — first run only |
+| `LDAP_ADMIN_PASS` | LDAP admin password (default auto-generated) — first run only |
+| `JWT_SECRET` | JWT secret (default auto-generated) — first run only |
+| `ORG_NAME` | Org name (default `SSO Manager`) — first run only |
+| `PORT` | HTTP port (default `3001`) — first run only |
+| `SKIP_LDAP` | `true` to skip OpenLDAP bootstrap entirely (point at an existing server yourself) |
+| `REPO_URL`, `REPO_DIR`, `BRANCH`, `SECRETS_FILE` | Override the defaults |
 
 ### Post-install
 
 ```bash
-sudo systemctl enable --now sso-manager
+sudo systemctl status sso-manager
 journalctl -fu sso-manager
 curl http://localhost:3001/health    # -> {"status":"ok"}
 ```
 
 ### What `install.sh` does
 
-1. Installs Node.js 20.x (NodeSource).
-2. Installs OpenLDAP (`slapd`) with: `pw-sha2`, `ppolicy`, `memberof`, `refint`
-   modules + overlays; the custom `theta42Person` schema (`dateOfBirth`); indexes;
-   `ou=people`/`ou=groups`/`ou=policies`; a default `pwdPolicy`; and the SSO groups.
-3. Installs the app to `/opt/sso-manager` and runs `npm ci --omit=dev`.
-4. Generates `conf/secrets.js` (LDAP/SMTP/JWT) and `conf/base.js` (generic defaults).
-5. Installs `sso-manager.service` (systemd), enabled on boot.
+1. Installs Node.js 22.x (NodeSource) and Redis.
+2. Clones/updates the repo at `/opt/theta42/sso-manager`.
+3. **First run only:** installs OpenLDAP (`slapd`) with `pw-sha2`, `ppolicy`,
+   `memberof`, `refint` modules + overlays; the custom `theta42Person` schema
+   (`dateOfBirth`); indexes; `ou=people`/`ou=groups`/`ou=policies`; a default
+   `pwdPolicy`; and the SSO groups — then seeds `/etc/sso-manager/secrets.js`.
+4. Symlinks `ops/systemd/sso-manager.service` into `/etc/systemd/system` and
+   runs `npm ci --omit=dev`.
+5. Enables and (re)starts the service.
 
-> For an existing LDAP server, run `sudo ./install.sh --skip-ldap …` and point the
-> app at it. For LDAP-only setup on a host that already runs the app elsewhere, use
-> `--skip-app`. To (re)configure overlays on an already-installed slapd, prefer
-> `ops/ldap-setup.sh` (idempotent, auto-detects the user database).
+> For an existing LDAP server, run with `SKIP_LDAP=true` and write
+> `/etc/sso-manager/secrets.js` yourself (see `secrets.js.example`) before
+> starting the service. To (re)configure overlays on an already-installed
+> slapd, use `ops/ldap-setup.sh` directly (idempotent, auto-detects the user
+> database).
 
 ---
 

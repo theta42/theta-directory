@@ -1,6 +1,7 @@
 [Unit]
-Description=SSO NodeJS manager Service
-After=network.target
+Description=Theta42 SSO Manager
+After=network.target slapd.service
+Wants=slapd.service
 StartLimitIntervalSec=0
 
 [Service]
@@ -8,7 +9,10 @@ Type=simple
 Restart=always
 RestartSec=1
 User=root
-ExecStart=/usr/bin/env node /var/www/sso-manager-node/nodejs/bin/www
+WorkingDirectory=/opt/theta42/sso-manager/nodejs
+Environment="NODE_ENV=production"
+Environment="CONF_SECRETS=/etc/sso-manager/secrets.js"
+ExecStart=/usr/bin/env node /opt/theta42/sso-manager/nodejs/bin/www
 
 [Install]
 WantedBy=multi-user.target
