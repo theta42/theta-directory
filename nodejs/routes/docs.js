@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const router = require('express').Router();
 const {marked} = require('marked');
+const xss = require('xss');
 const conf = require('@simpleworkjs/conf');
 const buildInfo = require('../utils/build_info');
 const rateLimit = require('../middleware/rate_limit');
@@ -131,7 +132,7 @@ router.get('/:slug', function(req, res, next) {
 			docs: docList,
 			currentSlug: req.params.slug,
 			docTitle: doc.title,
-			docHtml: fixDocLinks(fixImagePaths(marked(content))),
+			docHtml: xss(fixDocLinks(fixImagePaths(marked(content)))),
 		});
 	} catch (error) {
 		next(error);
