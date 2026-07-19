@@ -45,6 +45,20 @@ function escapeLDAPSearchValue(val) {
               .replace(/\0/g, '\\00');
 }
 
+// Escape a value used in an LDAP DN (RFC 4514).
+function escapeLDAPDNValue(val) {
+	return String(val)
+		.replace(/\\/g, '\\\\')
+		.replace(/,/g, '\\,')
+		.replace(/\+/g, '\\+')
+		.replace(/"/g, '\\"')
+		.replace(/</g, '\\<')
+		.replace(/>/g, '\\>')
+		.replace(/;/g, '\\;')
+		.replace(/=/g, '\\=')
+		.replace(/^\s|\s$/g, match => match === ' ' ? '\\ ' : match);
+}
+
 // Compute the next available uid/gidNumber: the highest existing value below
 // conf.uidGidReservedFloor, plus one -- or conf.uidGidMin if there are no
 // such entries yet. Entries at/above the reserved floor (e.g. a bootstrap
@@ -72,7 +86,8 @@ async function addPosixGroup(client, data){
 
 	data.gidNumber = nextPosixId(groups, 'gidNumber');
 
-	await client.add(`cn=${data.cn},${conf.groupBase}`, {
+	const safeCn = escapeLDAPDNValue(data.cn);
+	await client.add(`cn=${safeCn},${conf.groupBase}`, {
 	  cn: data.cn,
 	  gidNumber: data.gidNumber,
 	  objectclass: [ 'posixGroup', 'top' ]
@@ -94,6 +109,7 @@ async function addPosixAccount(client, data){
 
 	data.uidNumber = nextPosixId(people, 'uidNumber');
 
+	const safeCn = escapeLDAPDNValue(data.cn);
 	const entry = {
 		cn: data.cn,
 		sn: data.sn,
@@ -143,7 +159,7 @@ async function addPosixAccount(client, data){
 		entry.manager = [].concat(data.manager);
 	}
 
-	await client.add(`cn=${data.cn},${conf.userBase}`, entry);
+	await client.add(`cn=${safeCn},${conf.userBase}`, entry);
 
 	return data
 
@@ -799,7 +815,7 @@ User.addSSHkey = async function(data) {
 // memberUid (RFC 2307, posixGroup) is a bare username, not a DN, unlike
 // groupOfNames' `member` used by app_sso_* groups in group_ldap.js.
 function personalGroupDN(uid){
-	return `cn=${uid},${conf.groupBase}`;
+	return `cn=${escapeLDAPDNValue(uid)},${conf.groupBase}`;
 }
 
 User.getPersonalGroupMembers = async function(uid) {

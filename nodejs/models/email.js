@@ -58,7 +58,7 @@ Mail.sendTemplate = async function(to, template, context, from){
 		to,
 		mustache.render(template.subject, context),
 		mustache.render(template.message, context),
-		from || (template.from && mustache.render(template.message, context))
+		from || (template.from && mustache.render(template.from, context))
 	)
 };
 

@@ -1,7 +1,8 @@
 'use strict';
 
 const Table = require('.');
-const UUID = function b(a){return a?(a^Math.random()*16>>a/4).toString(16):([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,b)};
+const crypto = require('crypto');
+const UUID = () => crypto.randomUUID();
 
 
 class Token extends Table{
@@ -110,7 +111,7 @@ class OtpToken extends Token {
 		for (const t of existing) {
 			if (t.is_valid) await t.update({is_valid: false});
 		}
-		const code = String(Math.floor(100000 + Math.random() * 900000));
+		const code = String(crypto.randomInt(100000, 1000000));
 		return this.create({uid, code, method, created_by: uid});
 	}
 

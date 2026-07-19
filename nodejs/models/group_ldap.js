@@ -4,6 +4,31 @@ const { Client, Attribute, Change } = require('ldapts');
 const { LRUCache } = require('lru-cache');
 const conf = require('@simpleworkjs/conf').ldap;
 
+// Escape a value used inside an LDAP search filter (RFC 4515).
+function escapeLDAPSearchValue(val) {
+	return String(val)
+		.replace(/\\/g, '\\5c')
+		.replace(/\*/g, '\\2a')
+		.replace(/\(/g, '\\28')
+		.replace(/\)/g, '\\29')
+		.replace(/\0/g, '\\00');
+}
+
+// Escape a value used in an LDAP DN (RFC 4514). Defensive: usernames/cns
+// are normally alphanumeric, but this prevents metacharacter injection.
+function escapeLDAPDNValue(val) {
+	return String(val)
+		.replace(/\\/g, '\\\\')
+		.replace(/,/g, '\\,')
+		.replace(/\+/g, '\\+')
+		.replace(/"/g, '\\"')
+		.replace(/</g, '\\<')
+		.replace(/>/g, '\\>')
+		.replace(/;/g, '\\;')
+		.replace(/=/g, '\\=')
+		.replace(/^\s|\s$/g, match => match === ' ' ? '\\ ' : match);
+}
+
 function makeClient() {
 	return new Client({ url: conf.url });
 }
@@ -19,7 +44,7 @@ async function withClient(fn) {
 }
 
 async function getGroups(client, member){
-	let memberFilter = member ? `(member=${member})`: ''
+	let memberFilter = member ? `(member=${escapeLDAPSearchValue(member)})`: ''
 
 	let groups = (await client.search(conf.groupBase, {
 		scope: 'sub',
@@ -35,7 +60,8 @@ async function getGroups(client, member){
 }
 
 async function addGroup(client, data){
-	await client.add(`cn=${data.name},${conf.groupBase}`, {
+	const safeName = escapeLDAPDNValue(data.name);
+	await client.add(`cn=${safeName},${conf.groupBase}`, {
 		cn: data.name,
 		member: data.owner,
 		description: data.description,
@@ -139,9 +165,10 @@ Group.get = async function(data){
 	}
 
 	return withClient(async (client) => {
+		const safeName = escapeLDAPSearchValue(data.name);
 		let group = (await client.search(conf.groupBase, {
 			scope: 'sub',
-			filter: `(&(objectClass=groupOfNames)(cn=${data.name}))`,
+			filter: `(&(objectClass=groupOfNames)(cn=${safeName}))`,
 			attributes: ['cn', 'description', 'member', 'owner', 'createTimestamp', 'modifyTimestamp'],
 		})).searchEntries[0];
 

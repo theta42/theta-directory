@@ -6,6 +6,20 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
 ## [Unreleased]
 
+## [1.1.16] - 2026-07-18
+
+### Security
+- Hardened LDAP filter and DN construction against injection. All user-supplied values interpolated into group filters (`models/group_ldap.js`) and RDN values used when adding users/groups (`models/user_ldap.js`) are now escaped before being sent to the LDAP server.
+- Replaced `Math.random()`-based token generation in `models/token.js`, `models/oauth_code.js`, and `models/oauth_client.js` with `crypto.randomUUID()` for session tokens, OAuth codes, access/refresh tokens, and client IDs.
+- Replaced `Math.random()`-based OTP generation in `OtpToken.issue()` with `crypto.randomInt()`.
+- `routes/oauth.js` now refuses to start if `oauth.jwtSecret` is missing or still set to the placeholder value, instead of falling back to a hardcoded public string.
+
+### Changed
+- Public-release packaging: removed `"private": true` from `nodejs/package.json` and bumped version to `1.1.16`.
+
+### Fixed
+- `models/email.js`: fixed a template bug where the rendered `from` address used `template.message` instead of `template.from`.
+
 ## [1.1.15] - 2026-07-18
 
 ### Changed
