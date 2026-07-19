@@ -93,7 +93,14 @@ router.get('/login', async function(req, res, next) {
 // hardcoded in a doc, so they're always right for *this* deployment.
 router.get('/integrations', function(req, res, next) {
   const issuer = ((conf.oauth && conf.oauth.issuer) || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
-  const ldapHost = issuer.replace(/^https?:\/\//, '').replace(/:\d+$/, '');
+  // The public-facing host (from the OAuth issuer). Used for OIDC links.
+  const issuerHost = issuer.replace(/^https?:\/\//, '').replace(/:\d+$/, '');
+
+  // The hostname advertised for direct LDAPS binds may be a separate,
+  // internal-only name so admins don't have to port-forward 636 publicly.
+  // Defaults to the issuer host to preserve prior behavior.
+  const ldapsHost = (conf.ldap && conf.ldap.ldapsHost) || issuerHost;
+  const ldapsPort = Number((conf.ldap && conf.ldap.ldapsPort) || 636) || 636;
 
   const userBase = (conf.ldap && conf.ldap.userBase) || 'ou=people,dc=example,dc=com';
   const groupBase = (conf.ldap && conf.ldap.groupBase) || 'ou=groups,dc=example,dc=com';
@@ -106,8 +113,9 @@ router.get('/integrations', function(req, res, next) {
     ...values,
     issuer,
     discoveryUrl: `${issuer}/.well-known/openid-configuration`,
-    ldapHost,
-    ldapsUrl: `ldaps://${ldapHost}:636`,
+    ldapHost: ldapsHost,
+    ldapsUrl: `ldaps://${ldapsHost}:${ldapsPort}`,
+    ldapsHostExplicit: !!(conf.ldap && conf.ldap.ldapsHost),
     baseDn,
     userBase,
     groupBase,
