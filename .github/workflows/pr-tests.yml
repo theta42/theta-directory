@@ -136,6 +136,10 @@ jobs:
           # directory layout (dc=example,dc=com) -- only the admin password
           # (normally supplied via a gitignored secrets.js) needs setting.
           app_ldap__bindPassword: your-ldap-password
+          # routes/oauth.js now refuses to start without a real jwtSecret.
+          # This is a non-secret test value; the container under test uses
+          # secrets.js.example's jwtSecret independently.
+          app_oauth__jwtSecret: ci-test-jwt-secret-do-not-use-in-production
         run: npm test
 
   test-summary:

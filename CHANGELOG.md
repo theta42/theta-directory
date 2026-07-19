@@ -16,6 +16,7 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
 ### Changed
 - Public-release packaging: removed `"private": true` from `nodejs/package.json` and bumped version to `1.1.16`.
+- CI workflow (`.github/workflows/pr-tests.yml`) now sets `app_oauth__jwtSecret` so the test suite can run against the new startup-time JWT validation.
 
 ### Fixed
 - `models/email.js`: fixed a template bug where the rendered `from` address used `template.message` instead of `template.from`.
