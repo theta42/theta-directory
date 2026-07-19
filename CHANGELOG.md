@@ -13,6 +13,8 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 - Replaced `Math.random()`-based token generation in `models/token.js`, `models/oauth_code.js`, and `models/oauth_client.js` with `crypto.randomUUID()` for session tokens, OAuth codes, access/refresh tokens, and client IDs.
 - Replaced `Math.random()`-based OTP generation in `OtpToken.issue()` with `crypto.randomInt()`.
 - `routes/oauth.js` now refuses to start if `oauth.jwtSecret` is missing or still set to the placeholder value, instead of falling back to a hardcoded public string.
+- Rendered docs and Terms-of-Service HTML in `routes/docs.js` and `routes/index.js` are now sanitized with `xss` to prevent stored XSS from malicious markdown.
+- Removed a `console.log` that wrote new-user data (including password hashes) to the log in `models/user_ldap.js`; reduced login-path error logging to `error.name`/`error.message` only.
 
 ### Changed
 - Public-release packaging: removed `"private": true` from `nodejs/package.json` and bumped version to `1.1.16`.
@@ -131,7 +133,7 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 - Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
 - Merged OAuth Apps + LDAP Info into a single Integrations page.
 
-[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.15...HEAD
+[Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.16...HEAD
 [1.1.15]: https://github.com/theta42/sso-manager-node/compare/v1.1.14...v1.1.15
 [1.1.14]: https://github.com/theta42/sso-manager-node/compare/v1.1.13...v1.1.14
 [1.1.13]: https://github.com/theta42/sso-manager-node/compare/v1.1.12...v1.1.13

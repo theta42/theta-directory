@@ -5,7 +5,7 @@ var express = require('express');
 var router = express.Router();
 const moment = require('moment');
 const {marked} = require('marked');
-const DOMPurify = require('isomorphic-dompurify');
+const xss = require('xss');
 const {InviteToken, PasswordResetToken} = require('./../models/token');
 const {Tos} = require('../models/tos');
 const conf = require('@simpleworkjs/conf');
@@ -47,7 +47,7 @@ router.get('/health', function(req, res) {
 router.get('/tos', async function(req, res, next) {
   try {
     const tos = await Tos.getCurrent();
-    res.render('tos', {...values, tosHtml: DOMPurify.sanitize(marked(tos.content)), tosUpdatedOnFmt: moment(tos.updated_on, 'x').format('MMMM YYYY')});
+    res.render('tos', {...values, tosHtml: xss(marked(tos.content)), tosUpdatedOnFmt: moment(tos.updated_on, 'x').format('MMMM YYYY')});
   } catch (error) {
     next(error);
   }
@@ -69,7 +69,7 @@ router.get('/invites', function(req, res) {
 router.get('/onboarding', async function(req, res, next) {
   try {
     const tos = await Tos.getCurrent();
-    res.render('onboarding', {...values, tosHtml: DOMPurify.sanitize(marked(tos.content))});
+    res.render('onboarding', {...values, tosHtml: xss(marked(tos.content))});
   } catch (error) {
     next(error);
   }
