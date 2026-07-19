@@ -187,7 +187,6 @@ async function addLdapUser(client, data){
 			delete data.userPassword;
 		}
 
-		console.log('addLdapUser', data)
 		group = await addPosixGroup(client, data);
 		data = await addPosixAccount(client, group);
 
@@ -889,7 +888,7 @@ User.login = async function(data){
 		return user;
 
 	}catch(error){
-		console.error("USER LOGIN error:", error);
+		console.error("USER LOGIN error:", error.name, error.message);
 		throw error;
 	}
 };

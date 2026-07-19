@@ -30,6 +30,7 @@
     "express": "^5.2.1",
     "express-rate-limit": "^8.5.2",
     "extend": "^3.0.2",
+    "isomorphic-dompurify": "^3.19.0",
     "jq-repeat": "^2.2.0",
     "jquery": "^3.7.1",
     "jsonwebtoken": "^9.0.3",
