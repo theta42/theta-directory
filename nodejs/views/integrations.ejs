@@ -409,6 +409,46 @@
 	</p>
 
 	<div class="row g-3">
+		<div class="col-12">
+			<div class="card shadow-sm border-warning">
+				<div class="card-header bg-warning bg-opacity-10">
+					<i class="fa-solid fa-triangle-exclamation"></i>
+					LDAPS hostname: keep LDAP binds off the public internet
+				</div>
+				<div class="card-body">
+					<p class="small mb-2">
+						LDAPS requires a <strong>hostname</strong>, not a bare IP address, because
+						the TLS client verifies the server name against the certificate.
+						The URL below <% if (ldapsHostExplicit) { %>is set to <code><%= ldapHost %></code> from
+						<code>conf.ldap.ldapsHost</code>.<% } else { %>currently matches the public
+						OAuth issuer host — convenient, but that implies clients reach it through
+						your router on port 636. <strong>Do not port-forward 636 to the internet</strong>
+						for LDAP simple binds; instead pick an internal-only hostname and set
+						<code>conf.ldap.ldapsHost</code>.<% } %>
+					</p>
+					<ul class="small mb-2">
+						<li><strong>Same Docker/network host (recommended for the proxy or apps on this machine):</strong>
+							use <code>ldaps://sso-manager:636</code> (the internal service name).
+							Set <code>conf.ldap.ldapsHost = 'sso-manager'</code>.</li>
+						<li><strong>LAN host:</strong> create an internal DNS record like
+							<code>ldap.internal.example.com</code> → the local IP, get or generate a cert
+							whose SAN matches that name, and set <code>conf.ldap.ldapsHost</code>.
+							A wildcard for <code>*.internal.example.com</code> works well.</li>
+						<li><strong>Public hostname:</strong> only acceptable behind a VPN or firewall
+							lockdown — never exposed to the open internet.</li>
+					</ul>
+					<p class="small mb-0">
+						<b>Trusting the cert:</b> The bundled slapd uses a self-signed cert unless you
+						mount your own at <code>/etc/openldap/certs</code>. Clients must either trust
+						that cert, or set <code>TLS_REQCERT never</code> / <code>rejectUnauthorized: false</code>
+						for LAN-only use. See <a href="/docs/ldap">LDAP docs</a> for the full
+						runbook, including how to set <code>ldapsHost</code> in
+						<code>conf/secrets.js</code> or via <code>app_ldap__ldapsHost=...</code>.
+					</p>
+				</div>
+			</div>
+		</div>
+
 		<div class="col-lg-6">
 			<div class="card shadow-lg">
 				<div class="card-header shadow">
@@ -428,6 +468,11 @@
 								<input type="text" id="f-ldapsUrl" class="form-control font-monospace" readonly value="<%= ldapsUrl %>">
 								<button class="btn btn-outline-secondary" type="button" onclick="copyField('f-ldapsUrl', this)" title="Copy"><i class="fa-solid fa-copy"></i></button>
 							</div>
+							<% if (ldapsHostExplicit) { %>
+							<small class="field-help text-muted d-block">
+								Custom <code>conf.ldap.ldapsHost</code> — override in your secrets file if this name doesn't resolve from the client.
+							</small>
+							<% } %>
 						</dd>
 
 						<dt class="col-sm-4">Base DN</dt>
@@ -522,6 +567,8 @@
 			'git clone https://github.com/theta42/ldap-client.git',
 			'cd ldap-client',
 			'cat > ldap.vars << \'EOF\'',
+			'# LDAPS host advertised on the Integrations page. If this is an internal-only',
+			'# hostname, make sure it resolves from this host and the cert SAN matches it.',
 			'export ldap_host="<%= ldapHost %>"',
 			'export ldap_base_dn="<%= baseDn %>"',
 			'',

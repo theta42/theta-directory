@@ -118,6 +118,81 @@ volumes:
 
 The entrypoint leaves existing certs untouched (idempotent).
 
+## Choosing the LDAPS hostname
+
+The `/integrations` page advertises an **LDAPS URL** for direct LDAP binds. By
+default it derives that URL from the public OAuth issuer (e.g.
+`https://sso.example.com` → `ldaps://sso.example.com:636`). That is convenient,
+but it implies LDAP clients reach your directory through the same public
+hostname — which usually means port-forwarding 636 through your router.
+
+**Do not port-forward LDAPS (636) to the public internet.** LDAP simple binds
+have no rate limiting and are a brute-force target. Instead, use one of these
+internal-only patterns and set `conf.ldap.ldapsHost` (or
+`app_ldap__ldapsHost`) so the `/integrations` page shows the right URL.
+
+### 1. Same Docker / local network host (best for apps on this machine)
+
+If the LDAP client runs on the same Docker network as the SSO Manager (for
+example, the bundled `theta-env` stack), use the internal service name:
+
+```
+ldaps://sso-manager:636
+```
+
+In `conf/secrets.js`:
+
+```javascript
+ldap: {
+  ldapsHost: 'sso-manager',
+  ldapsPort: 636,
+}
+```
+
+The proxy in theta-env already uses this internally. The bundled slapd cert
+includes `sso-manager` in its SAN when `LDAP_CERT_CN` is left at its default,
+so hostname verification works without extra setup.
+
+### 2. LAN host behind your router (best for separate home-lan machines)
+
+Create an internal-only DNS record — e.g. `ldap.internal.example.com` →
+`192.168.1.10` — using your router, Pi-hole, or a local `hosts` file. Then get
+or generate a cert whose SAN/CN matches that internal name:
+
+- **Let's Encrypt wildcard** (`*.internal.example.com`) works if you own the
+  public domain and can complete DNS-01 challenge; the record itself can stay
+  private/routable only inside your LAN.
+- **Internal CA** is fine for a pure LAN: run a small CA, issue a cert for
+  `ldap.internal.example.com`, and distribute the CA cert to clients.
+- **Self-signed** with `LDAP_CERT_CN=ldap.internal.example.com` also works; copy
+  the generated `ldap.crt` to each client and trust it.
+
+In `conf/secrets.js`:
+
+```javascript
+ldap: {
+  ldapsHost: 'ldap.internal.example.com',
+  ldapsPort: 636,
+}
+```
+
+The URL on `/integrations` becomes `ldaps://ldap.internal.example.com:636`.
+
+### 3. Public hostname (acceptable only behind a VPN/firewall)
+
+If a remote host must bind LDAP, put it behind a VPN (Tailscale, WireGuard,
+etc.) or a tightly locked-down firewall rule. In that case the public hostname
+may be appropriate, but the LDAPS port should still not be reachable from the
+open internet.
+
+### Why not just use the LDAP server's IP address?
+
+TLS clients verify the server name against the certificate. Connecting to
+`ldaps://192.168.1.10:636` with a cert issued for `*.internal.example.com`
+will fail hostname verification unless you disable cert checks — which removes
+most of the security benefit of LDAPS. Always use a hostname that matches the
+cert.
+
 ## Service accounts
 
 A service account is a normal `posixAccount` for something that isn't a

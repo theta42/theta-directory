@@ -188,6 +188,12 @@ valid 10 years, SAN includes the CN + `localhost` + `127.0.0.1`) and listens on
 `ldap-certs` volume so it persists across container recreation — clients don't need
 to re-trust on every rebuild.
 
+The `/integrations` page derives its LDAPS URL from the OAuth issuer by default.
+To advertise a separate, internal-only hostname (e.g. `ldap.internal.example.com`
+or `sso-manager` for Docker-internal clients), set `conf.ldap.ldapsHost` in your
+secrets file or pass `app_ldap__ldapsHost=...`. See `docs/ldap.md` for
+recommended network layouts and how to match the cert SAN to the hostname.
+
 - **Trusting the self-signed cert** (clients): copy `/etc/openldap/certs/ldap.crt`
   out of the container and add it to the client's trusted CA store, or set
   `TLS_REQCERT never` for quick-and-dirty LAN use. Fetch it with:

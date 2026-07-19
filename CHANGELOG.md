@@ -6,6 +6,17 @@ correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
 ## [Unreleased]
 
+## [1.1.17] - 2026-07-18
+
+### Added
+- `conf.ldap.ldapsHost` and `conf.ldap.ldapsPort` config options (also settable via `app_ldap__ldapsHost` / `app_ldap__ldapsPort`). When `ldapsHost` is set, the `/integrations` page advertises that hostname for direct LDAPS binds instead of deriving it from the public OAuth issuer. This lets operators use an internal-only hostname (e.g. `ldap.internal.example.com` or `sso-manager` on the Docker network) and avoid port-forwarding 636 to the internet.
+- A contextual help panel on `/integrations` → LDAP explaining why LDAPS needs a hostname (not an IP), why 636 should not be publicly forwarded, and the recommended internal-DNS / Docker-internal alternatives.
+
+### Changed
+- `routes/index.js` now computes the displayed LDAPS URL from `conf.ldap.ldapsHost`/`ldapsPort` with fallback to the OAuth issuer host for backward compatibility.
+- `secrets.js.example`, `docs/configuration.md`, `docs/ldap.md`, and `DEPLOYMENT.md` document the new `ldapsHost`/`ldapsPort` options and recommended network layouts.
+- Bumped version to `1.1.17` in `nodejs/package.json`.
+
 ## [1.1.16] - 2026-07-18
 
 ### Security

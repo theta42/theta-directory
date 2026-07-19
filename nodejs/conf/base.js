@@ -22,6 +22,13 @@ module.exports = {
 		groupBase: 'ou=groups,dc=example,dc=com',
 		userFilter: '(objectClass=posixAccount)',
 		userNameAttribute: 'uid',
+		// Hostname/port advertised on the /integrations page for direct-LDAP
+		// clients. Leave ldapsHost empty to derive it from the OAuth issuer host.
+		// Set it to an internal-only name (e.g. 'ldap.internal.example.com' or
+		// 'sso-manager' on the Docker network) so external clients don't need a
+		// public 636 port forward. See docs/ldap.md.
+		ldapsHost: '',
+		ldapsPort: 636,
 		// New users/personal groups (see addPosixAccount/addPosixGroup in
 		// models/user_ldap.js) get the next uid/gidNumber >= uidGidMin.
 		// Existing entries >= uidGidReservedFloor are ignored when computing
