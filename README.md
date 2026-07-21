@@ -25,6 +25,10 @@ phone-home, no hosted control plane, and no per-user pricing.
 | --- | --- |
 | [![Groups](docs/images/groups.png)](docs/images/groups.png) | [![OAuth clients](docs/images/oauth-clients.png)](docs/images/oauth-clients.png) |
 
+| Sites & Replication |
+| --- |
+| [![Sites](docs/images/sites.png)](docs/images/sites.png) |
+
 ## Features
 
 - **OpenID Connect / OAuth 2.0 provider** — issue your own access, refresh, and
