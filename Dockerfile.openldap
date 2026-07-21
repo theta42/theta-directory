@@ -55,6 +55,7 @@ RUN apk add --no-cache \
     openldap-overlay-ppolicy \
     openldap-overlay-memberof \
     openldap-overlay-refint \
+    openldap-overlay-syncprov \
     openldap-passwd-sha2 \
     dumb-init \
     bash \

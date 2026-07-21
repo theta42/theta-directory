@@ -125,6 +125,8 @@ include         /etc/openldap/schema/theta42.schema
 include         /etc/openldap/schema/sudo.schema
 include         /etc/openldap/schema/openssh-lpk.schema
 
+SERVER_ID_PLACEHOLDER
+
 # Module loading (pw-sha2 provides {SSHA512} used by the app for user passwords;
 # ppolicy/memberof/refint are the overlays the app depends on). On OpenLDAP 2.5+
 # the ppolicy schema (pwdPolicy, pwdAccountLockedTime, ...) is built into
@@ -137,6 +139,7 @@ moduleload      pw-sha2
 moduleload      ppolicy
 moduleload      memberof
 moduleload      refint
+SYNCPROV_MODULE_PLACEHOLDER
 
 # TLS (LDAPS on 636 + StartTLS on 389). Cert/key paths are fixed; the files are
 # generated/mounted above. We accept clients without their own cert (the common
@@ -184,6 +187,8 @@ memberof-memberof-ad memberOf
 overlay         refint
 refint_attributes memberOf member manager owner
 
+REPLICATION_BLOCK_PLACEHOLDER
+
 # Access controls
 access to attrs=userPassword
     by dn="BIND_DN_PLACEHOLDER" write
@@ -209,6 +214,30 @@ if [[ -n "$MODULE_PATH" ]]; then
     sed -i "s|^SLAPMODULEPATH$|modulepath      ${MODULE_PATH}|" /etc/openldap/slapd.conf
 else
     sed -i "/^SLAPMODULEPATH$/d" /etc/openldap/slapd.conf
+fi
+
+# ── Multi-Master Replication Configuration ──
+if [[ -n "${LDAP_SERVER_ID:-}" && -n "${LDAP_REPLICATION_HOSTS:-}" ]]; then
+    info "Configuring Multi-Master replication (Server ID: ${LDAP_SERVER_ID})"
+    sed -i "s|^SERVER_ID_PLACEHOLDER|ServerID ${LDAP_SERVER_ID}|" /etc/openldap/slapd.conf
+    sed -i "s|^SYNCPROV_MODULE_PLACEHOLDER|moduleload      syncprov|" /etc/openldap/slapd.conf
+    
+    # Generate syncrepl blocks
+    REPL_BLOCK="overlay syncprov\nsyncprov-checkpoint 100 10\nsyncprov-sessionlog 100\n\n"
+    RID=100
+    for HOST in ${LDAP_REPLICATION_HOSTS}; do
+        RID=$((RID + 1))
+        REPL_BLOCK="${REPL_BLOCK}syncrepl rid=${RID}\n  provider=${HOST}\n  type=refreshAndPersist\n  retry=\"60 +\"\n  searchbase=\"${LDAP_BASE_DN}\"\n  bindmethod=simple\n  binddn=\"${LDAP_BIND_DN}\"\n  credentials=\"${LDAP_ADMIN_PASS}\"\n\n"
+    done
+    REPL_BLOCK="${REPL_BLOCK}mirrormode on\n"
+    
+    # Replace placeholder (awk is safer for multiline replacements than sed)
+    awk -v repl="$(printf '%b' "$REPL_BLOCK")" '{gsub(/REPLICATION_BLOCK_PLACEHOLDER/, repl)}1' /etc/openldap/slapd.conf > /etc/openldap/slapd.conf.tmp
+    mv /etc/openldap/slapd.conf.tmp /etc/openldap/slapd.conf
+else
+    sed -i "/^SERVER_ID_PLACEHOLDER/d" /etc/openldap/slapd.conf
+    sed -i "/^SYNCPROV_MODULE_PLACEHOLDER/d" /etc/openldap/slapd.conf
+    sed -i "/^REPLICATION_BLOCK_PLACEHOLDER/d" /etc/openldap/slapd.conf
 fi
 
 chown ldap:ldap /etc/openldap/slapd.conf 2>/dev/null || true

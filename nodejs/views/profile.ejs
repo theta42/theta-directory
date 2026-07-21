@@ -240,6 +240,7 @@
 					<i>Phone:</i> <b>{{mobile}}</b>
 					{{#phoneVerified}}<span class="badge bg-success ms-1"><i class="fa-solid fa-circle-check"></i> Verified</span>{{/phoneVerified}}
 					<br />
+					<i>Location (Site):</i> <b>{{location}} </b><br />
 					<i>LDAP DN:</i> <b>{{dn}} </b><br />
 					<i>Home Directory:</i> <b>{{homeDirectory}} </b><br />
 					<i>Login Shell:</i> <b>{{loginShell}} </b><br />
@@ -322,6 +323,10 @@
 						<div class="mb-3">
 							<label class="form-label">Mobile Phone</label>
 							<input type="text" class="form-control" name="mobile" placeholder="9175551234" value="{{mobile}}" />
+						</div>
+						<div class="mb-3">
+							<label class="form-label">Location (Site)</label>
+							<input type="text" class="form-control" name="location" placeholder="Site One" value="{{location}}" />
 						</div>
 						<div class="mb-3">
 							<label class="form-label">Home Directory</label>

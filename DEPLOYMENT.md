@@ -176,6 +176,8 @@ docker compose exec sso-manager ldapsearch -x -H ldap://localhost:389 \
 | `PORT` | `3001` | host port mapped to the UI |
 | `LDAPS_PORT` | `636` | host port mapped to LDAPS |
 | `LDAP_PORT` | `389` | uncomment the host mapping in compose to expose plain LDAP (not recommended) |
+| `LDAP_SERVER_ID` | empty | Unique integer ID (e.g. 1, 2) required to enable Multi-Master replication |
+| `LDAP_REPLICATION_HOSTS` | empty | Space-separated list of other sites' LDAP URLs for replication (e.g. `ldaps://site2:636`) |
 
 Any `app_*` var may also be set directly to override any config value (see the
 table at the top).

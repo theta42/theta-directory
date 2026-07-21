@@ -1,0 +1,36 @@
+services:
+  site1:
+    build: .
+    container_name: sso_site1
+    environment:
+      - LDAP_SERVER_ID=1
+      - LDAP_REPLICATION_HOSTS=ldap://site2:389
+      - LDAP_BASE_DN=dc=test,dc=local
+      - LDAP_ADMIN_PASS=secret
+    ports:
+      - "3001:3001"
+      - "10389:389"
+    volumes:
+      - site1-ldap:/var/lib/ldap
+      - site1-redis:/data
+
+  site2:
+    build: .
+    container_name: sso_site2
+    environment:
+      - LDAP_SERVER_ID=2
+      - LDAP_REPLICATION_HOSTS=ldap://site1:389
+      - LDAP_BASE_DN=dc=test,dc=local
+      - LDAP_ADMIN_PASS=secret
+    ports:
+      - "3002:3001"
+      - "20389:389"
+    volumes:
+      - site2-ldap:/var/lib/ldap
+      - site2-redis:/data
+
+volumes:
+  site1-ldap:
+  site1-redis:
+  site2-ldap:
+  site2-redis:
