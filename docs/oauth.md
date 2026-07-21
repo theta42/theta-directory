@@ -1,11 +1,16 @@
 ---
 layout: default
 title: OAuth / OIDC
+description: SSO Manager's OpenID Connect / OAuth 2.0 provider — discovery document, client registration, and token endpoints.
 ---
 
 # OAuth 2.0 / OpenID Connect
 
 [← Back to Home](index.html)
+
+> Looking for a plainer explanation of clients/scopes/redirect URIs instead
+> of endpoint-level detail? See
+> [Connecting Apps (Single Sign-On)](concepts-oauth-apps.html).
 
 SSO Manager is an **OpenID Connect / OAuth 2.0 provider**: it issues its own
 access, refresh, and ID tokens that your apps can consume to authenticate

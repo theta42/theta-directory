@@ -1,6 +1,7 @@
 ---
 layout: default
 title: Home
+description: A self-hosted OpenID Connect provider with a bundled OpenLDAP directory and a web management UI. One login for your modern apps, one LDAP directory for the rest, no phone-home.
 ---
 
 # SSO Manager
@@ -55,6 +56,7 @@ backend, that's the niche.
   Emby, …) uses LDAPS/StartTLS against the same directory.
 - **All-in-one Docker image** — app + OpenLDAP + Redis in one container, or
   run the pieces separately via `app_*` env config.
+- **Geo-Location Scaling** — built-in support for N-Way Multi-Master OpenLDAP [replication](replication.html) across physical sites.
 
 ## Get it
 
