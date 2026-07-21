@@ -7,6 +7,11 @@ title: Geo-Location Scaling (Replication)
 
 SSO Manager is built to be a self-contained identity provider, but if you have multiple physical sites, you may want a local copy of the directory at each site to ensure low latency and high availability.
 
+## Why and when to use this?
+- **High Availability (HA)**: If your primary site goes completely offline, your other sites can still authenticate users locally without depending on a WAN link.
+- **Low Latency**: Applications at a remote site can bind directly to their local LDAP server (`localhost` or LAN IP) instead of traversing the internet to query the primary site, making logins blazing fast.
+- **Independent Failure Domains**: By replicating only the LDAP directory (the source of truth) and keeping session state (Redis) independent, you prevent complex "split-brain" scenarios in the web UI. A failure at Site A won't bring down Site B.
+
 By default, the `sso-manager` Docker container runs a single, independent OpenLDAP instance. However, you can enable **N-Way Multi-Master Replication** via environment variables.
 
 ## How it works

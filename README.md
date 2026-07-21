@@ -44,6 +44,7 @@ phone-home, no hosted control plane, and no per-user pricing.
   drive the management API from scripts or CI, scoped to their own permissions.
 - **All-in-one Docker image** — app + OpenLDAP + Redis in one container, or run
   the pieces separately against your own LDAP/Redis via `app_*` env config.
+- **Multi-Site Support (Geo-Location Scaling)** — built-in support for N-Way Multi-Master OpenLDAP replication across physical sites for HA and low latency.
 
 ## Why this over the alternatives
 
