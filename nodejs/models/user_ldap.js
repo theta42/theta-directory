@@ -146,6 +146,10 @@ async function addPosixAccount(client, data){
 		entry.dateOfBirth = data.dob;
 	}
 
+	if (data.location) {
+		entry.l = data.location;
+	}
+
 	// userPassword is optional -- a service account with no password set
 	// simply can't bind (no special enforcement needed, that's the default
 	// LDAP simple-bind behavior for an entry lacking the attribute).
@@ -221,6 +225,7 @@ const user_parse = function(data){
 		data.username = data[conf.userNameAttribute]
 		data.userPassword = undefined;
 	}
+	data.location = data.l ? String(data.l) : '';
 	// Use truthy strings so jq-repeat section blocks ({{#isActive}}) fire correctly
 	data.isActive   = data.pwdAccountLockedTime ? '' : 'active';
 	data.isInactive = data.pwdAccountLockedTime ? 'inactive' : '';
@@ -517,6 +522,16 @@ User.update = async function(data){
 					}),
 				]);
 				this.dateOfBirth = data.dateOfBirth;
+			}
+
+			if(data.location !== undefined){
+				await client.modify(this.dn, [
+					new Change({
+						operation: 'replace',
+						modification: new Attribute({ type: 'l', values: [data.location] }),
+					}),
+				]);
+				this.location = data.location;
 			}
 
 			if(data.manager !== undefined){

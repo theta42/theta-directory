@@ -145,6 +145,45 @@ router.get('/token', function(req, res, next) {
   res.render('token', {...values});
 });
 
+router.get('/sites', async function(req, res, next) {
+  const net = require('net');
+  const url = require('url');
+  
+  const myId = process.env.LDAP_SERVER_ID || 'Standalone';
+  const hostsStr = process.env.LDAP_REPLICATION_HOSTS || '';
+  const hosts = hostsStr.split(' ').filter(h => h);
+  
+  const sites = await Promise.all(hosts.map(hostUrl => {
+      return new Promise((resolve) => {
+          try {
+              const u = new url.URL(hostUrl);
+              const port = u.port || (u.protocol === 'ldaps:' ? 636 : 389);
+              const hostname = u.hostname;
+              const socket = new net.Socket();
+              socket.setTimeout(2000);
+              
+              socket.on('connect', () => {
+                  socket.destroy();
+                  resolve({ url: hostUrl, status: 'Online' });
+              });
+              socket.on('timeout', () => {
+                  socket.destroy();
+                  resolve({ url: hostUrl, status: 'Offline (Timeout)' });
+              });
+              socket.on('error', (err) => {
+                  socket.destroy();
+                  resolve({ url: hostUrl, status: 'Offline (' + err.code + ')' });
+              });
+              socket.connect(port, hostname);
+          } catch (e) {
+              resolve({ url: hostUrl, status: 'Invalid URL' });
+          }
+      });
+  }));
+  
+  res.render('sites', { ...values, myId, sites });
+});
+
             
 router.get('/login/resetpassword/:token', async function(req, res, next){
 	let token = await PasswordResetToken.get(req.params.token);
