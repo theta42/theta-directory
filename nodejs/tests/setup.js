@@ -7,6 +7,12 @@ const { initORM } = require('../models');
 
 beforeAll(async () => {
 	await initORM();
+	const { Token } = require('../models');
+	try {
+		await Token.orm.adapter(Token).Table.redisClient.flushDb();
+	} catch (e) {
+		console.warn('Could not flush Redis:', e.message);
+	}
 });
 
 const TEST_CREDS = { uid: 'test', password: 'MyTestPassword!2' };
