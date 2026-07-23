@@ -21,6 +21,21 @@ class Token extends Model {
 			return false
 		}
 	}
+
+	static async get(pk, ...args) {
+		const result = await super.get(pk, ...args);
+		if (!result) {
+			const error = new Error('EntryNotFound');
+			error.name = 'EntryNotFound';
+			error.status = 404;
+			throw error;
+		}
+		return result;
+	}
+
+	async remove() {
+		return this.delete();
+	}
 }
 
 class AuthToken extends Token{
