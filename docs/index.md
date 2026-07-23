@@ -58,6 +58,7 @@ backend, that's the niche.
 - **All-in-one Docker image** — app + OpenLDAP + Redis in one container, or
   run the pieces separately via `app_*` env config.
 - **Geo-Location Scaling** — built-in support for N-Way Multi-Master OpenLDAP [replication](replication.html) across physical sites.
+- **[Directory & Inventory](directory.html)** — map sites, hosts, and services as a graph with rich metadata (IP/MAC, OS/kernel, ports, git repos), auto-provisioned access groups, and automatic registration from theta-env and ldap-client.
 
 ## Get it
 

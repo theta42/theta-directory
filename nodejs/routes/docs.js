@@ -33,6 +33,7 @@ const DOCS = {
 	accounts:        {title: 'Accounts, Groups & Managers', file: path.join(__dirname, '../../docs/concepts-accounts.md')},
 	'oauth-apps':    {title: 'Connecting Apps (SSO)',   file: path.join(__dirname, '../../docs/concepts-oauth-apps.md')},
 	'api-tokens':    {title: 'API Tokens',              file: path.join(__dirname, '../../docs/concepts-api-tokens.md')},
+	directory:       {title: 'Directory & Inventory',   file: path.join(__dirname, '../../docs/directory.md')},
 
 	overview:        {title: 'Overview',        file: path.join(__dirname, '../../README.md')},
 	changelog:       {title: 'Changelog',       file: path.join(__dirname, '../../CHANGELOG.md')},
