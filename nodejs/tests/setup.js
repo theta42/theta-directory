@@ -3,6 +3,11 @@
 const crypto = require('crypto');
 const request = require('supertest');
 const app = require('../app');
+const { initORM } = require('../models');
+
+beforeAll(async () => {
+	await initORM();
+});
 
 const TEST_CREDS = { uid: 'test', password: 'MyTestPassword!2' };
 
