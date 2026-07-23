@@ -23,13 +23,21 @@ async function initORM() {
   };
   ormConf.redis = conf.redis;
 
-  await init({
-    conf: { orm: ormConf },
-    models: [
-      Resource, ResourceEdge, ResourceGroup,
-      Token, AuthToken, InviteToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken
-    ]
-  });
+  console.log('[initORM] Starting ORM initialization...');
+  try {
+    await init({
+      conf: { orm: ormConf },
+      models: [
+        Resource, ResourceEdge, ResourceGroup,
+        Token, AuthToken, InviteToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken
+      ]
+    });
+    console.log('[initORM] ORM initialized successfully');
+    console.log('[initORM] Resource.orm =', !!Resource.orm, 'Token.orm =', !!Token.orm);
+  } catch (err) {
+    console.error('[initORM] ORM initialization failed:', err.message);
+    throw err;
+  }
 }
 
 module.exports.initORM = initORM;

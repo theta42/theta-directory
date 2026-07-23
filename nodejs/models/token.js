@@ -95,7 +95,7 @@ class OtpToken extends Token {
 	}
 
 	static async issue(uid, method) {
-		const existing = await this.find({uid});
+		const existing = await this.list({where: {uid}});
 		for (const t of existing) {
 			if (t.is_valid) await t.update({is_valid: false});
 		}
@@ -104,7 +104,7 @@ class OtpToken extends Token {
 	}
 
 	static async verify(uid, code) {
-		const tokens = await this.listDetail({uid});
+		const tokens = await this.list({where: {uid}});
 		const match = tokens.find(t => t.is_valid && !t.isExpired && t.code === code);
 		if (!match) return null;
 		await match.update({is_valid: false});

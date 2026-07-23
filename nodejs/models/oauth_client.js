@@ -16,11 +16,18 @@ class OAuthClient {
 		const raw_secret = crypto.randomUUID();
 		const client_id = crypto.randomUUID();
 		const client_secret_hash = await bcrypt.hash(raw_secret, 10);
-		
+
+		// Generate a unique slug from the client name
+		let slug = data.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'oauth-client';
+		// Ensure uniqueness by appending a suffix if needed
+		const existing = await Resource.list({ where: { slug } });
+		if (existing.length) slug = `${slug}-${client_id.slice(0, 8)}`;
+
 		const r = await Resource.create({
 			id: client_id,
 			kind: 'oauth',
 			name: data.name,
+			slug: slug,
 			description: data.description || '',
 			owner: data.created_by,
 			metadata: {
@@ -37,10 +44,13 @@ class OAuthClient {
 		return r;
 	}
 	static async get(client_id) {
-		const resources = await Resource.list({ where: { id: client_id, kind: 'oauth' } });
-		if (!resources.length) throw new Error('OAuthClient not found');
-		
-		const r = resources[0];
+			let r;
+			try {
+				r = await Resource.get(client_id);
+			} catch (_) {
+				throw new Error('OAuthClient not found');
+			}
+			if (r.kind !== 'oauth') throw new Error('OAuthClient not found');
 		// Map metadata to top-level properties to satisfy routes/oauth.js without rewriting it
 		r.client_id = r.id;
 		r.client_secret_hash = r.metadata.client_secret_hash;
@@ -48,6 +58,8 @@ class OAuthClient {
 		r.scopes = r.metadata.scopes || ['openid', 'profile', 'email', 'groups'];
 		r.allowed_groups = r.metadata.allowed_groups || [];
 		r.token_lifetime = r.metadata.token_lifetime || { ...defaultLifetime };
+		// Resource has no is_valid column; validity lives in metadata (absent = valid)
+		r.is_valid = r.metadata.is_valid !== false;
 		r.verifySecret = async (secret) => bcrypt.compare(secret, r.client_secret_hash);
 		
 		r.rotateSecret = async () => {
@@ -64,11 +76,11 @@ class OAuthClient {
 			if (data.scopes !== undefined) r.metadata.scopes = data.scopes;
 			if (data.allowed_groups !== undefined) r.metadata.allowed_groups = data.allowed_groups;
 			if (data.token_lifetime !== undefined) r.metadata.token_lifetime = data.token_lifetime;
-			
+			if (data.is_valid !== undefined) r.metadata.is_valid = data.is_valid;
+
 			const updateData = { metadata: r.metadata };
 			if (data.name !== undefined) updateData.name = data.name;
 			if (data.description !== undefined) updateData.description = data.description;
-			if (data.is_valid !== undefined) updateData.is_valid = data.is_valid;
 			
 			return originalUpdate(updateData);
 		};
@@ -79,6 +91,10 @@ class OAuthClient {
 	static async list() {
 		const resources = await Resource.list({ where: { kind: 'oauth' } });
 		return Promise.all(resources.map(r => this.get(r.id)));
+	}
+
+	static async listDetail() {
+		return this.list();
 	}
 
 	static async verifySecret(client_id, secret) {
