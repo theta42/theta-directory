@@ -95,6 +95,7 @@ app.use('/api/api-token', middleware.auth, require('./routes/api_token'));
 // OAuth 2.0 / OpenID Connect
 app.use('/oauth', oauthRouter);
 app.use('/api/oauth', middleware.auth, oauthApiRouter);
+app.use('/api/oauth/client', middleware.auth, require('./routes/oauth_client'));
 app.get('/.well-known/openid-configuration', discovery);
 
 
