@@ -3,6 +3,19 @@
 const crypto = require('crypto');
 const request = require('supertest');
 const app = require('../app');
+const { initORM } = require('../models');
+
+beforeAll(async () => {
+	await initORM();
+	const { Token } = require('../models/token');
+	try {
+		if (Token.orm) {
+			await Token.orm.adapter(Token).Table.redisClient.flushDb();
+		}
+	} catch (e) {
+		console.warn('Could not flush Redis:', e.message);
+	}
+});
 
 const TEST_CREDS = { uid: 'test', password: 'MyTestPassword!2' };
 

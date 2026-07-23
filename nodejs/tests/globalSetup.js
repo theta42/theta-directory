@@ -5,7 +5,8 @@
 const { createClient } = require('redis');
 
 module.exports = async function() {
-	const client = createClient();
+	const redisUrl = process.env.REDIS_URL || undefined;
+	const client = createClient(redisUrl ? { url: redisUrl } : {});
 	await client.connect();
 
 	const keys = await client.keys('sso_manager_test_*');
