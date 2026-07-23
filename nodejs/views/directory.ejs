@@ -1,0 +1,819 @@
+<%- include('top') %>
+
+<div class="container mt-4">
+  <div class="row">
+    <div class="col-12">
+			<div class="card shadow">
+				<div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+				    <div>
+    					<i class="fa-solid fa-server"></i> Directory Management
+    				</div>
+					<div class="d-flex flex-wrap gap-2 align-items-center">
+                        <input type="text" id="search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search..." onkeyup="renderTable()" style="width: 200px;">
+                        <select id="sort-by" class="form-select form-select-sm shadow-sm" onchange="renderTable()" style="width: 150px;">
+                          <option value="name">Name (A-Z)</option>
+                          <option value="kind">Kind</option>
+                          <option value="env">Environment</option>
+                        </select>
+                        <div class="btn-group btn-group-sm shadow-sm" role="group">
+                          <input type="radio" class="btn-check" name="viewMode" id="view-list" value="list" autocomplete="off" checked onchange="renderTable()">
+                          <label class="btn btn-outline-secondary" for="view-list"><i class="fa-solid fa-list"></i></label>
+                          <input type="radio" class="btn-check" name="viewMode" id="view-tree" value="tree" autocomplete="off" onchange="renderTable()">
+                          <label class="btn btn-outline-secondary" for="view-tree"><i class="fa-solid fa-folder-tree"></i></label>
+                        </div>
+					    <button class="btn btn-sm btn-primary ms-1 shadow-sm" onclick="openAddModal()">
+					        <i class="fas fa-plus"></i> Add Resource
+					    </button>
+					</div>
+				</div>
+                <div class="card-header actionMessage" style="display:none"></div>
+                <div class="p-3 pb-0 text-muted small border-bottom">
+                    <i class="fa-solid fa-circle-info"></i> Manage infrastructure, services, and their relationships.
+                </div>
+				<div class="table-responsive">
+				<table class="card-body table table-striped mb-0">
+            <thead>
+              <tr>
+                <th class="ps-3">Kind</th>
+                <th>Name</th>
+                <th>Env</th>
+                <th>Host</th>
+                <th>IP / Address</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="resources-list" jq-repeat="resources">
+              <tr>
+                <td class="ps-3 text-nowrap">
+                  {{{indentHtml}}}
+                  <span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
+                </td>
+                <td><strong>{{name}}</strong><br><small class="text-muted">{{slug}}</small></td>
+                <td>
+                  {{#metadata.isProduction}}<span class="badge bg-danger">Prod</span>{{/metadata.isProduction}}
+                  {{^metadata.isProduction}}<span class="badge bg-info">Dev</span>{{/metadata.isProduction}}
+                </td>
+                <td><span class="badge bg-light text-dark border">{{hostName}}</span></td>
+                <td>
+                  {{#metadata.ip}}<div><small>IP:</small> {{metadata.ip}}</div>{{/metadata.ip}}
+                  {{#metadata.address}}<div><small>URL:</small> {{metadata.address}}</div>{{/metadata.address}}
+                </td>
+                <td>
+                  <button class="btn btn-sm btn-primary" onclick="openEditModal('{{id}}')" title="Edit">
+                    <i class="fa-solid fa-pen"></i>
+                  </button>
+                  <button class="btn btn-sm btn-success" onclick="openAddModal('{{id}}', '{{kind}}')" title="Add Child Resource">
+                    <i class="fa-solid fa-plus"></i>
+                  </button>
+                  <button class="btn btn-sm btn-danger" onclick="deleteResource('{{id}}')">
+                    <i class="fa-solid fa-trash"></i>
+                  </button>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Edit Resource Modal -->
+<div class="modal fade" id="resourceModal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header shadow">
+        <h5 class="modal-title" id="resourceModalTitle">Resource</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="actionMessage mb-3" style="display:none"></div>
+        <input type="hidden" id="res-id">
+        
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label">Name</label>
+            <input type="text" id="res-name" class="form-control shadow-sm">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Slug</label>
+            <input type="text" id="res-slug" class="form-control shadow-sm font-monospace">
+          </div>
+        </div>
+        
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label">Kind</label>
+            <select id="res-kind" class="form-select shadow-sm" onchange="toggleFormFields()">
+              <option value="site">Site</option>
+              <option value="host">Host</option>
+              <option value="service">Service (App)</option>
+              <option value="oauth">OAuth Integration</option>
+            </select>
+          </div>
+          <div class="col-6">
+            <label class="form-label">Sub Type</label>
+            <input type="text" id="res-subtype" class="form-control shadow-sm" placeholder="e.g. proxmox_node, web, etc.">
+          </div>
+        </div>
+        
+        <div class="row mb-3" id="site-details-container" style="display: none;">
+          <div class="col-12">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" id="res-is-current-site">
+              <label class="form-check-label" for="res-is-current-site">
+                Mark as Current Site
+              </label>
+            </div>
+          </div>
+        </div>
+        
+        <div class="row mb-3" id="host-parent-container" style="display: none;">
+          <div class="col-12">
+            <label class="form-label text-primary">Parent Resource <span class="text-danger">*</span></label>
+            <select id="res-host-id" class="form-select shadow-sm border-primary">
+              <option value="">-- Select Parent --</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row mb-3">
+          <div class="col-6">
+            <label class="form-label">IP Address</label>
+            <input type="text" id="res-ip" class="form-control shadow-sm font-monospace" placeholder="192.168.1.x">
+          </div>
+          <div class="col-6">
+            <label class="form-label">Host / URI Address</label>
+            <input type="text" id="res-address" class="form-control shadow-sm font-monospace" placeholder="https://...">
+          </div>
+        </div>
+        
+        <div class="row mb-3" id="host-details-container" style="display: none;">
+          <div class="col-4">
+            <label class="form-label">VMID</label>
+            <input type="number" id="res-vmid" class="form-control shadow-sm" placeholder="e.g. 101">
+          </div>
+          <div class="col-4">
+            <label class="form-label">MAC Address</label>
+            <input type="text" id="res-mac" class="form-control shadow-sm font-monospace" placeholder="00:00:00:00:00:00">
+          </div>
+          <div class="col-4">
+            <label class="form-label">OS / Kernel</label>
+            <input type="text" id="res-os" class="form-control shadow-sm" placeholder="Ubuntu / 5.15">
+          </div>
+        </div>
+        
+        <div class="row mb-3" id="service-ports-container" style="display: none;">
+          <div class="col-6">
+            <label class="form-label">Internal Port</label>
+            <input type="number" id="res-port" class="form-control shadow-sm" placeholder="e.g. 8080">
+          </div>
+          <div class="col-6">
+            <label class="form-label">External Port</label>
+            <input type="number" id="res-external-port" class="form-control shadow-sm" placeholder="e.g. 443">
+            <small class="text-muted">Same as Internal if empty</small>
+          </div>
+        </div>
+
+        <div class="row mb-3" id="service-details-container" style="display: none;">
+          <div class="col-4">
+            <label class="form-label">Git Repo</label>
+            <input type="text" id="res-git-repo" class="form-control shadow-sm" placeholder="https://github.com/...">
+          </div>
+          <div class="col-4">
+            <label class="form-label">Install Path</label>
+            <input type="text" id="res-install-path" class="form-control shadow-sm" placeholder="/opt/app">
+          </div>
+          <div class="col-4">
+            <label class="form-label">Systemd Service</label>
+            <input type="text" id="res-systemd" class="form-control shadow-sm" placeholder="app.service">
+          </div>
+        </div>
+        
+        <div id="oauth-details-container" style="display: none;">
+          <hr>
+          <h5>OAuth Configuration</h5>
+          <div class="mb-3">
+            <label class="form-label">Redirect URIs <small class="text-muted">(one per line)</small></label>
+            <textarea id="res-redirect-uris" class="form-control shadow-sm font-monospace" rows="3"></textarea>
+            <small class="field-help text-muted d-block">
+              <code>*</code> matches one hostname label, <code>**</code> matches any number of labels.
+            </small>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Scopes <small class="text-muted">(space separated)</small></label>
+            <input type="text" id="res-scopes" class="form-control shadow-sm" value="openid profile email groups">
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Restrict to Groups <small class="text-muted">(space separated CNs, optional)</small></label>
+            <input type="text" id="res-allowed-groups" class="form-control shadow-sm">
+          </div>
+          <div class="row mb-3">
+            <div class="col-6">
+              <label class="form-label">Access Token TTL <small class="text-muted">(seconds)</small></label>
+              <input type="number" id="res-access-ttl" class="form-control shadow-sm" value="3600" min="60">
+            </div>
+            <div class="col-6">
+              <label class="form-label">Refresh Token TTL <small class="text-muted">(seconds)</small></label>
+              <input type="number" id="res-refresh-ttl" class="form-control shadow-sm" value="2592000" min="3600">
+            </div>
+          </div>
+          <div class="mb-3" id="oauth-rotate-container" style="display: none;">
+            <button class="btn btn-outline-warning" onclick="rotateSecret()">
+              <i class="fa-solid fa-arrows-rotate"></i> Rotate Client Secret
+            </button>
+            <small class="d-block text-muted mt-1">Rotating the secret will break any currently running clients until they are updated.</small>
+          </div>
+        </div>
+        
+        <div class="row mb-3">
+          <div class="col-4">
+            <div class="form-check form-switch mt-2">
+              <input class="form-check-input" type="checkbox" id="res-is-production">
+              <label class="form-check-label" for="res-is-production"><strong>Production</strong></label>
+            </div>
+          </div>
+          <div class="col-4" id="external-container" style="display: none;">
+            <div class="form-check form-switch mt-2">
+              <input class="form-check-input" type="checkbox" id="res-is-external">
+              <label class="form-check-label" for="res-is-external"><strong>External Reachable</strong></label>
+            </div>
+          </div>
+          <div class="col-4" id="public-container" style="display: none;">
+            <div class="form-check form-switch mt-2">
+              <input class="form-check-input" type="checkbox" id="res-is-public">
+              <label class="form-check-label" for="res-is-public"><strong>Public (No Auth)</strong></label>
+            </div>
+          </div>
+        </div>
+
+        <div class="mb-3">
+          <label class="form-label">Description</label>
+          <textarea id="res-description" class="form-control shadow-sm" rows="2"></textarea>
+        </div>
+        
+        <hr>
+        
+        <div id="edit-only-section" style="display: none;">
+          <h5>Associated LDAP Groups</h5>
+          <div class="mb-3">
+            <ul class="list-group mb-2 shadow-sm" id="groups-list" jq-repeat="groups">
+              <li class="list-group-item d-flex justify-content-between align-items-center">
+                <span>
+                  <i class="fa-solid fa-users text-muted me-2"></i> 
+                  <strong>{{groupCn}}</strong> 
+                  <span class="badge bg-primary ms-2">{{accessLevel}}</span>
+                </span>
+                <button class="btn btn-sm btn-outline-danger" onclick="removeGroup('{{id}}')"><i class="fa-solid fa-xmark"></i></button>
+              </li>
+            </ul>
+            <div class="input-group shadow-sm mt-2">
+              <input type="text" class="form-control" id="new-group-cn" placeholder="Group CN (e.g. app_emby_users)" list="ldap-groups-datalist">
+              <datalist id="ldap-groups-datalist"></datalist>
+              <select class="form-select" id="new-group-level" style="max-width: 140px;">
+                <option value="member">Member</option>
+                <option value="owner">Owner</option>
+              </select>
+              <button class="btn btn-success" onclick="addGroup()"><i class="fa-solid fa-plus"></i></button>
+            </div>
+          </div>
+          
+          <hr>
+          
+          <h5>Relationships (Graph Edges)</h5>
+          <div class="mb-3">
+            <ul class="list-group mb-2 shadow-sm" id="edges-list" jq-repeat="edges">
+              <li class="list-group-item d-flex justify-content-between align-items-center">
+                <span>
+                  {{#isParent}}
+                    <i class="fa-solid fa-arrow-down text-success me-2"></i> Has child: <strong>{{targetName}}</strong> <span class="badge bg-secondary ms-1">{{relation}}</span>
+                  {{/isParent}}
+                  {{^isParent}}
+                    <i class="fa-solid fa-arrow-up text-primary me-2"></i> Is child of: <strong>{{targetName}}</strong> <span class="badge bg-secondary ms-1">{{relation}}</span>
+                  {{/isParent}}
+                </span>
+                <button class="btn btn-sm btn-outline-danger" onclick="removeEdge('{{id}}')"><i class="fa-solid fa-xmark"></i></button>
+              </li>
+            </ul>
+            <div class="input-group shadow-sm mt-2">
+              <select class="form-select" id="new-edge-dir" style="max-width: 140px;">
+                <option value="parent">Has child</option>
+                <option value="child">Is child of</option>
+              </select>
+              <select class="form-select" id="new-edge-target">
+                <option value="">-- Select Resource --</option>
+              </select>
+              <input type="text" class="form-control" id="new-edge-relation" placeholder="Relation (e.g. hosts)" style="max-width: 150px;">
+              <button class="btn btn-success" onclick="addEdge()"><i class="fa-solid fa-plus"></i></button>
+            </div>
+          </div>
+        </div>
+        
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary" onclick="saveResource()">
+          <i class="fa-solid fa-floppy-disk"></i> Save Resource
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  app.auth.forceLogin(['app_sso_admin', 'app_sso_directory_admin']);
+  
+  var resourceModal = new bootstrap.Modal(document.getElementById('resourceModal'));
+  var resourcesById = {};
+  var allGroups = [];
+  var allEdges = [];
+  var rawResources = [];
+  
+  $(document).ready(async function() {
+    await loadResources();
+  });
+  
+  async function loadResources() {
+    try {
+      const [resResources, resGroups, resEdges] = await Promise.all([
+        app.api.get('directory-admin/resources'),
+        app.api.get('directory-admin/groups'),
+        app.api.get('directory-admin/edges')
+      ]);
+      
+      resourcesById = {};
+      
+      for (const r of resResources.results) {
+        r.metadata = r.metadata || {};
+        resourcesById[r.id] = r;
+      }
+      
+      allGroups = resGroups.results;
+      allEdges = resEdges.results;
+
+      rawResources = [];
+      for (const r of resResources.results) {
+        // Compute hostName from edges
+        r.hostName = '—';
+        r.parentId = null;
+        const parentEdge = allEdges.find(e => e.childId === r.id);
+        if (parentEdge) {
+           r.parentId = parentEdge.parentId;
+           const parent = resourcesById[parentEdge.parentId];
+           if (parent) r.hostName = parent.name;
+        }
+        rawResources.push(r);
+      }
+      
+      renderTable();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to load data');
+    }
+  }
+  
+  function renderTable() {
+    const filter = $('#search-filter').val().toLowerCase();
+    const sort = $('#sort-by').val();
+    const viewMode = $('input[name="viewMode"]:checked').val();
+    
+    let filtered = rawResources.filter(r => {
+      if (!filter) return true;
+      return (r.name || '').toLowerCase().includes(filter) ||
+             (r.slug || '').toLowerCase().includes(filter) ||
+             (r.kind || '').toLowerCase().includes(filter) ||
+             (r.metadata?.subType || '').toLowerCase().includes(filter) ||
+             (r.metadata?.ip || '').toLowerCase().includes(filter) ||
+             (r.hostName || '').toLowerCase().includes(filter);
+    });
+    
+    // Sort
+    filtered.sort((a, b) => {
+      if (sort === 'name') return a.name.localeCompare(b.name);
+      if (sort === 'kind') return a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name);
+      if (sort === 'env') {
+         const ae = a.metadata?.isProduction ? 0 : 1;
+         const be = b.metadata?.isProduction ? 0 : 1;
+         return ae - be || a.name.localeCompare(b.name);
+      }
+      return 0;
+    });
+
+    let finalRenderList = [];
+
+    if (viewMode === 'tree') {
+      const map = {};
+      const roots = [];
+      filtered.forEach(r => { map[r.id] = { ...r, children: [] }; });
+      
+      filtered.forEach(r => {
+        const node = map[r.id];
+        if (node.parentId && map[node.parentId]) {
+           map[node.parentId].children.push(node);
+        } else {
+           roots.push(node);
+        }
+      });
+      
+      const flatten = (nodes, depth) => {
+         nodes.forEach(n => {
+           let indentHtml = '';
+           for(let i = 0; i < depth; i++) {
+              indentHtml += '<span style="display:inline-block; width: 1.5rem;"></span>';
+           }
+           if (depth > 0) {
+              indentHtml += '<i class="fa-solid fa-turn-up fa-rotate-90 text-muted me-2"></i>';
+           }
+           n.indentHtml = indentHtml;
+           finalRenderList.push(n);
+           if (n.children.length > 0) {
+             flatten(n.children, depth + 1);
+           }
+         });
+      };
+      
+      flatten(roots, 0);
+    } else {
+      finalRenderList = filtered.map(r => ({ ...r, indentHtml: '' }));
+    }
+    
+    $.scope.resources.empty();
+    for (const r of finalRenderList) {
+      $.scope.resources.push(r);
+    }
+  }
+  
+  function toggleFormFields() {
+    const kind = $('#res-kind').val();
+    if (kind === 'host') {
+      $('#host-parent-container').show();
+      $('#host-details-container').show();
+      $('#service-ports-container').hide();
+      $('#service-details-container').hide();
+      $('#oauth-details-container').hide();
+      $('#external-container').hide();
+      $('#public-container').hide();
+      $('#site-details-container').hide();
+    } else if (kind === 'service') {
+      $('#host-parent-container').show();
+      $('#host-details-container').hide();
+      $('#service-ports-container').show();
+      $('#service-details-container').show();
+      $('#oauth-details-container').hide();
+      $('#external-container').show();
+      $('#public-container').show();
+      $('#site-details-container').hide();
+    } else if (kind === 'oauth') {
+      $('#host-parent-container').show();
+      $('#host-details-container').hide();
+      $('#service-ports-container').hide();
+      $('#service-details-container').hide();
+      $('#oauth-details-container').show();
+      $('#external-container').hide();
+      $('#public-container').hide();
+      $('#site-details-container').hide();
+    } else { // site
+      $('#host-parent-container').hide();
+      $('#host-details-container').hide();
+      $('#service-ports-container').hide();
+      $('#service-details-container').hide();
+      $('#oauth-details-container').hide();
+      $('#external-container').hide();
+      $('#public-container').hide();
+      $('#site-details-container').show();
+    }
+    populateHostDropdown($('#res-host-id').val());
+  }
+
+  $('#res-name, #res-kind').on('input change', function() {
+    const id = $('#res-id').val();
+    if (!id && $('#res-name').val()) {
+      const name = $('#res-name').val();
+      const kind = $('#res-kind').val();
+      let prefix = '';
+      if (kind === 'service') prefix = 'app_';
+      if (kind === 'host') prefix = 'host_';
+      if (kind === 'site') prefix = 'site_';
+      
+      const slug = prefix + name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+      $('#res-slug').val(slug);
+    }
+  });
+
+  function openAddModal(parentId, parentKind) {
+    $('#resourceModalTitle').html('<i class="fa-solid fa-plus"></i> Add Resource');
+    $('#res-id').val('');
+    $('#res-name').val('');
+    $('#res-slug').val('');
+    
+    let defaultKind = 'service';
+    if (parentKind === 'site') defaultKind = 'host';
+    if (parentKind === 'host') defaultKind = 'service';
+    $('#res-kind').val(defaultKind);
+    
+    if (!parentId && defaultKind === 'service') {
+        const currentSite = Object.values(resourcesById).find(r => r.kind === 'site' && r.metadata && r.metadata.isCurrentSite);
+        if (currentSite) parentId = currentSite.id;
+    }
+    if (!parentId && defaultKind === 'host') {
+        const currentSite = Object.values(resourcesById).find(r => r.kind === 'site' && r.metadata && r.metadata.isCurrentSite);
+        if (currentSite) parentId = currentSite.id;
+    }
+    
+    $('#res-description').val('');
+    $('#res-ip').val('');
+    $('#res-address').val('');
+    $('#res-subtype').val('');
+    $('#res-vmid').val('');
+    $('#res-mac').val('');
+    $('#res-os').val('');
+    $('#res-port').val('');
+    $('#res-external-port').val('');
+    $('#res-git-repo').val('');
+    $('#res-install-path').val('');
+    $('#res-systemd').val('');
+    $('#res-is-production').prop('checked', false);
+    $('#res-is-external').prop('checked', false);
+    $('#res-is-public').prop('checked', false);
+    $('#res-is-current-site').prop('checked', false);
+    $('#edit-only-section').hide();
+    
+    populateHostDropdown(parentId || '');
+    toggleFormFields();
+    
+    resourceModal.show();
+  }
+  
+  var ldapGroupsCache = null;
+  async function loadLdapGroups() {
+    if (ldapGroupsCache) return;
+    try {
+      const res = await app.api.get('group');
+      ldapGroupsCache = res.results;
+      const $datalist = $('#ldap-groups-datalist');
+      $datalist.empty();
+      for (const cn of ldapGroupsCache) {
+        $datalist.append($('<option>').val(cn));
+      }
+    } catch (err) {
+      console.error('Failed to load LDAP groups', err);
+    }
+  }
+
+  function populateHostDropdown(selectedId) {
+    const kind = $('#res-kind').val();
+    const $target = $('#res-host-id');
+    $target.empty().append('<option value="">-- Select Parent --</option>');
+    Object.values(resourcesById).forEach(r => {
+      if (r.id === $('#res-id').val()) return; // cannot be parent of itself
+      
+      if (kind === 'host' && (r.kind === 'site' || r.kind === 'host')) {
+        $target.append($('<option>').val(r.id).text(r.name + ' (' + r.slug + ')'));
+      } else if (kind === 'service' && (r.kind === 'host' || r.kind === 'service')) {
+        $target.append($('<option>').val(r.id).text(r.name + ' (' + r.slug + ')'));
+      }
+    });
+    if (selectedId) $target.val(selectedId);
+  }
+
+  function refreshGroupsUI(resourceId) {
+    const myGroups = allGroups.filter(g => g.resourceId === resourceId);
+    $.scope.groups.empty();
+    for (const g of myGroups) {
+      $.scope.groups.push(g);
+    }
+  }
+
+  function refreshEdgesUI(resourceId) {
+    const myEdges = allEdges.filter(e => e.parentId === resourceId || e.childId === resourceId);
+    $.scope.edges.empty();
+    for (const e of myEdges) {
+      const isParent = e.parentId === resourceId;
+      const targetId = isParent ? e.childId : e.parentId;
+      const target = resourcesById[targetId];
+      if (!target) continue;
+      
+      $.scope.edges.push({
+        id: e.id,
+        isParent: isParent,
+        relation: e.relation,
+        targetName: target.name + ' (' + target.slug + ')'
+      });
+    }
+    
+    const $target = $('#new-edge-target');
+    $target.empty().append('<option value="">-- Select Resource --</option>');
+    Object.values(resourcesById).forEach(r => {
+      if (r.id !== resourceId) {
+        $target.append($('<option>').val(r.id).text(r.name + ' (' + r.slug + ')'));
+      }
+    });
+  }
+
+  async function openEditModal(id) {
+    const r = resourcesById[id];
+    if (!r) return;
+    
+    $('#resourceModalTitle').html('<i class="fa-solid fa-pen-to-square"></i> Edit Resource');
+    $('#res-id').val(r.id);
+    $('#res-name').val(r.name);
+    $('#res-slug').val(r.slug);
+    $('#res-kind').val(r.kind);
+    $('#res-description').val(r.description || '');
+    $('#res-ip').val(r.metadata.ip || '');
+    $('#res-address').val(r.metadata.address || '');
+    $('#res-subtype').val(r.metadata.subType || '');
+    $('#res-vmid').val(r.metadata.vmid || '');
+    $('#res-mac').val(r.metadata.macAddress || '');
+    let osKernel = '';
+    if (r.metadata.os) osKernel += r.metadata.os;
+    if (r.metadata.kernel) osKernel += (osKernel ? ' / ' : '') + r.metadata.kernel;
+    $('#res-os').val(osKernel);
+    $('#res-port').val(r.metadata.port || '');
+    $('#res-external-port').val(r.metadata.externalPort || '');
+    $('#res-git-repo').val(r.metadata.gitRepo || '');
+    $('#res-install-path').val(r.metadata.installPath || '');
+    $('#res-systemd').val(r.metadata.systemdService || '');
+    $('#res-is-production').prop('checked', !!r.metadata.isProduction);
+    $('#res-is-external').prop('checked', !!r.metadata.isExternalReachable);
+    $('#res-is-public').prop('checked', !!r.metadata.isPublic);
+    $('#res-is-current-site').prop('checked', !!r.metadata.isCurrentSite);
+    
+    $('#res-redirect-uris').val((r.metadata.redirect_uris || []).join('\n'));
+    $('#res-scopes').val((r.metadata.scopes || []).join(' '));
+    $('#res-allowed-groups').val((r.metadata.allowed_groups || []).join(' '));
+    $('#res-access-ttl').val((r.metadata.token_lifetime || {}).access_token || 3600);
+    $('#res-refresh-ttl').val((r.metadata.token_lifetime || {}).refresh_token || 2592000);
+    
+    if (r.kind === 'oauth') $('#oauth-rotate-container').show();
+    else $('#oauth-rotate-container').hide();
+    
+    // Find parent host
+    const parentEdge = allEdges.find(e => e.childId === r.id && (e.relation === 'hosts' || e.relation === 'oauth'));
+    populateHostDropdown(parentEdge ? parentEdge.parentId : '');
+    toggleFormFields();
+    
+    $('#edit-only-section').show();
+    
+    refreshGroupsUI(r.id);
+    refreshEdgesUI(r.id);
+    await loadLdapGroups();
+    
+    resourceModal.show();
+  }
+  
+  async function saveResource() {
+    const id = $('#res-id').val();
+    const data = {
+      name: $('#res-name').val(),
+      slug: $('#res-slug').val(),
+      kind: $('#res-kind').val(),
+      hostId: ['host', 'service', 'oauth'].includes($('#res-kind').val()) ? $('#res-host-id').val() : undefined,
+      description: $('#res-description').val(),
+      metadata: {
+        subType: $('#res-subtype').val(),
+        ip: $('#res-ip').val(),
+        address: $('#res-address').val(),
+        vmid: $('#res-vmid').val(),
+        macAddress: $('#res-mac').val(),
+        os: $('#res-os').val(),
+        port: $('#res-port').val(),
+        externalPort: $('#res-external-port').val() || $('#res-port').val(),
+        gitRepo: $('#res-git-repo').val(),
+        installPath: $('#res-install-path').val(),
+        systemdService: $('#res-systemd').val(),
+        isProduction: $('#res-is-production').is(':checked'),
+        isExternalReachable: $('#res-is-external').is(':checked'),
+        isPublic: $('#res-is-public').is(':checked'),
+        isCurrentSite: $('#res-is-current-site').is(':checked')
+      }
+    };
+    
+    if (data.kind === 'oauth') {
+      data.redirect_uris = $('#res-redirect-uris').val().split('\n').map(x => x.trim()).filter(Boolean);
+      data.scopes = $('#res-scopes').val().split(' ').map(x => x.trim()).filter(Boolean);
+      data.allowed_groups = $('#res-allowed-groups').val().split(' ').map(x => x.trim()).filter(Boolean);
+      data.token_lifetime = {
+        access_token: Number($('#res-access-ttl').val()) || 3600,
+        refresh_token: Number($('#res-refresh-ttl').val()) || 2592000
+      };
+    }
+    
+    try {
+      let res;
+      if (id) {
+        res = await app.api.put('directory-admin/resources/' + id, data);
+      } else {
+        res = await app.api.post('directory-admin/resources', data);
+      }
+      
+      resourceModal.hide();
+      await loadResources();
+      
+      if (!id && data.kind === 'oauth' && res.results && res.results._raw_secret) {
+        app.util.alert('OAuth Secret', 'Save this client secret, it will not be shown again: <br><br><code>' + res.results._raw_secret + '</code>', 'success');
+      }
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Failed to save');
+    }
+  }
+
+  async function rotateSecret() {
+    const id = $('#res-id').val();
+    if (!id) return;
+    if (!confirm('Are you sure you want to rotate the OAuth secret? Any existing integrations using the old secret will break.')) return;
+    
+    try {
+      const res = await app.api.post(`directory-admin/resources/${id}/rotate-secret`);
+      app.util.alert('Secret Rotated', 'Save this NEW client secret, it will not be shown again: <br><br><code>' + res.secret + '</code>', 'success');
+    } catch (err) {
+      console.error(err);
+      alert(err.message || 'Failed to rotate secret');
+    }
+  }
+
+  async function addGroup() {
+    const resourceId = $('#res-id').val();
+    const groupCn = $('#new-group-cn').val().trim();
+    const accessLevel = $('#new-group-level').val();
+    
+    if (!groupCn) return alert('Group CN is required');
+    try {
+      const res = await app.api.post('directory-admin/groups', {
+        resourceId,
+        groupCn,
+        accessLevel
+      });
+      allGroups.push(res.results);
+      refreshGroupsUI(resourceId);
+      $('#new-group-cn').val('');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to add group');
+    }
+  }
+  
+  async function removeGroup(id) {
+    try {
+      await app.api.delete('directory-admin/groups/' + id);
+      allGroups = allGroups.filter(g => g.id !== id);
+      refreshGroupsUI($('#res-id').val());
+    } catch (err) {
+      console.error(err);
+      alert('Failed to remove group');
+    }
+  }
+
+  async function addEdge() {
+    const resourceId = $('#res-id').val();
+    const dir = $('#new-edge-dir').val();
+    const targetId = $('#new-edge-target').val();
+    const relation = $('#new-edge-relation').val().trim() || 'hosts';
+    
+    if (!targetId) return alert('Select a target resource');
+    
+    const data = { relation };
+    if (dir === 'parent') {
+      data.parentId = resourceId;
+      data.childId = targetId;
+    } else {
+      data.parentId = targetId;
+      data.childId = resourceId;
+    }
+    
+    try {
+      const res = await app.api.post('directory-admin/edges', data);
+      allEdges.push(res.results);
+      refreshEdgesUI(resourceId);
+      $('#new-edge-target').val('');
+    } catch (err) {
+      console.error(err);
+      alert('Failed to add edge');
+    }
+  }
+  
+  async function removeEdge(id) {
+    try {
+      await app.api.delete('directory-admin/edges/' + id);
+      allEdges = allEdges.filter(e => e.id !== id);
+      refreshEdgesUI($('#res-id').val());
+    } catch (err) {
+      console.error(err);
+      alert('Failed to remove edge');
+    }
+  }
+
+  async function deleteResource(id) {
+    if (!confirm('Are you sure you want to delete this resource? All relationships will be destroyed.')) return;
+    try {
+      await app.api.delete('directory-admin/resources/' + id);
+      await loadResources();
+    } catch (err) {
+      console.error(err);
+      alert('Failed to delete');
+    }
+  }
+</script>
+
+<%- include('bottom') %>

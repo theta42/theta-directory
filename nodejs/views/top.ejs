@@ -28,7 +28,7 @@
   <body>
 
   	<nav class="navbar navbar-expand-md navbar-dark fixed-top bg-dark">
-  	  <a class="navbar-brand" href="#"><img src="<%- logo %>" height="28" class="me-2" alt=""><%- name %> <%- titleIcon %></a>
+  	  <a class="navbar-brand" href="/"><img src="<%- logo %>" height="28" class="me-2" alt=""><%- name %> <%- titleIcon %></a>
   	  <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent" aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
   	    <span class="navbar-toggler-icon"></span>
   	  </button>
@@ -44,33 +44,22 @@
   	          Groups
   	        </a>
   	      </li>
-  	      <li class="nav-item group-required group-required-app_sso_admin group-required-app_sso_oauth_admin">
-  	        <a class="nav-link" href="/integrations">
-  	          <i class="fa-solid fa-plug"></i>
-  	          Integrations
+  	      <li class="nav-item group-required group-required-app_sso_admin group-required-app_sso_directory_admin">
+  	        <a class="nav-link" href="/directory"><i class="fa-solid fa-server"></i>
+  	          Directory
   	        </a>
   	      </li>
-  	      <li class="nav-item group-required group-required-app_sso_admin group-required-app_sso_invite">
-  	        <a class="nav-link" href="/invites">
-  	          <i class="fa-solid fa-envelope-open-text"></i>
-  	          Invites
-  	        </a>
-  	      </li>
+
+
   	      <li class="nav-item group-required group-required-app_sso_admin">
-  	        <a class="nav-link" href="/sites">
-  	          <i class="fa-solid fa-network-wired"></i>
-  	          Sites
-  	        </a>
-  	      </li>
-  	      <li class="nav-item group-required group-required-app_sso_admin">
-  	        <a class="nav-link" href="/dashboard">
+  	        <a class="nav-link" href="/executive">
   	          <i class="fa-solid fa-gauge-high"></i>
-  	          Dashboard
+  	          Executive
   	        </a>
   	      </li>
   	    </ul>
   	    <div class="form-inline mt-2 mt-md-0">
-  	      <a id="cl-username" class="navbar-text text-light me-3" href="/" style="display: none;">
+  	      <a id="cl-username" class="navbar-text text-light me-3" href="/profile" style="display: none;">
   	        <i class="fa-solid fa-user me-1"></i><span id="cl-username-text"></span>
   	      </a>
   	      <a id="cl-login-button" class="btn btn-outline-danger my-2 my-sm-0" onclick="app.auth.forceLogin()" style="display: none;">

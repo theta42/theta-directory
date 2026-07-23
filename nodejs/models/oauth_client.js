@@ -1,51 +1,90 @@
 'use strict';
 
-const Table = require('.');
+const { Resource } = require('./resource');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
-const UUID = () => crypto.randomUUID();
 const conf = require('@simpleworkjs/conf');
+const UUID = () => crypto.randomUUID();
 
 const defaultLifetime = (conf.oauth && conf.oauth.token_lifetime) || {
 	access_token: 3600,
 	refresh_token: 2592000
 };
 
-class OAuthClient extends Table {
-	static _key = 'client_id';
-	static _keyMap = {
-		'client_id':          {default: UUID, type: 'string'},
-		'client_secret_hash': {isRequired: true, type: 'string', isPrivate: true},
-		'name':               {isRequired: true, type: 'string', min: 1, max: 255},
-		'description':        {default: '', type: 'string'},
-		'redirect_uris':      {default: [], type: 'object'},
-		'scopes':             {default: ['openid', 'profile', 'email', 'groups'], type: 'object'},
-		'allowed_groups':     {default: [], type: 'object'},
-		'token_lifetime':     {default: function(){ return Object.assign({}, defaultLifetime) }, type: 'object'},
-		'created_by':         {isRequired: true, type: 'string'},
-		'created_on':         {default: function(){ return (new Date).getTime() }},
-		'is_valid':           {default: true, type: 'boolean'},
-	}
-
+class OAuthClient {
 	static async add(data) {
-		const raw_secret = UUID();
-		data.client_secret_hash = await bcrypt.hash(raw_secret, 10);
-		data.client_id = UUID();
-		const client = await this.create(data);
-		client._raw_secret = raw_secret;
-		return client;
+		const raw_secret = crypto.randomUUID();
+		const client_id = crypto.randomUUID();
+		const client_secret_hash = await bcrypt.hash(raw_secret, 10);
+		
+		const r = await Resource.create({
+			id: client_id,
+			kind: 'oauth',
+			name: data.name,
+			description: data.description || '',
+			owner: data.created_by,
+			metadata: {
+				client_secret_hash,
+				redirect_uris: data.redirect_uris || [],
+				scopes: data.scopes || ['openid', 'profile', 'email', 'groups'],
+				allowed_groups: data.allowed_groups || [],
+				token_lifetime: data.token_lifetime || { ...defaultLifetime }
+			}
+		});
+		
+		r._raw_secret = raw_secret;
+		r.client_id = client_id;
+		return r;
+	}
+	static async get(client_id) {
+		const resources = await Resource.list({ where: { id: client_id, kind: 'oauth' } });
+		if (!resources.length) throw new Error('OAuthClient not found');
+		
+		const r = resources[0];
+		// Map metadata to top-level properties to satisfy routes/oauth.js without rewriting it
+		r.client_id = r.id;
+		r.client_secret_hash = r.metadata.client_secret_hash;
+		r.redirect_uris = r.metadata.redirect_uris || [];
+		r.scopes = r.metadata.scopes || ['openid', 'profile', 'email', 'groups'];
+		r.allowed_groups = r.metadata.allowed_groups || [];
+		r.token_lifetime = r.metadata.token_lifetime || { ...defaultLifetime };
+		r.verifySecret = async (secret) => bcrypt.compare(secret, r.client_secret_hash);
+		
+		r.rotateSecret = async () => {
+			const raw_secret = crypto.randomUUID();
+			r.metadata.client_secret_hash = await bcrypt.hash(raw_secret, 10);
+			await r.update({ metadata: r.metadata });
+			return raw_secret;
+		};
+
+		// proxy update to handle metadata correctly
+		const originalUpdate = r.update.bind(r);
+		r.update = async (data) => {
+			if (data.redirect_uris !== undefined) r.metadata.redirect_uris = data.redirect_uris;
+			if (data.scopes !== undefined) r.metadata.scopes = data.scopes;
+			if (data.allowed_groups !== undefined) r.metadata.allowed_groups = data.allowed_groups;
+			if (data.token_lifetime !== undefined) r.metadata.token_lifetime = data.token_lifetime;
+			
+			const updateData = { metadata: r.metadata };
+			if (data.name !== undefined) updateData.name = data.name;
+			if (data.description !== undefined) updateData.description = data.description;
+			if (data.is_valid !== undefined) updateData.is_valid = data.is_valid;
+			
+			return originalUpdate(updateData);
+		};
+
+		return r;
 	}
 
-	async verifySecret(secret) {
-		return bcrypt.compare(secret, this.client_secret_hash);
+	static async list() {
+		const resources = await Resource.list({ where: { kind: 'oauth' } });
+		return Promise.all(resources.map(r => this.get(r.id)));
 	}
 
-	async rotateSecret() {
-		const raw_secret = UUID();
-		await this.update({ client_secret_hash: await bcrypt.hash(raw_secret, 10) });
-		return raw_secret;
+	static async verifySecret(client_id, secret) {
+		const client = await this.get(client_id);
+		return client.verifySecret(secret);
 	}
 }
-OAuthClient.register();
 
 module.exports = { OAuthClient };

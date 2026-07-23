@@ -95,12 +95,23 @@ common query fields can be promoted to columns later.
 | column       | type        | notes |
 |--------------|-------------|-------|
 | `id`         | uuid / pk   | |
-| `kind`       | enum        | `proxmox_node` \| `container` \| `vm` \| `bare_metal` \| `service` |
+| `kind`       | enum        | `site` \| `host` \| `service` |
 | `name`       | text        | display name ("Home Assistant", "ct101") |
 | `slug`       | text unique | url-safe id used by the API |
 | `description`| text        | free text |
-| `metadata`   | jsonb       | `{ url, icon, fqdn, ip, port, tags[], … }` |
+| `metadata`   | jsonb       | `{ subType, ip, macAddress, address, vmid, port, externalPort, gitRepo, installPath, systemdService, os, kernel, isProduction, isExternalReachable, isPublic }` |
 | `created_at` / `updated_at` | timestamptz | |
+
+**Parent Enforcement Rules:**
+- A **Host** MUST have a parent **Site** or **Host**.
+- A **Service** MUST have a parent **Host**.
+- An **OAuth Integration** MUST have a parent **Service**.
+
+**LDAP Group Auto-Creation:**
+When a Host or Service is created, the system will automatically create two LDAP groups in the directory (if they do not already exist): 
+- `<slug>_access` (for standard user access)
+- `<slug>_admin` (for administrative access)
+Additional groups can still be linked manually.
 
 ### `resource_edge` — directed relationships (the graph)
 | column       | type   | notes |
@@ -109,7 +120,7 @@ common query fields can be promoted to columns later.
 | `child_id`   | fk → resource | |
 | `relation`   | enum   | `runs_on` \| `hosts` \| `exposes` \| `depends_on` |
 
-Represents host←container←service (`hosts`/`runs_on`) and service→service
+Represents site←host←service (`hosts`/`runs_on`) and service→service
 (`depends_on`). Directed edges (not a single `parent_id` column) so a node can have
 multiple parents/children and multiple relation types.
 
@@ -164,12 +175,7 @@ Write endpoints (POST/PUT/DELETE) are **out of scope for v1**; population is man
 
 - **Interactive users:** existing session auth — `middleware.auth` validating the
   `auth-token` header (an `AuthToken`, `models/token.js`). No change.
-- **CI/CD (machine) access:** the app does **not yet** have a long-lived service
-  token — `AuthToken` is session-oriented. **Proposed small addition:** a
-  `ServiceToken` subclass in `models/token.js` (mirrors `AuthToken`/`ImpersonationToken`),
-  long-lived, read-only, passed in the same `auth-token` header. Track as its own
-  task; the discovery API should assume it exists but degrade to normal auth tokens
-  until then.
+- **CI/CD (machine) access:** scripts and external integrations (like jump hosts) will use the existing `ApiToken` system (Personal Access Tokens) passed in the `Authorization: Bearer sso_...` header. The `ApiToken` inherits the exact LDAP group permissions of the user who created it, seamlessly mapping to existing access controls.
 - **Read visibility (decision to confirm):** either (a) any authenticated user may
   read all resource metadata and only `/me` is filtered, or (b) list endpoints are
   themselves filtered to entitlement. Recommend **(a)** for a home lab — simpler,
@@ -195,7 +201,7 @@ Write endpoints (POST/PUT/DELETE) are **out of scope for v1**; population is man
 ## 7. Roadmap
 
 1. **v1 — Discovery API** (this spec's focus): SQL schema + migrations, read models,
-   `/api/discovery/*` endpoints, `ServiceToken` for CI/CD.
+   `/api/discovery/*` endpoints, `ApiToken` for CI/CD.
 2. **v2 — "My Access" dashboard**: swap `profile.ejs`'s static list for `/me`.
 3. **v3 — Admin CRUD UI**: manage resources/edges/group links (reusing `app.ui`
    widgets and the `oauth_clients.ejs` card+modal pattern); gated by
@@ -213,4 +219,4 @@ Write endpoints (POST/PUT/DELETE) are **out of scope for v1**; population is man
    `description` so LDAP-only external consumers see it? **Default: no** — keep LDAP
    for auth, SQL for inventory.
 4. **Read-visibility policy:** confirm option (a) vs (b) in §5.
-5. **Service token scope:** read-only globally, or per-token resource/kind scoping?
+5. **Service token scope:** Currently `ApiToken` shares the creator's full permissions. A future enhancement could scope tokens specifically to the Directory API.

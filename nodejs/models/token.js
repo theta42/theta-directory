@@ -1,22 +1,17 @@
 'use strict';
 
-const Table = require('.');
+const { Model } = require('@simpleworkjs/orm');
 const crypto = require('crypto');
 const UUID = () => crypto.randomUUID();
 
-
-class Token extends Table{
-	static _key = 'token';
-	static _keyMap = {
-		'created_by': {isRequired: true, type: 'string', min: 3, max: 500},
-		'created_on': {default: function(){return (new Date).getTime()}},
-		'updated_on': {default: function(){return (new Date).getTime()}, always: true},
-		'token': {default: UUID, type: 'string', min: 36, max: 36, isPrivate: true},
-		'is_valid': {default: true, type: 'boolean'},	
-	}
-
-	constructor(...args){
-		super(...args);
+class Token extends Model {
+	static adapterName = 'redis';
+	static fields = {
+		token: { type: 'string', primaryKey: true, default: UUID, isPrivate: true, min: 36, max: 36 },
+		created_by: { isRequired: true, type: 'string', min: 3, max: 500 },
+		created_on: { type: 'integer', default: function(){return (new Date).getTime()} },
+		updated_on: { type: 'integer', default: function(){return (new Date).getTime()}, always: true },
+		is_valid: { default: true, type: 'boolean' }
 	}
 
 	async check(){
@@ -28,12 +23,10 @@ class Token extends Table{
 	}
 }
 
-Token.register();
-
 class AuthToken extends Token{
-	static _keyMap = {
-		...super._keyMap,
-		user: {model: 'User', rel: 'one', localKey: 'created_by'},
+	static fields = {
+		...Token.fields,
+		user: {model: 'User', type: 'hasOne', localKey: 'created_by'},
 	}
 
 	static async create(data){
@@ -42,11 +35,10 @@ class AuthToken extends Token{
 
 	}
 }
-AuthToken.register();
 
 class InviteToken extends Token{
-	static _keyMap = {
-		...super._keyMap,
+	static fields = {
+		...Token.fields,
 		claimed_by:  {default: '__NONE__', isRequired: false, type: 'string'},
 		mail:        {default: '__NONE__', type: 'string'},
 		mail_token:  {default: '__NONE__', type: 'string'},
@@ -68,14 +60,13 @@ class InviteToken extends Token{
 		}
 	}
 }
-InviteToken.register();
 
 class ImpersonationToken extends Token {
-	static _keyMap = {
-		...super._keyMap,
+	static fields = {
+		...Token.fields,
 		target_uid: {isRequired: true, type: 'string', min: 1, max: 200},
 		temp_hash:  {isRequired: true, type: 'string', min: 1, max: 500},
-		expires_at: {default: function(){ return (new Date).getTime() + 7200000 }, type: 'number'},
+		expires_at: {default: function(){ return (new Date).getTime() + 7200000 }, type: 'integer'},
 	}
 
 	get isExpired() {
@@ -87,27 +78,24 @@ class ImpersonationToken extends Token {
 		return this.create(data);
 	}
 }
-ImpersonationToken.register();
 
 class PasswordResetToken extends Token {}
-PasswordResetToken.register();
 
 class OtpToken extends Token {
-	static _keyMap = {
-		...Token._keyMap,
+	static fields = {
+		...Token.fields,
 		uid:        {isRequired: true, type: 'string'},
 		code:       {isRequired: true, type: 'string'},
 		method:     {isRequired: true, type: 'string'},
-		expires_at: {default: function(){ return (new Date).getTime() + 600000 }, type: 'number'},
+		expires_at: {default: function(){ return (new Date).getTime() + 600000 }, type: 'integer'},
 	};
 
 	get isExpired() {
 		return (new Date).getTime() > this.expires_at;
 	}
 
-	// Factory method — named `issue` to avoid shadowing Token's `create(data)`
 	static async issue(uid, method) {
-		const existing = await this.listDetail({uid});
+		const existing = await this.find({uid});
 		for (const t of existing) {
 			if (t.is_valid) await t.update({is_valid: false});
 		}
@@ -123,6 +111,15 @@ class OtpToken extends Token {
 		return match;
 	}
 }
-OtpToken.register();
+class ServiceToken extends Token {
+	static fields = {
+		...Token.fields,
+		resource_id: {isRequired: true, type: 'string'}
+	}
+	
+	static async issue(resource_id, created_by) {
+		return this.create({resource_id, created_by});
+	}
+}
 
-module.exports = {Token, InviteToken, AuthToken, ImpersonationToken, PasswordResetToken, OtpToken};
+module.exports = {Token, InviteToken, AuthToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken};

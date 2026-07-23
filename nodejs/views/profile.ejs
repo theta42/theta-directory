@@ -89,6 +89,47 @@
 		renderPersonalGroupMembers(currentUser);
 	}
 
+	async function renderMyServices(){
+		try{
+			let res = await app.api.get('discovery/me');
+			res.results.forEach(r => {
+				r.resolvedAddress = (r.metadata && r.metadata.address) || (r.metadata && r.metadata.ip) || 'N/A';
+			});
+			$.scope.myservices.empty();
+			$.scope.myservices.push(...res.results);
+		}catch(error){
+			console.error('renderMyServices error:', error)
+		}
+	}
+
+	async function renderMyMetrics(){
+		try{
+			let uid = currentUser.uid;
+			let res = await app.api.get(`metrics/user/${uid}`);
+			if (res && res.results) {
+				const renderList = (items, id) => {
+					const el = document.getElementById(id);
+					if(!el) return;
+					el.innerHTML = '';
+					if (!items || items.length === 0) {
+						el.innerHTML = '<li class="list-group-item text-muted">No data available</li>';
+						return;
+					}
+					items.forEach(item => {
+						el.innerHTML += `<li class="list-group-item d-flex justify-content-between align-items-center">
+							${item.value}
+							<span class="badge bg-primary rounded-pill">${item.score}</span>
+						</li>`;
+					});
+				};
+				renderList(res.results.services, 'metrics-user-services');
+			}
+		}catch(error){
+			console.error('renderMyMetrics error:', error)
+		}
+	}
+
+
 	async function determinUser(){
 		if(location.pathname.includes('/users/')){
 			let uid = location.pathname.replace('/users/', '');
@@ -160,6 +201,11 @@
 		renderProfile(currentUser);
 		renderUserGroups(currentUser);
 		renderPersonalGroupMembers(currentUser);
+		renderMyServices();
+		if(!isOwnProfile) {
+			renderMyMetrics();
+			$('#user-metrics-card').show();
+		}
 		$('#personal-group-uid-label').text(currentUser.uid);
 
 		addGroupSelect = app.ui.groupSelect('#add-group-select', {
@@ -392,6 +438,60 @@
 					<div class="d-flex gap-2 align-items-start">
 						<div id="add-group-select" class="flex-grow-1"></div>
 						<button type="button" class="btn btn-outline-dark" onclick="addToGroups(this)">Add</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="shadow-lg card card-default mb-8">
+			<div class="card-header shadow">
+				<i class="fa-solid fa-layer-group"></i>
+				My Services
+				<div class="float-end">
+					<i class="fa-solid fa-arrows-up-down"></i>
+				</div>
+			</div>
+			<div class="card-body">
+				<div class="table-responsive">
+					<table class="table">
+						<thead>
+							<th>Name</th>
+							<th>Address / IP</th>
+							<th>Description</th>
+							<th>Kind</th>
+						</thead>
+						<tbody jq-repeat="myservices">
+							<tr>
+								<td>{{name}} <small class="text-muted">({{slug}})</small></td>
+								<td><a href="{{resolvedAddress}}" target="_blank"><code>{{resolvedAddress}}</code></a></td>
+								<td>{{description}}</td>
+								<td>
+									{{#metadata.isProduction}}<span class="badge bg-danger mb-1">Prod</span><br>{{/metadata.isProduction}}
+									<span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="shadow-lg card card-default mb-8 group-required group-required-app_sso_admin" id="user-metrics-card" style="display:none">
+			<div class="card-header shadow bg-success text-white">
+				<i class="fa-solid fa-chart-line"></i>
+				Security & Usage Stats (Last 7 Days)
+				<div class="float-end">
+					<i class="fa-solid fa-arrows-up-down"></i>
+				</div>
+			</div>
+			<div class="card-body p-0">
+				<div class="row m-0">
+					<div class="col-12 p-3">
+						<h6 class="text-success"><i class="fa-solid fa-plug"></i> Top Services Used</h6>
+						<ul class="list-group list-group-flush border rounded" id="metrics-user-services">
+							<li class="list-group-item text-muted">Loading...</li>
+						</ul>
 					</div>
 				</div>
 			</div>

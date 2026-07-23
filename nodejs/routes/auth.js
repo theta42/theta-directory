@@ -13,6 +13,7 @@ const middleware = require('../middleware/auth');
 const rateLimit = require('../middleware/rate_limit');
 const permission = require('../utils/permission');
 const conf = require('@simpleworkjs/conf');
+const metrics = require('../utils/metrics');
 
 async function findUserByLogin(login) {
 	try {
@@ -37,12 +38,16 @@ router.get('/username-suggestions', async function(req, res, next) {
 router.post('/login', rateLimit.login, async function(req, res, next){
 	try{
 		let auth = await Auth.login(req.body);
+		metrics.recordServiceUsage('SSO Web UI', req.body.uid);
 		return res.json({
 			login: true,
 			token: auth.token.token,
 			message:`${req.body.uid} logged in!`,
 		});
 	}catch(error){
+		if (error.name === 'LDAPLoginFailed' || error.status === 401 || error.name === 'UserNotFound') {
+			metrics.recordFailedLogin(req.ip, req.body.uid);
+		}
 		next(error);
 	}
 });

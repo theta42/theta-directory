@@ -1,0 +1,79 @@
+'use strict';
+
+// Example secrets configuration file (file-based config).
+//
+// Bare-metal: install.sh seeds a filled-in version of this file at
+// /etc/sso-manager/secrets.js on first run (LDAP + JWT already live; only
+// SMTP is left as a placeholder). Only write this one by hand if you're
+// skipping install.sh's LDAP bootstrap (SKIP_LDAP=true) or setting up
+// manually.
+// Docker / unified stack: place at ./config/sso-secrets.js and bind-mount
+// ./config at /config (see docker-compose.yml); docker-entrypoint.sh points
+// the CONF_SECRETS env var at it so @simpleworkjs/conf reads it.
+//
+// Values here override conf/base.js and win over <environment>.js. `app_*` env
+// vars (if any are set) override this file too — so the Docker stack passes NO
+// app_* env, keeping this file authoritative.
+//
+// The app only reads the keys it knows (port, name, ldap, smtp, voipms, oauth).
+// The extra `stack`, `bootstrap`, and `serviceAccountPass` keys below are read
+// by the orchestrator (docker-entrypoint.sh, the bootstrap script, setup.sh)
+// and ignored by the app — safe to leave them out for bare-metal use.
+
+module.exports = {
+    port: 3001,
+    name: 'SSO Manager',                 // shown in UI and outbound email
+    logo: '/static/img/theta42.svg',     // nav/favicon image; point at your own file under public/ to white-label
+    ldap: {
+        url: 'ldap://localhost',         // or ldaps://host:636 for TLS
+        bindDN: 'cn=admin,dc=example,dc=com',
+        bindPassword: 'ldap-admin-pass',
+        userBase: 'ou=people,dc=example,dc=com',
+        groupBase: 'ou=groups,dc=example,dc=com',
+        // ldapsHost: 'ldap.internal.example.com', // optional: hostname shown for
+        // direct LDAPS binds on /integrations. Leave empty to derive from the
+        // OAuth issuer. Set an internal-only name to avoid port-forwarding 636.
+        // ldapsPort: 636,
+    },
+    smtp: {
+        host: 'smtp.example.com',
+        port: 587,
+        secure: false,                   // true for 465, false for other ports
+        user: 'noreply@example.com',
+        pass: 'your-smtp-password',
+        from: 'SSO Manager <noreply@example.com>',
+    },
+    voipms: {
+        username: '',                    // VoIP.ms username (optional)
+        password: '',                    // VoIP.ms password (optional)
+        did: '',                          // VoIP.ms DID (optional)
+    },
+    oauth: {
+        issuer: 'https://sso.example.com', // falls back to the request host at runtime
+        jwtSecret: 'a-long-random-development-jwt-secret-value-1234567890',
+        token_lifetime: {
+            access_token: 3600,          // 1 hour in seconds
+            refresh_token: 2592000       // 30 days in seconds
+        }
+    },
+
+    // ── Orchestrator-only keys (ignored by the app) ──────────────────────────
+    // Read by docker-entrypoint.sh (server-side slapd config + validation), the
+    // superproject bootstrap script, and setup.sh. Omit for bare-metal use.
+    stack: {
+        ldapBaseDn: 'dc=example,dc=com',   // slapd suffix (also drives seed OUs).
+        // The base DN also appears in ldap.bindDN/userBase/groupBase above and
+        // in oauth.issuer — keep them consistent with this value
+        // (cn=admin,<dn>, ou=people,<dn>, ou=groups,<dn>, https://<ssoHost>).
+        ldapDomain: 'example.com',         // default cert CN + OAuth issuer host
+        ldapCertCn: '',                    // cert CN; empty -> defaults to ldapDomain
+        ssoHost: 'sso.example.com',        // public SSO hostname (OAuth issuer URL)
+        proxyHost: 'proxy.example.com',    // public proxy hostname
+    },
+    bootstrap: {
+        adminUid: 'admin',                 // initial SSO admin username
+        adminPass: 'AdminPass123!',        // initial SSO admin password
+        adminEmail: 'admin@example.com',   // initial SSO admin email
+    },
+    serviceAccountPass: 'proxy-service-pass', // LDAP password the proxy binds with
+};

@@ -55,16 +55,19 @@ router.get('/tos', async function(req, res, next) {
 
 // Admin dashboard (stats + recent/inactive users) and Notifications
 // (broadcast + history) merged into one page.
-router.get('/dashboard', function(req, res) {
-  res.render('dashboard', {...values});
+router.get('/executive', function(req, res) {
+  res.render('executive', {...values});
 });
 
-router.get('/admin', (req, res) => res.redirect(301, '/dashboard'));
-router.get('/notifications', (req, res) => res.redirect(301, '/dashboard'));
+router.get('/admin', (req, res) => res.redirect(301, '/executive'));
+router.get('/notifications', (req, res) => res.redirect(301, '/executive'));
+router.get('/dashboard', (req, res) => res.redirect(301, '/executive'));
 
-router.get('/invites', function(req, res) {
-  res.render('invites', {...values});
+router.get('/directory', function(req, res) {
+  res.render('directory', {...values});
 });
+
+// Route removed since it's now in directory
 
 router.get('/onboarding', async function(req, res, next) {
   try {
@@ -76,6 +79,10 @@ router.get('/onboarding', async function(req, res, next) {
 });
 
 router.get('/', async function(req, res, next) {
+  res.render('landing', {...values});
+});
+
+router.get('/profile', async function(req, res, next) {
   res.render('profile', {...values});
 });
 
@@ -145,44 +152,7 @@ router.get('/token', function(req, res, next) {
   res.render('token', {...values});
 });
 
-router.get('/sites', async function(req, res, next) {
-  const net = require('net');
-  const url = require('url');
-  
-  const myId = process.env.LDAP_SERVER_ID || 'Standalone';
-  const hostsStr = process.env.LDAP_REPLICATION_HOSTS || '';
-  const hosts = hostsStr.split(' ').filter(h => h);
-  
-  const sites = await Promise.all(hosts.map(hostUrl => {
-      return new Promise((resolve) => {
-          try {
-              const u = new url.URL(hostUrl);
-              const port = u.port || (u.protocol === 'ldaps:' ? 636 : 389);
-              const hostname = u.hostname;
-              const socket = new net.Socket();
-              socket.setTimeout(2000);
-              
-              socket.on('connect', () => {
-                  socket.destroy();
-                  resolve({ url: hostUrl, status: 'Online' });
-              });
-              socket.on('timeout', () => {
-                  socket.destroy();
-                  resolve({ url: hostUrl, status: 'Offline (Timeout)' });
-              });
-              socket.on('error', (err) => {
-                  socket.destroy();
-                  resolve({ url: hostUrl, status: 'Offline (' + err.code + ')' });
-              });
-              socket.connect(port, hostname);
-          } catch (e) {
-              resolve({ url: hostUrl, status: 'Invalid URL' });
-          }
-      });
-  }));
-  
-  res.render('sites', { ...values, myId, sites });
-});
+
 
             
 router.get('/login/resetpassword/:token', async function(req, res, next){

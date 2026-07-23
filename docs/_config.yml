@@ -31,6 +31,9 @@ nav:
   - title: LDAP
     page: /ldap.html
     icon: fa-address-book
+  - title: Directory
+    page: /directory.html
+    icon: fa-server
   - title: Changelog
     url: https://github.com/theta42/sso-manager-node/blob/master/CHANGELOG.md
     icon: fa-list

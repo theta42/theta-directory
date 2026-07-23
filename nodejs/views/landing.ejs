@@ -1,0 +1,136 @@
+<%- include('top') %>
+
+<style>
+/* App Portal styling using Bootstrap defaults */
+.portal-banner {
+    background-color: var(--bs-primary);
+    color: white;
+    padding: 3rem 1rem;
+    margin-bottom: 2rem;
+    border-radius: .5rem;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+.portal-banner h1 {
+    font-weight: 700;
+}
+.carousel-container {
+    display: flex;
+    overflow-x: auto;
+    gap: 1.5rem;
+    padding-bottom: 1.5rem;
+    scrollbar-width: thin;
+}
+.service-card {
+    min-width: 280px;
+    height: 100%;
+    transition: transform 0.2s, box-shadow 0.2s;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+}
+.service-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 .5rem 1rem rgba(0,0,0,.15)!important;
+}
+.service-card .card-body {
+    flex: 1;
+}
+</style>
+
+<div class="container mt-4">
+    <div class="portal-banner text-center">
+        <h1>SSO Portal</h1>
+        <p class="lead">Explore and access all your services in one place.</p>
+        <a href="/profile" class="btn btn-light shadow-sm mt-2"><i class="fa-solid fa-user"></i> My Profile</a>
+    </div>
+
+    <h3 class="mb-3"><i class="fa-solid fa-layer-group text-primary"></i> My Apps & Services</h3>
+    <div class="carousel-container mb-5" id="my-services" jq-repeat="myservices">
+        <a href="{{resolvedAddress}}" target="_blank" style="text-decoration: none; color: inherit; min-width: 280px;">
+            <div class="card shadow-sm service-card border-success">
+                <div class="card-body">
+                    <h5 class="card-title text-success"><i class="fa-solid fa-rocket"></i> {{name}}</h5>
+                    <p class="card-text text-muted mb-1">{{kind}}{{#metadata.subType}} - {{metadata.subType}}{{/metadata.subType}}</p>
+                    <p class="card-text text-truncate small" title="{{description}}">{{description}}</p>
+                </div>
+                <div class="card-footer bg-transparent border-top-0 pt-0">
+                    <span class="badge bg-success">Access Granted</span>
+                </div>
+            </div>
+        </a>
+    </div>
+
+    <h3 class="mb-3"><i class="fa-solid fa-compass text-secondary"></i> Discover More Services</h3>
+    <div class="carousel-container mb-5" id="other-services" jq-repeat="otherservices">
+        <div class="card shadow-sm service-card" style="min-width: 280px;" onclick="requestAccess('{{id}}')">
+            <div class="card-body">
+                <h5 class="card-title"><i class="fa-solid fa-cloud"></i> {{name}}</h5>
+                <p class="card-text text-muted mb-1">{{kind}}{{#metadata.subType}} - {{metadata.subType}}{{/metadata.subType}}</p>
+                <p class="card-text text-truncate small" title="{{description}}">{{description}}</p>
+            </div>
+            <div class="card-footer bg-transparent border-top-0 pt-0">
+                <span class="badge bg-secondary">Request Access</span>
+            </div>
+        </div>
+    </div>
+    
+    <h3 class="mb-3"><i class="fa-solid fa-server text-info"></i> Hosts & Infrastructure</h3>
+    <div class="carousel-container mb-5" id="hosts" jq-repeat="hosts">
+        <div class="card shadow-sm service-card" style="min-width: 280px;">
+            <div class="card-body">
+                <h5 class="card-title"><i class="fa-solid fa-desktop"></i> {{name}}</h5>
+                <p class="card-text text-muted mb-1">IP: {{metadata.ip}}</p>
+                <p class="card-text small mb-0">OS: {{metadata.os}}</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script type="text/javascript">
+    app.auth.forceLogin();
+    
+    $(document).ready(async function() {
+        try {
+            let res = await app.api.get('discovery/me');
+            let allAccessible = res.results || [];
+            
+            let allRes = await app.api.get('directory-admin/resources').catch(e => { return {results:[]}; });
+            
+            let myServices = [];
+            let otherServices = [];
+            let hosts = [];
+            
+            allAccessible.forEach(r => {
+                r.resolvedAddress = (r.metadata && r.metadata.address) || (r.metadata && r.metadata.ip) || '#';
+                r.description = r.description || 'No description provided';
+                if (r.kind === 'service' || r.kind === 'oauth') myServices.push(r);
+                if (r.kind === 'host') hosts.push(r);
+            });
+            
+            if (allRes && allRes.results) {
+                allRes.results.forEach(r => {
+                    r.description = r.description || 'No description provided';
+                    if (r.kind === 'service' && !myServices.find(s => s.id === r.id)) {
+                        otherServices.push(r);
+                    }
+                });
+            }
+            
+            $.scope.myservices.empty();
+            $.scope.myservices.push(...myServices);
+            
+            $.scope.otherservices.empty();
+            $.scope.otherservices.push(...otherServices);
+            
+            $.scope.hosts.empty();
+            $.scope.hosts.push(...hosts);
+            
+        } catch (e) {
+            console.error('Failed to load discovery data:', e);
+        }
+    });
+    
+    function requestAccess(id) {
+        app.util.alert('Access Request', 'This feature is coming soon!', 'info');
+    }
+</script>

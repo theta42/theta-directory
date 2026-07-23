@@ -53,20 +53,16 @@ An OAuth client represents an app that authenticates against the SSO. Each has:
 
 ### Managing clients
 
-Clients are managed from the web UI (as a member of the `app_sso_oauth_admin`
-group) or the HTTP API at `/api/oauth/client` (auth via the `auth-token` header
-from a login):
+Clients are managed directly from the **Directory** tab in the web UI. They are modeled as resources of `kind: oauth` and must belong to a parent Service.
 
-| Method | Path | Action |
-|--------|------|--------|
-| `GET` | `/api/oauth/client` | list clients |
-| `POST` | `/api/oauth/client` | create a client (returns the raw `client_secret` once) |
-| `GET` | `/api/oauth/client/:id` | get one |
-| `PUT` | `/api/oauth/client/:id` | update redirect URIs / scopes / groups |
-| `DELETE` | `/api/oauth/client/:id` | delete |
-| `POST` | `/api/oauth/client/:id/rotate` | rotate the secret (returns the new raw secret once) |
+| Action | How to do it |
+|--------|--------------|
+| **Create** | Click the green **+** on a parent Service to add a child resource. Choose **OAuth Integration**. The raw `client_secret` is shown once upon creation. |
+| **Edit** | Click the edit pencil on the OAuth resource in the Directory list or tree. You can update redirect URIs, scopes, allowed groups, and token TTLs. |
+| **Delete** | Click the trash can on the OAuth resource in the Directory list. |
+| **Rotate Secret** | Open the edit modal for the OAuth resource and click **Rotate Client Secret**. The new raw secret is shown once. |
 
-> All client-management endpoints are gated by the `app_sso_oauth_admin` group.
+> All client-management actions use the standard Directory API (`/api/directory-admin/resources`) and are gated by the `app_sso_directory_admin` group.
 
 ## Scopes
 

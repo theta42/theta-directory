@@ -231,7 +231,7 @@ router.get('/invite', async function(req, res, next){
 	try{
 		await permission.byGroup(req.user, ['app_sso_admin', 'app_sso_invite']);
 		const isAdmin = await permission.byGroup(req.user, ['app_sso_admin']).then(() => true).catch(() => false);
-		const all = await InviteToken.listDetail();
+		const all = await InviteToken.list();
 		const visible = isAdmin ? all : all.filter(t => t.created_by === req.user.uid);
 		const results = visible.map(t => ({ token: t.token, ...t }));
 		return res.json({ results });

@@ -1,14 +1,35 @@
 'use strict';
 
 const conf = require('@simpleworkjs/conf');
-const {setUpTable} = require('model-redis');
+const { setUpTable } = require('model-redis');
 
+// Keep model-redis for the ones not yet ported
 const Table = setUpTable(conf.redis);
-
 module.exports = Table;
 
-require('./token');
+const { Token, AuthToken, InviteToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken } = require('./token');
 require('./verification');
-require('./oauth_client');
 require('./oauth_code');
 require('./api_token');
+
+const { init } = require('@simpleworkjs/orm');
+const { Resource, ResourceEdge, ResourceGroup } = require('./resource');
+
+async function initORM() {
+  const ormConf = conf.orm || {
+    dialect: 'sqlite',
+    storage: './config/inventory.sqlite',
+    logging: false
+  };
+  ormConf.redis = conf.redis;
+
+  await init({
+    conf: { orm: ormConf },
+    models: [
+      Resource, ResourceEdge, ResourceGroup,
+      Token, AuthToken, InviteToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken
+    ]
+  });
+}
+
+module.exports.initORM = initORM;

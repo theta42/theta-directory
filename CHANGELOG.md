@@ -4,7 +4,13 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
-## [Unreleased]
+## [1.2.1] - 2026-07-22
+
+### Added
+- **Actionable Metrics**: New real-time metrics tracking for failed logins, top IPs, and service usage per user.
+- **LDAP Monitor**: Background service to parse OpenLDAP binds over port 389 and track metrics for legacy apps.
+- **UI Updates**: Executive dashboard now displays actionable metrics cards instead of raw logs. User profiles show individual service usage stats to admins.
+- **Directory Management**: Integrated site/host/service abstractions into directory UI and allowed associating OAuth apps directly to services.
 
 ## [1.1.18] - 2026-07-21
 

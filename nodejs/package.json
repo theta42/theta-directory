@@ -1,6 +1,7 @@
 {
   "name": "t42-sso-manager",
-  "version": "1.1.18",
+  "version": "1.2.1",
+  "description": "A very simple LDAP management and SSO system",
   "author": [
     {
       "name": "William Mantly",
@@ -23,6 +24,7 @@
     "@fortawesome/fontawesome-free": "^7.3.0",
     "@popperjs/core": "^2.11.8",
     "@simpleworkjs/conf": "^1.2.0",
+    "@simpleworkjs/orm": "file:../../../simpleworkjs/orm",
     "bcrypt": "^6.0.0",
     "bootstrap": "^5.3.8",
     "compression": "^1.8.1",
