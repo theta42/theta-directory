@@ -1,8 +1,10 @@
 # Home-Lab Directory / Inventory — Design Spec
 
-Status: **Draft / agreed direction** (no code yet)
+Status: **Implemented** (v1.2.1+: model, admin API, UI; v1.3.x: automatic
+registration from theta-env + ldap-client). §9 adds the planned-consumer
+readiness review.
 Owner: wmantly
-Last updated: 2026-07-02
+Last updated: 2026-07-23
 
 ---
 
@@ -220,3 +222,148 @@ Write endpoints (POST/PUT/DELETE) are **out of scope for v1**; population is man
    for auth, SQL for inventory.
 4. **Read-visibility policy:** confirm option (a) vs (b) in §5.
 5. **Service token scope:** Currently `ApiToken` shares the creator's full permissions. A future enhancement could scope tokens specifically to the Directory API.
+
+---
+
+## 9. Planned consumers — data-model & API readiness
+
+Five consumers the directory data should be able to power. None are being
+built yet; this section records what each needs, what already exists, and the
+gaps to close so the model/API never paints us into a corner.
+
+The recurring theme: **the graph model itself (Resource / ResourceEdge /
+ResourceGroup + LDAP groups) is sufficient for all five.** The gaps are
+(a) one new model (access requests), (b) machine-to-machine auth for the read
+API, (c) documented metadata conventions instead of new columns, and
+(d) change detection for the drift/sync consumers.
+
+### 9.1 End-user exploration ("Netflix-style" catalog + request access)
+
+A user browses everything that exists — part advertisement, part
+documentation — sees what they already have, and requests access to the rest.
+
+Already there:
+- `/api/discovery/me` (`getMyAccess`) — the "My Services" half.
+- `Resource.owner` + `<slug>_access` / `<slug>_admin` ResourceGroup links —
+  who approves, and which group an approval means joining.
+- The Notification model — the approval-request delivery mechanism.
+
+Gaps:
+1. **Catalog projection with metadata privacy.** `/api/discovery/resources`
+   returns full `metadata` to any authenticated user — including the OAuth
+   kind's `client_secret_hash`, and operator notes that may name internal
+   IPs. Needed: a per-kind public projection (name, description, kind,
+   subType, icon, address, hasAccess, requestable) and a private-key
+   convention for the rest (e.g. only `app_sso_directory_admin` sees full
+   metadata). This is a **fix worth doing before any catalog UI exists**.
+2. **`AccessRequest` model** — the one genuinely new model:
+   `{id, uid, resourceId, groupCn, status: pending|approved|denied, note,
+   requestedOn, decidedBy, decidedOn}`. Approval = LDAP group add + notify.
+   Endpoints: user POST/GET own; resource owner / directory admin
+   list/approve/deny.
+3. **Catalog metadata conventions**: `icon`, `tagline` (card-length blurb),
+   `requestable: false` for resources that shouldn't be advertised.
+
+### 9.2 SSH jump host (`username_-_{hostname-or-ip}@publicHost`)
+
+A public jump host parses the target out of the SSH username, checks the user
+may reach that host, and proxies the connection (WinSCP-friendly: one
+username string, no interactive menu needed — though an interactive picker on
+plain `username@` login is the same query).
+
+Already there:
+- Hosts carry `ip` (and `host_<hostname>` slugs to resolve by name).
+- Access is already group-based (`<slug>_access`), checkable via LDAP alone —
+  the jump host can run entirely off LDAP (SSSD) + one directory query.
+- User SSH keys are in LDAP (openssh-lpk) — the jump host authenticates the
+  real user without local accounts.
+
+Gaps:
+1. **Machine auth for the access query.** The jump host must ask "may user X
+   reach host Y" / "list hosts user X may reach" *about another user*.
+   `getMyAccess` only answers for the calling user. Needed: a
+   service-token-authenticated endpoint (`GET
+   /api/discovery/access/:uid[/:slug]`). `ServiceToken` already exists and
+   is even linked to a resource (`resource_id`) — what's missing is an auth
+   middleware that accepts it and a permission rule ("service tokens may
+   read access info, scoped read-only").
+2. **Connection metadata conventions** on hosts: `sshPort` (default 22),
+   optional `fqdn` (when IP is dynamic), optional `jumpVia` edge relation if
+   multi-hop topologies ever appear.
+3. Document the username grammar (`{uid}_-_{host-slug-or-ip}`) here so the
+   seed/ldap-client keep host slugs DNS-safe (they already are: slugify
+   strips everything but `[a-z0-9-]`).
+
+### 9.3 Firewall port-forward rules (build / update / drift-test)
+
+An automation renders the public firewall's forwarding table from the
+directory, applies it, and alerts on drift in either direction.
+
+Already there:
+- `metadata.port` / `metadata.externalPort` / `metadata.ip` /
+  `metadata.isExternalReachable` — the core mapping data, already seeded for
+  the stack's own services.
+
+Gaps:
+1. **Port-mapping convention is too thin for real rules**: no protocol, no
+   multi-port services. Adopt `metadata.portMappings: [{proto: "tcp"|"udp",
+   external: n, internal: n, comment}]` as the authoritative form
+   (`port`/`externalPort` stay as the simple single-mapping case).
+2. **Drift detection needs cheap change polling**: an `updated_on` timestamp
+   on resources surfaced in the graph API, or a graph-level etag/hash, so
+   the runner can poll without diffing full payloads. (The ORM already
+   publishes create/update events internally — a future push feed can ride
+   that; polling comes first.)
+3. Same **service-token read auth** as 9.2 — automation must not run on a
+   human's session token.
+
+### 9.4 Local DNS / mDNS
+
+A DNS (or mDNS advertiser) zone is generated from the directory: hosts get
+A records from `metadata.ip`, services get CNAMEs/records from their
+addresses, sites map to zones.
+
+Already there:
+- `host_<hostname>` + `ip` covers A records; `site_<name>` is a natural zone
+  boundary; service `address` yields names.
+
+Gaps:
+1. **Name conventions**: `metadata.dnsNames: []` for extra aliases, and a
+   documented rule for which name wins (slug vs `address` hostname). TTL
+   only if someone actually needs per-record TTLs — default is fine.
+2. Same **change detection** as 9.3 (poll `updated_on` / etag; push later).
+3. Nothing else — this consumer is nearly free once 9.3's conventions land.
+
+### 9.5 Access control for hosts
+
+Who may log in to / sudo on which machine, driven by the directory.
+
+Already there — this is the original point of the system:
+- `<slug>_access` / `<slug>_admin` groups are auto-provisioned per host;
+  ldap-client configures SSSD/PAM against the directory; `sudoRole` and
+  openssh-lpk schemas cover sudo and SSH keys.
+
+Gaps:
+1. **Close the loop in ldap-client**: joined hosts should set an SSSD access
+   filter (`access_provider = ldap`, filter on `host_<hostname>_access`
+   membership) so directory group membership *is* login permission, not just
+   identity. Today the registration exists but enforcement is host-side
+   convention.
+2. **`accessLevel` granularity**: ResourceGroup's `member`/`owner` maps to
+   login/admin today; if finer roles emerge (e.g. `login` vs `sudo` vs
+   `admin`), extend the enum — the join-table shape already supports it.
+
+### 9.6 Consolidated work list (model/API only, no consumers)
+
+Ordered by how much they unblock:
+
+1. **Metadata privacy projection** on the read API (blocks 9.1; fixes the
+   `client_secret_hash` exposure regardless of any consumer).
+2. **Service-token auth for `/api/discovery/*`** + `access/:uid` endpoint
+   (blocks 9.2, 9.3; ServiceToken model already exists).
+3. **`AccessRequest` model + endpoints** (blocks 9.1's request half).
+4. **Metadata conventions doc entries** (`sshPort`, `portMappings`,
+   `dnsNames`, `icon`, `tagline`, `requestable`) in `docs/directory.md` —
+   conventions, not schema changes; the json column already holds them.
+5. **`updated_on` in graph output / graph etag** (blocks drift/DNS
+   freshness; trivial once surfaced).
