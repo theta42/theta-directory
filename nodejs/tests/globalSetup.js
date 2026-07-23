@@ -2,10 +2,11 @@
 
 // Flush all test-prefix Redis keys before each test run so state is always clean.
 // Uses model-redis's own bundled redis client since redis is not a top-level dep.
-const { createClient } = require('../node_modules/model-redis/node_modules/redis');
+const { createClient } = require('redis');
 
 module.exports = async function() {
-	const client = createClient();
+	const redisUrl = process.env.REDIS_URL || undefined;
+	const client = createClient(redisUrl ? { url: redisUrl } : {});
 	await client.connect();
 
 	const keys = await client.keys('sso_manager_test_*');

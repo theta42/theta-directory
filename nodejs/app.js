@@ -25,6 +25,7 @@ app.contoller = require('./controller');
 
 // Background services (self-initializing on require).
 require('./services/update_check');
+require('./services/ldap_monitor');
 
 // Push pubsub over the socket and back.
 app.onListen.push(function(){
@@ -83,16 +84,18 @@ app.use('/api/token', middleware.auth, require('./routes/token'));
 
 app.use('/api/group', middleware.auth, require('./routes/group'));
 app.use('/api/notification', middleware.auth, require('./routes/notification'));
+app.use('/api/discovery', middleware.auth, require('./routes/discovery'));
+app.use('/api/directory-admin', middleware.auth, require('./routes/api_directory_admin'));
 app.use('/api/update-check', middleware.auth, require('./routes/update_check'));
 app.use('/api/tos', middleware.auth, require('./routes/tos'));
-
+app.use('/api/metrics', middleware.auth, require('./routes/api_metrics'));
 // Self-service API tokens (PATs) — owner-scoped, no admin group required.
 app.use('/api/api-token', middleware.auth, require('./routes/api_token'));
 
 // OAuth 2.0 / OpenID Connect
 app.use('/oauth', oauthRouter);
-app.use('/api/oauth/client', middleware.auth, require('./routes/oauth_client'));
 app.use('/api/oauth', middleware.auth, oauthApiRouter);
+app.use('/api/oauth/client', middleware.auth, require('./routes/oauth_client'));
 app.get('/.well-known/openid-configuration', discovery);
 
 
@@ -105,7 +108,10 @@ app.use(function(req, res, next) {
   next(err);
 });
 
-// Error handler. This is where `next()` will go on error
+// Discovery API
+app.use('/api/discovery', middleware.auth, require('./routes/api_discovery'));
+
+// Error handling
 app.use(function(err, req, res, next) {
   const SILENT_404S = ['/.well-known/'];
   const isSilent404 = err.status === 404 && SILENT_404S.some(p => req.url.startsWith(p));

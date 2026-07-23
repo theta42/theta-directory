@@ -45,8 +45,11 @@ router.post('/', async function(req, res, next) {
 
 		const client = await OAuthClient.add(req.body);
 
+		const result = client.toJSON ? client.toJSON() : { ...client };
+		result.client_id = client.client_id || client.id;
+
 		return res.json({
-			results: client,
+			results: result,
 			client_secret: client._raw_secret,
 			message: `OAuth client '${client.name}' created. Save the client secret — it will not be shown again.`,
 		});

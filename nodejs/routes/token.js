@@ -23,8 +23,10 @@ router.get('/', async function(req, res, next){
 
 router.get('/:name', async function(req, res, next){
 	try{
+		// ORM models: list() on the redis adapter always returns full rows;
+		// detail is handled by serialization (isPrivate fields are excluded).
 		return res.json({
-			results:  await tokens[req.params.name][req.query.detail ? "listDetail" : "list"]()
+			results:  await tokens[req.params.name].list()
 		});
 	}catch(error){
 		next(error);
@@ -34,9 +36,13 @@ router.get('/:name', async function(req, res, next){
 
 router.get('/:name/:token', async function(req, res, next){
 	try{
-		return res.json({
-			results:  await tokens[req.params.name].get(req.params.token)
-		});
+		const result = await tokens[req.params.name].get(req.params.token);
+		if (!result) {
+			const error = new Error('Token not found');
+			error.status = 404;
+			throw error;
+		}
+		return res.json({ results: result });
 	}catch(error){
 		next(error);
 	}

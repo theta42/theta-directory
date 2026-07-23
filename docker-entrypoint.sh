@@ -139,6 +139,7 @@ moduleload      pw-sha2
 moduleload      ppolicy
 moduleload      memberof
 moduleload      refint
+moduleload      auditlog
 SYNCPROV_MODULE_PLACEHOLDER
 
 # TLS (LDAPS on 636 + StartTLS on 389). Cert/key paths are fixed; the files are
@@ -186,6 +187,10 @@ memberof-memberof-ad memberOf
 # refint overlay (referential integrity on group membership)
 overlay         refint
 refint_attributes memberOf member manager owner
+
+# auditlog overlay (LDIF audit trail of all changes)
+overlay         auditlog
+auditlog        /var/lib/ldap/auditlog.ldif
 
 REPLICATION_BLOCK_PLACEHOLDER
 
@@ -249,7 +254,7 @@ info "Starting OpenLDAP (base DN: ${LDAP_BASE_DN})..."
 # -h listens on ldap:///  (389: plain + StartTLS) and ldaps:/// (636: LDAPS).
 # ldapi:/// is intentionally omitted: its default socket dir doesn't exist on
 # Alpine and the container only uses simple bind over ldap://localhost:389.
-slapd -d 0 -u ldap -g ldap -f /etc/openldap/slapd.conf -h "ldap:/// ldaps:///" &
+slapd -d 256 -u ldap -g ldap -f /etc/openldap/slapd.conf -h "ldap:/// ldaps:///" >> /var/lib/ldap/slapd.log 2>&1 &
 SLAPD_PID=$!
 
 # Wait for slapd to answer the root DSE (means it's up, regardless of DB state).

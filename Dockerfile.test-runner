@@ -1,0 +1,50 @@
+# Test-runner image for SSO Manager.
+#
+# Installs all dependencies (including dev) and bundles the app code plus
+# the seed script. The entrypoint waits for LDAP + Redis, seeds the test
+# user, then runs whatever command is given (default: npm test).
+
+FROM node:20-alpine
+
+# Install OpenLDAP clients (ldapadd, ldapsearch) and bash for the seed script
+RUN apk add --no-cache openldap-clients bash
+
+WORKDIR /app
+
+# Copy and install dependencies (including devDependencies for jest/supertest)
+COPY nodejs/package*.json ./
+RUN npm ci
+
+# Copy the application source
+COPY nodejs/app.js ./
+COPY nodejs/bin ./bin
+COPY nodejs/conf ./conf
+COPY nodejs/controller ./controller
+COPY nodejs/middleware ./middleware
+COPY nodejs/models ./models
+COPY nodejs/routes ./routes
+COPY nodejs/services ./services
+COPY nodejs/utils ./utils
+COPY nodejs/views ./views
+COPY nodejs/public ./public
+COPY nodejs/tests ./tests
+
+# SQLite database directory (config/inventory.sqlite for Resource model's ORM)
+RUN mkdir -p /app/config
+
+# Files expected at the flattened /app path (see Dockerfile.openldap notes)
+COPY tos.md /tos.md
+COPY README.md /README.md
+COPY CHANGELOG.md /CHANGELOG.md
+COPY DEPLOYMENT.md /DEPLOYMENT.md
+COPY API.md /API.md
+COPY directory_spec.md /directory_spec.md
+COPY docs /docs
+
+# Seed script and utility
+COPY test_seed.js ./test_seed.js
+COPY test/seed-test-user.sh /usr/local/bin/seed-test-user
+RUN chmod +x /usr/local/bin/seed-test-user
+
+# Default command: seed the test user, then run the test suite
+CMD ["sh", "-c", "seed-test-user && npm test"]

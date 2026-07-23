@@ -64,6 +64,7 @@ async function fetchUsernameSuggestions() {
 		// simply can't bind). Disabling (not just hiding) keeps disabled
 		// fields out of both form serialization and validation.
 		$form.find('[name=mail]').prop('disabled', checked).closest('.mb-3').toggle(!checked);
+
 		$form.find('[name=userPassword]').prop('disabled', checked).closest('.mb-3').toggle(!checked);
 		$form.find('[name=passwordMatch]').prop('disabled', checked).closest('.mb-3').toggle(!checked);
 
@@ -136,10 +137,7 @@ async function fetchUsernameSuggestions() {
 		<input type="text" class="form-control shadow" name="sshPublicKey" placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQ..." />
 	</div>
 
-	<div class="mb-3">
-		<label class="form-label">Mobile Phone <small class="text-muted">(optional, include country code e.g. +14155551234)</small></label>
-		<input type="text" class="form-control shadow" name="mobile" placeholder="+14155551234" />
-	</div>
+
 
 	<div class="mb-3">
 		<label class="form-label">Location (Site) <small class="text-muted">(optional)</small></label>
@@ -166,3 +164,18 @@ async function fetchUsernameSuggestions() {
 	</div>
 	<button type="submit" class="btn btn-outline-dark">Add</button>
 </form>
+<script>
+	$(document).ready(async function() {
+	    const $loc = $('[name="location"]');
+	    if (!$loc.val()) {
+	        try {
+	            const dirRes = await app.api.get('directory-admin/resources');
+	            const resources = dirRes.results || [];
+	            const site = resources.find(r => r.kind === 'site' && r.metadata && r.metadata.isCurrentSite);
+	            if (site) {
+	                $loc.val(site.name);
+	            }
+	        } catch(e) {}
+	    }
+	});
+</script>

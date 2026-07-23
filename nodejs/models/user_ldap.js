@@ -891,6 +891,12 @@ User.invite = async function(data = {}){
 
 User.login = async function(data){
 	try{
+		if (!data.uid && !data.username) {
+			let error = new Error('Invalid Credentials, login failed.');
+			error.name = 'LDAPLoginFailed';
+			error.status = 401;
+			throw error;
+		}
 		let user = await this.get(data.uid || data.username);
 
 		const loginClient = makeClient();

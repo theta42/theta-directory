@@ -9,10 +9,23 @@ async function auth(req, res, next){
 		// the same /api/* routes the UI uses.
 		const authz = req.header('authorization') || '';
 		if(authz.slice(0, 7).toLowerCase() === 'bearer '){
-			const user = await Auth.checkApiToken(authz.slice(7));
-			if(user && user.uid){
-				req.user = user;
-				return next();
+			const tokenStr = authz.slice(7);
+			if (tokenStr.startsWith('sso_')) {
+				const user = await Auth.checkApiToken(tokenStr);
+				if(user && user.uid){
+					req.user = user;
+					return next();
+				}
+			} else {
+				// Machine token (ServiceToken)
+				const { ServiceToken } = require('../models/token');
+				let svcToken;
+				try { svcToken = await ServiceToken.get(tokenStr); } catch(e) {}
+				if (svcToken && svcToken.is_valid) {
+					req.user = { uid: svcToken.resource_id, isMachine: true, name: 'Machine Account' };
+					req.resourceId = svcToken.resource_id;
+					return next();
+				}
 			}
 		}
 

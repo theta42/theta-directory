@@ -1,0 +1,81 @@
+# Docker Compose for running the SSO Manager test suite.
+#
+# Spins up:
+#   ldap   — OpenLDAP + Redis (all-in-one image, slapd + redis only, no app)
+#   redis  — Standalone Redis for the app's model/token storage
+#   test-runner — Seeds the test user, then runs `npm test`
+#
+# Usage:
+#   docker compose -f docker-compose.test.yml up --build
+#   # Or to run a specific test file:
+#   docker compose -f docker-compose.test.yml run --rm test-runner npx jest tests/auth.test.js
+#
+# The LDAP service uses the same Dockerfile.openldap image as production but
+# overrides the command to only start slapd + redis (the entrypoint handles
+# slapd.conf generation, directory initialization, and Redis startup before
+# running the given command — "sleep infinity" keeps it alive).
+#
+# The test-runner connects to ldap:389 and redis:6379 via Docker networking.
+# app_* env vars override conf/secrets.js (highest precedence in
+# @simpleworkjs/conf), so the production secrets.js is never read.
+
+services:
+  ldap:
+    build:
+      context: .
+      dockerfile: Dockerfile.openldap
+    environment:
+      - LDAP_BASE_DN=dc=test,dc=local
+      - LDAP_ADMIN_PASS=secret
+      - ORG_NAME=Test SSO
+    # The entrypoint starts slapd + redis, then runs whatever command is given.
+    # "sleep infinity" keeps the container alive so the test-runner can connect.
+    command: ["sleep", "infinity"]
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost:389 -b '' -s base '(objectClass=*)' >/dev/null 2>&1"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    volumes:
+      - ldap-data:/var/lib/ldap
+      - ldap-certs:/etc/openldap/certs
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test-runner
+    environment:
+      # Tell the app which environment it's in (loads conf/test.js for Redis prefix)
+      - NODE_ENV=test
+      # LDAP — point at the ldap service container
+      - app_ldap__url=ldap://ldap:389
+      - app_ldap__bindDN=cn=admin,dc=test,dc=local
+      - app_ldap__bindPassword=secret
+      - app_ldap__userBase=ou=people,dc=test,dc=local
+      - app_ldap__groupBase=ou=groups,dc=test,dc=local
+      # Redis — point at the redis service container
+      - app_redis__redisConf__url=redis://redis:6379
+      # Also used by tests/globalSetup.js (direct Redis client, not @simpleworkjs/conf)
+      - REDIS_URL=redis://redis:6379
+      # JWT secret (required by the app, not sensitive in test)
+      - app_oauth__jwtSecret=test-jwt-secret-for-testing-only
+      # App name
+      - app_name=Test SSO
+    depends_on:
+      ldap:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  ldap-data:
+  ldap-certs:

@@ -13,6 +13,7 @@ const middleware = require('../middleware/auth');
 const rateLimit = require('../middleware/rate_limit');
 const permission = require('../utils/permission');
 const conf = require('@simpleworkjs/conf');
+const metrics = require('../utils/metrics');
 
 async function findUserByLogin(login) {
 	try {
@@ -37,12 +38,16 @@ router.get('/username-suggestions', async function(req, res, next) {
 router.post('/login', rateLimit.login, async function(req, res, next){
 	try{
 		let auth = await Auth.login(req.body);
+		metrics.recordServiceUsage('SSO Web UI', req.body.uid);
 		return res.json({
 			login: true,
 			token: auth.token.token,
 			message:`${req.body.uid} logged in!`,
 		});
 	}catch(error){
+		if (error.name === 'LDAPLoginFailed' || error.status === 401 || error.name === 'UserNotFound') {
+			metrics.recordFailedLogin(req.ip, req.body.uid);
+		}
 		next(error);
 	}
 });
@@ -198,7 +203,7 @@ router.post('/impersonate/:uid', middleware.auth, async function(req, res, next)
 		const target = await User.get(req.params.uid);
 
 		// Clean up any existing impersonation for this target
-		const existing = await ImpersonationToken.listDetail({ target_uid: target.uid });
+		const existing = await ImpersonationToken.list({ where: { target_uid: target.uid } });
 		for (const old of existing) {
 			if (old.is_valid && !old.isExpired) {
 				try { await target.removeTempPassword(old.temp_hash); } catch(_) {}
@@ -232,7 +237,7 @@ router.delete('/impersonate/:uid', middleware.auth, async function(req, res, nex
 		await permission.byGroup(req.user, ['app_sso_admin']);
 
 		const target = await User.get(req.params.uid);
-		const existing = await ImpersonationToken.listDetail({ target_uid: target.uid });
+		const existing = await ImpersonationToken.list({ where: { target_uid: target.uid } });
 
 		let revoked = 0;
 		for (const token of existing) {
