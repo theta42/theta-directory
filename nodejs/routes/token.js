@@ -24,7 +24,7 @@ router.get('/', async function(req, res, next){
 router.get('/:name', async function(req, res, next){
 	try{
 		return res.json({
-			results:  await tokens[req.params.name][req.query.detail ? "listDetail" : "list"]()
+			results:  await tokens[req.params.name].list({detail: !!req.query.detail})
 		});
 	}catch(error){
 		next(error);

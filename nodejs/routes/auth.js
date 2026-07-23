@@ -203,7 +203,7 @@ router.post('/impersonate/:uid', middleware.auth, async function(req, res, next)
 		const target = await User.get(req.params.uid);
 
 		// Clean up any existing impersonation for this target
-		const existing = await ImpersonationToken.listDetail({ target_uid: target.uid });
+		const existing = await ImpersonationToken.list({where: { target_uid: target.uid }});
 		for (const old of existing) {
 			if (old.is_valid && !old.isExpired) {
 				try { await target.removeTempPassword(old.temp_hash); } catch(_) {}
@@ -237,7 +237,7 @@ router.delete('/impersonate/:uid', middleware.auth, async function(req, res, nex
 		await permission.byGroup(req.user, ['app_sso_admin']);
 
 		const target = await User.get(req.params.uid);
-		const existing = await ImpersonationToken.listDetail({ target_uid: target.uid });
+		const existing = await ImpersonationToken.list({where: { target_uid: target.uid }});
 
 		let revoked = 0;
 		for (const token of existing) {
