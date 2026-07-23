@@ -41,9 +41,10 @@ phone-home, no hosted control plane, and no per-user pricing.
 - **Web management UI** — manage users, groups, and OAuth clients from a
   browser; invite and password-reset flows over email; user self-service for
   profile and API tokens.
-- **LDAPS for legacy apps** — apps that bind LDAP directly (Gitea, Emby, and
-  anything else that speaks LDAP) use LDAPS (636) or StartTLS against the same
-  directory, so you don't maintain a second user database for them.
+- **Direct LDAP binds** — Linux hosts (PAM/SSSD login, LDAP-backed `sudo`
+  rules, SSH public keys via openssh-lpk) and LDAP-native apps (Gitea, Emby,
+  and anything else that speaks LDAP) use LDAPS (636) or StartTLS against the
+  same directory, so you don't maintain a second user database for them.
 - **Personal access tokens** — any user can mint a long-lived bearer token to
   drive the management API from scripts or CI, scoped to their own permissions.
 - **All-in-one Docker image** — app + OpenLDAP + Redis in one container, or run
@@ -151,7 +152,7 @@ details, including env var overrides (`LDAP_BASE_DN`, `SKIP_LDAP`, ...), in
 ┌────────────────────────┐
 │  OpenLDAP (slapd)      │
 │  - users / groups      │
-│  - LDAPS :636          │─── legacy apps bind directly
+│  - LDAPS :636          │─── Linux hosts + LDAP apps bind directly
 │  - StartTLS :389       │
 └────────────────────────┘
 ```

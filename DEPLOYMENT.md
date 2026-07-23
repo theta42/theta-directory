@@ -120,7 +120,7 @@ bare-metal / advanced standalone use; most deployments should use the file.
 - Health check: `http://localhost:3001/health` → `{"status":"ok"}`
 - OIDC discovery: `http://localhost:3001/.well-known/openid-configuration`
 - LDAP (internal, app↔slapd): `ldap://localhost:389` (not mapped to the host)
-- LDAPS (for legacy apps / direct binds): `ldaps://<host>:636` (TLS)
+- LDAPS (direct binds: Linux hosts, LDAP-native apps): `ldaps://<host>:636` (TLS)
 
 ### API tokens (personal access tokens)
 
@@ -483,8 +483,8 @@ netstat -tlnp | grep 389
 2. **Use LDAPS / StartTLS** for any LDAP connection that crosses the network. The
    bundled slapd listens on `ldaps:///` (636, TLS) and `ldap:///` (389, plain +
    StartTLS); port 389 is not mapped to the host by default so LAN clients can't
-   bind in cleartext. Direct-LDAP apps (legacy services, `theta42/proxy`) should
-   use `ldaps://…:636` or StartTLS.
+   bind in cleartext. Direct-LDAP consumers (Linux hosts, LDAP-native apps,
+   `theta42/proxy`) should use `ldaps://…:636` or StartTLS.
 3. **Persist `JWT_SECRET`** — if the Docker image auto-generates one and you don't
    set `JWT_SECRET`, issued tokens invalidate on container recreation.
 4. **Don't expose the UI's HTTP port to the internet** — terminate TLS at a front

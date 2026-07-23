@@ -131,7 +131,8 @@ COPY ops/schema/openssh-lpk.schema /etc/openldap/schema/openssh-lpk.schema
 # 3001: SSO Manager web interface (HTTP — terminate TLS at the front proxy)
 # 389:  LDAP  (plain + StartTLS) — used internally by the app; map to host only
 #       if you want LAN clients to bind without TLS (not recommended).
-# 636:  LDAPS — for legacy apps / direct LDAP binds over the network (TLS)
+# 636:  LDAPS — direct LDAP binds over the network (TLS): Linux host auth
+#       (PAM/SSSD, sudo, SSH keys) and LDAP-native apps
 EXPOSE 3001 389 636
 
 # Health check
