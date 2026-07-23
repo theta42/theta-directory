@@ -52,8 +52,9 @@ backend, that's the niche.
 - **Web management UI** — users, groups, and OAuth clients from a browser;
   invite and password-reset flows over email; self-service profile + API
   tokens.
-- **LDAPS for legacy apps** — anything that binds LDAP directly (Gitea,
-  Emby, …) uses LDAPS/StartTLS against the same directory.
+- **Direct LDAP binds** — anything that binds LDAP directly (Linux hosts
+  via PAM/SSSD, Gitea, Emby, …) uses LDAPS/StartTLS against the same
+  directory.
 - **All-in-one Docker image** — app + OpenLDAP + Redis in one container, or
   run the pieces separately via `app_*` env config.
 - **Geo-Location Scaling** — built-in support for N-Way Multi-Master OpenLDAP [replication](replication.html) across physical sites.

@@ -14,8 +14,9 @@ description: SSO Manager's bundled OpenLDAP directory — schema, service accoun
 
 SSO Manager runs an OpenLDAP directory holding your users and groups. The app
 authenticates against it over `localhost:389` (inside the all-in-one container)
-and exposes **LDAPS** (`ldaps://…:636`, TLS) for legacy apps that bind LDAP
-directly — Gitea, Emby, the theta42/proxy, etc.
+and exposes **LDAPS** (`ldaps://…:636`, TLS) for anything that binds LDAP
+directly — Linux hosts (PAM/SSSD, sudo rules, SSH keys), Gitea, Emby, the
+theta42/proxy, etc.
 
 ## Directory layout
 
