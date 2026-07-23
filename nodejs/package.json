@@ -24,7 +24,7 @@
     "@fortawesome/fontawesome-free": "^7.3.0",
     "@popperjs/core": "^2.11.8",
     "@simpleworkjs/conf": "^1.2.0",
-    "@simpleworkjs/orm": "file:../../../simpleworkjs/orm",
+    "@simpleworkjs/orm": "^0.2.7",
     "bcrypt": "^6.0.0",
     "bootstrap": "^5.3.8",
     "compression": "^1.8.1",
