@@ -58,7 +58,7 @@ backend, that's the niche.
 - **All-in-one Docker image** — app + OpenLDAP + Redis in one container, or
   run the pieces separately via `app_*` env config.
 - **Geo-Location Scaling** — built-in support for N-Way Multi-Master OpenLDAP [replication](replication.html) across physical sites.
-- **[Directory & Inventory](directory.html)** — map sites, hosts, and services as a graph with rich metadata (IP/MAC, OS/kernel, ports, git repos), auto-provisioned access groups, and automatic registration from theta-env and ldap-client.
+- **[Directory & Inventory](directory.html)** — map sites, hosts, and services as a graph with rich metadata (IP/MAC, OS/kernel, ports, git repos), auto-provisioned access groups, and automatic registration from theta-env and ldap-client. Drives directory-aware tools like the [SSH jump host](https://theta42.github.io/jump-host/).
 
 ## Get it
 
@@ -78,5 +78,7 @@ That's the standalone quick start. For the full set of install options
 
 - **[Proxy](https://theta42.github.io/proxy/)** — an OIDC + LDAP-aware
   reverse proxy, designed to sit in front of this SSO.
+- **[Jump Host](https://theta42.github.io/jump-host/)** — an SSH jump host that
+  uses this SSO's directory to decide who may reach which machine.
 - **[theta-env](https://theta42.github.io/theta-env/)** — runs this SSO
   Manager and the proxy together with one command.
