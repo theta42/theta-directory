@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.3.2] - 2026-07-23
+
+### Fixed
+- **OAuth client management API returned `client_id: undefined` on every GET.** The ORM's `Model.toJSON()` only serializes schema fields, so the mapped `client_id`/`scopes`/`redirect_uris`/… that `OAuthClient.get()` attaches to the wrapped Resource were stripped from `GET /api/oauth/client` and `GET /api/oauth/client/:id` responses. The theta-env bootstrap (which lists clients and rotates by the returned `client_id`) then called `/api/oauth/client/undefined/rotate` and got a 500, aborting stack bring-up when `proxy-secrets.js` had no usable secret. `OAuthClient.get()` now emits an explicit public JSON shape (and deliberately omits `client_secret_hash`, so the secret hash no longer leaks over the API).
+- `OAuthClient.get()` no longer 500s on an unknown/`undefined` client id: `Resource.get()` returns `null` (it doesn't throw), which was dereferenced as `r.kind`. It now returns a clean 404.
+
 ## [1.3.1] - 2026-07-23
 
 ### Added
