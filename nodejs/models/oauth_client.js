@@ -44,13 +44,21 @@ class OAuthClient {
 		return r;
 	}
 	static async get(client_id) {
+			const notFound = () => {
+				const e = new Error('OAuthClient not found');
+				e.status = 404;
+				return e;
+			};
 			let r;
 			try {
 				r = await Resource.get(client_id);
 			} catch (_) {
-				throw new Error('OAuthClient not found');
+				throw notFound();
 			}
-			if (r.kind !== 'oauth') throw new Error('OAuthClient not found');
+			// Resource.get() returns null (does not throw) for a missing id —
+			// guard it so a bad/undefined client_id is a clean 404, not a
+			// "Cannot read properties of null (reading 'kind')" 500.
+			if (!r || r.kind !== 'oauth') throw notFound();
 		// Map metadata to top-level properties to satisfy routes/oauth.js without rewriting it
 		r.client_id = r.id;
 		r.client_secret_hash = r.metadata.client_secret_hash;
@@ -67,6 +75,29 @@ class OAuthClient {
 			r.metadata.client_secret_hash = await bcrypt.hash(raw_secret, 10);
 			await r.update({ metadata: r.metadata });
 			return raw_secret;
+		};
+
+		// The ORM Model.toJSON() only serializes schema fields, so the mapped
+		// properties above (client_id, scopes, redirect_uris, …) would be
+		// stripped from any res.json() — that's why GET /api/oauth/client
+		// returned client_id: undefined and the bootstrap's rotate blew up.
+		// Emit the public shape explicitly. client_secret_hash is deliberately
+		// omitted so it never leaks over the API.
+		r.toJSON = function () {
+			return {
+				client_id: r.id,
+				id: r.id,
+				kind: r.kind,
+				name: r.name,
+				slug: r.slug,
+				owner: r.owner,
+				description: r.description,
+				redirect_uris: r.redirect_uris,
+				scopes: r.scopes,
+				allowed_groups: r.allowed_groups,
+				token_lifetime: r.token_lifetime,
+				is_valid: r.is_valid,
+			};
 		};
 
 		// proxy update to handle metadata correctly

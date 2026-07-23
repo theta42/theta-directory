@@ -43,6 +43,65 @@ afterAll(async () => {
 	}
 });
 
+describe('OAuth client management API — /api/oauth/client', () => {
+	// Regression: the ORM Model.toJSON() strips non-schema fields, so the
+	// mapped client_id/scopes/etc. used to vanish from GET responses —
+	// client_id came back undefined and the theta-env bootstrap's rotate
+	// crashed with a 500. GET must expose client_id (and never the secret hash).
+	test('GET / list exposes client_id and hides client_secret_hash', async () => {
+		const res = await request(app)
+			.get('/api/oauth/client/')
+			.set('auth-token', token);
+		expect(res.status).toBe(200);
+		const mine = res.body.results.find((c) => c.client_id === clientId);
+		expect(mine).toBeDefined();
+		expect(mine.client_id).toBe(clientId);
+		expect(mine).toHaveProperty('scopes');
+		expect(mine).not.toHaveProperty('client_secret_hash');
+	});
+
+	test('GET /:id exposes client_id', async () => {
+		const res = await request(app)
+			.get(`/api/oauth/client/${clientId}`)
+			.set('auth-token', token);
+		expect(res.status).toBe(200);
+		expect(res.body.results.client_id).toBe(clientId);
+		expect(res.body.results).not.toHaveProperty('client_secret_hash');
+	});
+
+	test('list then rotate a client by its returned client_id (the bootstrap path)', async () => {
+		// Reproduces exactly what the theta-env bootstrap does: create, list,
+		// find by name, rotate by the client_id from the list response. Uses a
+		// throwaway client so the shared flow client's secret is untouched.
+		const created = await request(app)
+			.post('/api/oauth/client/')
+			.set('auth-token', token)
+			.send({ name: 'rotate-regression', redirect_uris: REDIRECT_URI });
+		expect(created.status).toBe(200);
+
+		const list = await request(app).get('/api/oauth/client/').set('auth-token', token);
+		const found = list.body.results.find((c) => c.name === 'rotate-regression');
+		expect(found).toBeDefined();
+		expect(found.client_id).toBeTruthy(); // was undefined before the fix
+
+		const rotated = await request(app)
+			.post(`/api/oauth/client/${found.client_id}/rotate`)
+			.set('auth-token', token);
+		expect(rotated.status).toBe(200);
+		expect(rotated.body.client_secret).toBeTruthy();
+
+		await request(app).delete(`/api/oauth/client/${found.client_id}`).set('auth-token', token);
+	});
+
+	test('GET /:id unknown id returns 404, not 500', async () => {
+		const res = await request(app)
+			.get('/api/oauth/client/00000000-0000-0000-0000-000000000000')
+			.set('auth-token', token);
+		expect(res.status).toBeGreaterThanOrEqual(400);
+		expect(res.status).toBeLessThan(500);
+	});
+});
+
 describe('OIDC Discovery', () => {
 	test('GET /.well-known/openid-configuration returns required fields', async () => {
 		const res = await request(app).get('/.well-known/openid-configuration');
