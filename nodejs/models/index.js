@@ -13,6 +13,17 @@ require('./oauth_code');
 require('./api_token');
 
 const { init } = require('@simpleworkjs/orm');
+const { RedisAdapter } = require('@simpleworkjs/orm/lib/adapters/redis');
+
+// Monkey-patch ORM bugs in RedisAdapter
+RedisAdapter.prototype.delete = async function(instance) {
+  await instance._backing.remove();
+};
+RedisAdapter.prototype.update = async function(instance, data) {
+  await instance._backing.update(data);
+  return instance;
+};
+
 const { Resource, ResourceEdge, ResourceGroup } = require('./resource');
 
 async function initORM() {
