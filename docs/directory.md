@@ -87,6 +87,14 @@ The seed is idempotent and non-destructive: a resource whose slug already exists
 
 The `ldap-client` join script enrolls a Debian/Ubuntu machine for LDAP login (SSSD/PAM), LDAP-backed `sudo`, and SSH keys from the directory — and, when given an SSO API token, registers the machine as a `host_<hostname>` resource with its IP, MAC, OS, and kernel, parented to the site named by its configured location.
 
+## Consumers of the directory
+
+The inventory graph isn't just documentation — other components read it to make decisions:
+
+- **[Jump Host](https://theta42.github.io/jump-host/)** — an SSH jump host that resolves which downstream machines a user may reach from their LDAP groups × the directory's `host` resources (`GET /api/discovery/resources?group=<cn>`), then bridges them in. The `host_<hostname>` slugs and `host_<slug>_access` groups this directory creates are exactly what it keys off; a host's `metadata.ip` / `metadata.sshPort` tell it where to connect. So a machine registered here (by theta-env or ldap-client) becomes reachable through the jump host the moment a user is in its access group.
+
+Planned consumers (end-user catalog, firewall/DNS generation) and the model/API gaps they need are tracked in [`directory_spec.md`](https://github.com/theta42/sso-manager-node/blob/master/directory_spec.md) §9.
+
 ## API
 
 All of the above uses the same admin API the UI does (group `app_sso_directory_admin` or `app_sso_admin`):
