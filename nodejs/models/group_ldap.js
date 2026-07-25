@@ -3,44 +3,18 @@
 const { Client, Attribute, Change } = require('ldapts');
 const { LRUCache } = require('lru-cache');
 const conf = require('@simpleworkjs/conf').ldap;
-
-// Escape a value used inside an LDAP search filter (RFC 4515).
-function escapeLDAPSearchValue(val) {
-	return String(val)
-		.replace(/\\/g, '\\5c')
-		.replace(/\*/g, '\\2a')
-		.replace(/\(/g, '\\28')
-		.replace(/\)/g, '\\29')
-		.replace(/\0/g, '\\00');
-}
-
-// Escape a value used in an LDAP DN (RFC 4514). Defensive: usernames/cns
-// are normally alphanumeric, but this prevents metacharacter injection.
-function escapeLDAPDNValue(val) {
-	return String(val)
-		.replace(/\\/g, '\\\\')
-		.replace(/,/g, '\\,')
-		.replace(/\+/g, '\\+')
-		.replace(/"/g, '\\"')
-		.replace(/</g, '\\<')
-		.replace(/>/g, '\\>')
-		.replace(/;/g, '\\;')
-		.replace(/=/g, '\\=')
-		.replace(/^\s|\s$/g, match => match === ' ' ? '\\ ' : match);
-}
+// Connection + escaping from the shared @simpleworkjs/ldap package. Local
+// wrappers preserve the no-arg call signatures; see user_ldap.js for rationale.
+const { makeClient: _makeClient, withClient: _withClient, escapeFilter, escapeDN } = require('@simpleworkjs/ldap');
+const escapeLDAPSearchValue = escapeFilter;
+const escapeLDAPDNValue = escapeDN;
 
 function makeClient() {
-	return new Client({ url: conf.url });
+	return _makeClient(conf);
 }
 
 async function withClient(fn) {
-	const client = makeClient();
-	try {
-		await client.bind(conf.bindDN, conf.bindPassword);
-		return await fn(client);
-	} finally {
-		await client.unbind().catch(() => {});
-	}
+	return _withClient(conf, fn);
 }
 
 async function getGroups(client, member){

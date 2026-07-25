@@ -9,6 +9,14 @@ const {Token, InviteToken, PasswordResetToken} = require('./token');
 const {Group} = require('./group_ldap');
 const {UserVerification} = require('./verification');
 const conf = require('@simpleworkjs/conf').ldap;
+// Connection + escaping come from the shared @simpleworkjs/ldap package. The
+// wrappers below preserve this file's no-arg call signatures (makeClient() /
+// withClient(fn)) so no call site changes; sso's makeClient passes no
+// tlsOptions, which the shared client forwards as undefined — identical to the
+// previous `new Client({ url: conf.url })`.
+const { makeClient: _makeClient, withClient: _withClient, escapeFilter, escapeDN } = require('@simpleworkjs/ldap');
+const escapeLDAPSearchValue = escapeFilter;
+const escapeLDAPDNValue = escapeDN;
 
 function hashPasswordSSHA512(password) {
 	const salt = crypto.randomBytes(8);
@@ -23,40 +31,11 @@ const cache = new LRUCache({
 });
 
 function makeClient() {
-	return new Client({ url: conf.url });
+	return _makeClient(conf);
 }
 
 async function withClient(fn) {
-	const client = makeClient();
-	try {
-		await client.bind(conf.bindDN, conf.bindPassword);
-		return await fn(client);
-	} finally {
-		await client.unbind().catch(() => {});
-	}
-}
-
-// Helper to escape LDAP filter values (crucial for security)
-function escapeLDAPSearchValue(val) {
-    return val.replace(/\\/g, '\\5c')
-              .replace(/\*/g, '\\2a')
-              .replace(/\(/g, '\\28')
-              .replace(/\)/g, '\\29')
-              .replace(/\0/g, '\\00');
-}
-
-// Escape a value used in an LDAP DN (RFC 4514).
-function escapeLDAPDNValue(val) {
-	return String(val)
-		.replace(/\\/g, '\\\\')
-		.replace(/,/g, '\\,')
-		.replace(/\+/g, '\\+')
-		.replace(/"/g, '\\"')
-		.replace(/</g, '\\<')
-		.replace(/>/g, '\\>')
-		.replace(/;/g, '\\;')
-		.replace(/=/g, '\\=')
-		.replace(/^\s|\s$/g, match => match === ' ' ? '\\ ' : match);
+	return _withClient(conf, fn);
 }
 
 // Compute the next available uid/gidNumber: the highest existing value below
