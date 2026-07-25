@@ -3,6 +3,7 @@ const router = require('express').Router();
 const permission = require('../utils/permission');
 const { Resource, ResourceEdge, ResourceGroup } = require('../models/resource');
 const { Group } = require('../models/group_ldap');
+const { projectResources } = require('@simpleworkjs/directory-schema');
 
 // Require the admin group
 router.use(async (req, res, next) => {
@@ -18,7 +19,9 @@ router.use(async (req, res, next) => {
 router.get('/resources', async (req, res, next) => {
   try {
     const resources = await Resource.list();
-    res.json({ results: resources });
+    // Even admins never receive secret metadata (e.g. client_secret_hash) over
+    // the wire; projectResources strips it unconditionally.
+    res.json({ results: projectResources(resources, { fullMetadata: true }) });
   } catch (err) { next(err); }
 });
 

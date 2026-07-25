@@ -108,9 +108,6 @@ app.use(function(req, res, next) {
   next(err);
 });
 
-// Discovery API
-app.use('/api/discovery', middleware.auth, require('./routes/api_discovery'));
-
 // Error handling
 app.use(function(err, req, res, next) {
   const SILENT_404S = ['/.well-known/'];
