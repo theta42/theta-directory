@@ -1,6 +1,6 @@
 {
   "name": "t42-sso-manager",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "A very simple LDAP management and SSO system",
   "author": [
     {
@@ -36,7 +36,7 @@
     "express-rate-limit": "^8.5.2",
     "extend": "^3.0.2",
     "jq-repeat": "^2.2.0",
-    "jquery": "^3.7.1",
+    "jquery": "^4.0.0",
     "jsonwebtoken": "^9.0.3",
     "ldapts": "^8.1.8",
     "lru-cache": "^11.5.1",

@@ -74,7 +74,17 @@ router.delete('/:uid', async function(req, res, next){
 
 router.get('/me', async function(req, res, next){
 	try{
-		return res.json(await User.get({uid: req.user.uid}));
+		const user = JSON.parse(JSON.stringify(await User.get({uid: req.user.uid})));
+
+		// The shared client framework gates the UI on a single effective-rights
+		// flag (the OIDC-client apps send the same key). Here "admin" means
+		// membership in app_sso_admin; group-level gating still reads memberOf.
+		const groups = (user.memberOf || []).map(function(dn){
+			return String(dn).split(',')[0].replace(/^cn=/i, '');
+		});
+		user.isAdmin = groups.includes('app_sso_admin');
+
+		return res.json(user);
 	}catch(error){
 		next(error);
 	}
