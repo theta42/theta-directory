@@ -46,7 +46,7 @@ on, just like anyone else's.
 
 A **group** is just a named list of accounts, used to control access. This
 app has a handful of built-in groups that grant admin powers (e.g. only
-people in the `app_sso_admin` group can see the Users/Groups/Integrations
+people in the `app_sso_admin` group can see the Users/Groups/Directory/Executive
 pages at all), but you can also make your own groups for any app you
 connect — say, a group listing everyone who should be allowed into your
 photo server. Once a group exists, add or remove members from the

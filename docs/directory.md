@@ -58,6 +58,8 @@ Resources carry a flexible `metadata` JSON object that can store essential conte
 
 The Directory Management interface provides a **Tree View** toggle that visually nests your resources, making it easy to comprehend your network topography at a glance. You can also filter, search, and sort your entire infrastructure inventory. From the tree view, you can click the green `+` icon next to any resource to instantly add a child resource beneath it.
 
+<a href="images/directory.png" target="_blank"><img src="images/directory.png" alt="Directory & inventory list view" width="80%"></a>
+
 ## Slug conventions
 
 Slugs are the stable identifiers automation keys off, so the tooling around the SSO Manager follows a shared convention:
