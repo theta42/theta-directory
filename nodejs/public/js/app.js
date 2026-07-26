@@ -396,7 +396,7 @@ app.impersonate = (function(app){
 
 app.token = (function(app){
 	function list(name, callack){
-		if($.isFunction(name)){
+		if(typeof name === 'function'){
 			callack = name;
 			name = '';
 		}

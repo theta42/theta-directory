@@ -61,6 +61,11 @@ app.set('trust proxy', 1);
 app.set('views', path.join(__dirname, 'views'));
 app.set('view engine', 'ejs');
 
+// Per-app values for the shared UI shell (views/top.ejs + views/bottom.ejs).
+// Set as an app local so every res.render has it, including routes that don't
+// spread the routers' `values` object.
+app.locals.ui = require('./utils/ui');
+
 // Have express server static content( images, CSS, browser JS) from the public
 // local folder. maxAge is short since this is the app's own JS/CSS, which
 // changes on every deploy and isn't cache-busted/fingerprinted.
