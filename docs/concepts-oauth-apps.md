@@ -28,7 +28,7 @@ what matters practically is the handful of concepts below.
 ## What's a "client"?
 
 Every app you connect is registered here as a **client** — a single entry
-on the Integrations page representing that one app. Registering a client
+in the Directory representing that one app. Registering a client
 gives you a **Client ID** and **Client Secret**: think of these like a
 username and password, but for the *app itself* rather than for a person.
 You paste them into the other app's own "Single Sign-On" or "OIDC" setup

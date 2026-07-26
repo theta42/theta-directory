@@ -64,6 +64,8 @@ Clients are managed directly from the **Directory** tab in the web UI. They are 
 
 > All client-management actions use the standard Directory API (`/api/directory-admin/resources`) and are gated by the `app_sso_directory_admin` group.
 
+<a href="images/oauth-clients.png" target="_blank"><img src="images/oauth-clients.png" alt="Editing an OAuth client resource" width="80%"></a>
+
 ## Scopes
 
 | Scope | Claims / access |
