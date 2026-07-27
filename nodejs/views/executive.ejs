@@ -117,8 +117,8 @@
 		const msgEl       = document.getElementById('notif-result');
 		const $compose    = $('#notif-subject').closest('.card-body');
 
-		if (!subject || !message) { alert('Subject and message are required.'); return; }
-		if (!filterCheck) { alert('Choose who to send this to.'); return; }
+		if (!subject || !message) { app.messages.action('Subject and message are required.', $compose, 'danger'); return; }
+		if (!filterCheck) { app.messages.action('Choose who to send this to.', $compose, 'danger'); return; }
 		const filterType = filterCheck.value;
 
 		let filter_value = '';
@@ -179,7 +179,12 @@
 		const resetAcceptance = document.getElementById('tos-reset-acceptance').checked;
 		const msgEl = document.getElementById('tos-result');
 
-		if (!content) { alert('Terms of Service text cannot be empty.'); return; }
+		if (!content) {
+			msgEl.className = 'alert alert-danger mt-2';
+			msgEl.textContent = 'Terms of Service text cannot be empty.';
+			msgEl.style.display = '';
+			return;
+		}
 
 		app.tos.update({content, resetAcceptance}, function(error, data) {
 			if (error) {

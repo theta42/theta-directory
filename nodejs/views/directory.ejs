@@ -369,7 +369,7 @@
       renderTable();
     } catch (err) {
       console.error(err);
-      alert('Failed to load data');
+      app.messages.toast('Failed to load data', 'danger');
     }
   }
   
@@ -718,21 +718,22 @@
       }
     } catch (err) {
       console.error(err);
-      alert(err.message || 'Failed to save');
+      app.messages.action(err.message || 'Failed to save', $('#resourceModal'), 'danger');
     }
   }
 
   async function rotateSecret() {
     const id = $('#res-id').val();
     if (!id) return;
-    if (!confirm('Are you sure you want to rotate the OAuth secret? Any existing integrations using the old secret will break.')) return;
-    
+    const ok = await app.messages.confirm('Are you sure you want to rotate the OAuth secret? Any existing integrations using the old secret will break.', $('#resourceModal'), 'warning');
+    if (!ok) return;
+
     try {
       const res = await app.api.post(`directory-admin/resources/${id}/rotate-secret`);
       app.modal.open({title: 'Secret Rotated', bodyHtml: 'Save this NEW client secret, it will not be shown again: <br><br><code>' + res.secret + '</code>'});
     } catch (err) {
       console.error(err);
-      alert(err.message || 'Failed to rotate secret');
+      app.messages.action(err.message || 'Failed to rotate secret', $('#resourceModal'), 'danger');
     }
   }
 
@@ -741,7 +742,7 @@
     const groupCn = $('#new-group-cn').val().trim();
     const accessLevel = $('#new-group-level').val();
     
-    if (!groupCn) return alert('Group CN is required');
+    if (!groupCn) return app.messages.action('Group CN is required', $('#resourceModal'), 'danger');
     try {
       const res = await app.api.post('directory-admin/groups', {
         resourceId,
@@ -753,10 +754,10 @@
       $('#new-group-cn').val('');
     } catch (err) {
       console.error(err);
-      alert('Failed to add group');
+      app.messages.action('Failed to add group', $('#resourceModal'), 'danger');
     }
   }
-  
+
   async function removeGroup(id) {
     try {
       await app.api.delete('directory-admin/groups/' + id);
@@ -764,7 +765,7 @@
       refreshGroupsUI($('#res-id').val());
     } catch (err) {
       console.error(err);
-      alert('Failed to remove group');
+      app.messages.action('Failed to remove group', $('#resourceModal'), 'danger');
     }
   }
 
@@ -774,7 +775,7 @@
     const targetId = $('#new-edge-target').val();
     const relation = $('#new-edge-relation').val().trim() || 'hosts';
     
-    if (!targetId) return alert('Select a target resource');
+    if (!targetId) return app.messages.action('Select a target resource', $('#resourceModal'), 'danger');
     
     const data = { relation };
     if (dir === 'parent') {
@@ -792,10 +793,10 @@
       $('#new-edge-target').val('');
     } catch (err) {
       console.error(err);
-      alert('Failed to add edge');
+      app.messages.action('Failed to add edge', $('#resourceModal'), 'danger');
     }
   }
-  
+
   async function removeEdge(id) {
     try {
       await app.api.delete('directory-admin/edges/' + id);
@@ -803,18 +804,23 @@
       refreshEdgesUI($('#res-id').val());
     } catch (err) {
       console.error(err);
-      alert('Failed to remove edge');
+      app.messages.action('Failed to remove edge', $('#resourceModal'), 'danger');
     }
   }
 
   async function deleteResource(id) {
-    if (!confirm('Are you sure you want to delete this resource? All relationships will be destroyed.')) return;
+    // Called from the outer table's row button, not from inside
+    // #resourceModal — target the page's own card so the confirm/error
+    // renders somewhere actually visible.
+    const $target = $('#resources-list');
+    const ok = await app.messages.confirm('Are you sure you want to delete this resource? All relationships will be destroyed.', $target, 'danger');
+    if (!ok) return;
     try {
       await app.api.delete('directory-admin/resources/' + id);
       await loadResources();
     } catch (err) {
       console.error(err);
-      alert('Failed to delete');
+      app.messages.action('Failed to delete', $target, 'danger');
     }
   }
 </script>

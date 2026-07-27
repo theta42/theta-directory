@@ -67,13 +67,6 @@ app.user = (function(app){
 		});
 	}
 
-	function remove(args, callack){
-		if(!confirm('Delete '+ args.uid+ 'user?')) return false;
-		app.api.delete('user/'+ args.uid, function(error, data){
-			callack(error, data);
-		});
-	}
-
 	function changePassword(args, callack){
 		app.api.put('users/'+ arg.uid || '', args, function(error, data){
 			callack(error, data);
@@ -110,7 +103,7 @@ app.user = (function(app){
 		return m ? m[1] : dn;
 	}
 
-	return {list, remove, createInvite, setActive, dnToUid};
+	return {list, createInvite, setActive, dnToUid};
 
 })(app);
 
@@ -306,13 +299,6 @@ app.oauthClient = (function(app){
 		});
 	}
 
-	function remove(args, callack){
-		if(!confirm('Delete OAuth client "' + args.client_id + '"?')) return false;
-		app.api.delete('oauth/client/' + args.client_id, function(error, data){
-			callack(error, data);
-		});
-	}
-
 	function update(args, callack){
 		app.api.put('oauth/client/' + args.client_id, args, function(error, data){
 			callack(error, data);
@@ -325,7 +311,7 @@ app.oauthClient = (function(app){
 		});
 	}
 
-	return { list, add, remove, update, rotateSecret };
+	return { list, add, update, rotateSecret };
 })(app);
 
 app.tos = (function(app){

@@ -176,7 +176,7 @@
 
 	async function toggleActive(uid, active){
 		app.user.setActive(uid, active, async function(error, data){
-			if(error) return alert('Failed to update user status');
+			if(error) return app.messages.toast('Failed to update user status', 'danger');
 			currentUser = await determinUser();
 			renderProfile(currentUser);
 		});

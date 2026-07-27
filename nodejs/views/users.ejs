@@ -19,7 +19,7 @@
 
 	function toggleActive(uid, active){
 		app.user.setActive(uid, active, function(error, data){
-			if(error) return alert('Failed to update user status');
+			if(error) return app.messages.toast('Failed to update user status', 'danger');
 			renderUsers();
 		});
 	}
@@ -137,7 +137,7 @@
 			await app.api.delete(`user/invite/${tokenId}`);
 			loadInvites();
 		} catch(e) {
-			alert('Failed to revoke invite.');
+			app.messages.action('Failed to revoke invite.', $thisRow, 'danger');
 		}
 	}
 
