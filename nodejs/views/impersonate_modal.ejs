@@ -68,7 +68,7 @@
 function startImpersonate(uid){
 	app.impersonate.create(uid, function(error, data){
 		if(error){
-			alert('Could not start impersonation: ' + (data && data.message ? data.message : 'Unknown error'));
+			app.messages.toast('Could not start impersonation: ' + (data && data.message ? data.message : 'Unknown error'), 'danger');
 			return;
 		}
 		$('#impersonateModalTitle').text(data.uid);

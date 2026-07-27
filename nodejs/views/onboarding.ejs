@@ -38,7 +38,7 @@
 	async function acceptTos() {
 		var checkbox = document.getElementById('tosCheckbox');
 		if (!checkbox.checked) {
-			alert('Please read and check the box to accept the Terms of Service.');
+			app.messages.toast('Please read and check the box to accept the Terms of Service.', 'danger');
 			return;
 		}
 		try {
@@ -50,14 +50,14 @@
 			document.getElementById('section-tos').style.display = 'none';
 			checkAllDone();
 		} catch(e) {
-			alert('Could not save TOS acceptance. Please try again.');
+			app.messages.toast('Could not save TOS acceptance. Please try again.', 'danger');
 		}
 	}
 
 	async function saveDob() {
 		var dob = document.getElementById('dobInput').value;
 		if (!dob) {
-			alert('Please enter your date of birth.');
+			app.messages.toast('Please enter your date of birth.', 'danger');
 			return;
 		}
 		try {
@@ -73,7 +73,7 @@
 			document.getElementById('section-dob').style.display = 'none';
 			checkAllDone();
 		} catch(e) {
-			alert('Could not save date of birth. Please try again.');
+			app.messages.toast('Could not save date of birth. Please try again.', 'danger');
 		}
 	}
 
@@ -81,11 +81,11 @@
 		var pw  = document.getElementById('pwInput').value;
 		var pw2 = document.getElementById('pwInput2').value;
 		if (!pw || pw.length < 5) {
-			alert('Password must be at least 5 characters.');
+			app.messages.toast('Password must be at least 5 characters.', 'danger');
 			return;
 		}
 		if (pw !== pw2) {
-			alert('Passwords do not match.');
+			app.messages.toast('Passwords do not match.', 'danger');
 			return;
 		}
 		try {
@@ -101,7 +101,7 @@
 			document.getElementById('section-password').style.display = 'none';
 			checkAllDone();
 		} catch(e) {
-			alert('Could not change password. Please try again.');
+			app.messages.toast('Could not change password. Please try again.', 'danger');
 		}
 	}
 
