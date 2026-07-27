@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.6.0] - 2026-07-27
+
+### Changed
+- **Adopted `@simpleworkjs/frontend`'s `app.messages`, `app.modal`, and `app.validate` modules**, replacing the vendored `app.util.actionMessage`/`actionConfirm`/`alert` in `public/lib/js/app-base.js` and the vendored `public/lib/js/val.js`. Message content is now HTML-escaped (the vendored `alert()` this replaces had no escaping), and `app.messages.action` falls back to a page-wide toast when there's no inline `.actionMessage` target. `app.api`/`app.auth`/`app.pubsub`/`app.socket` are untouched — they're app-specific (dual-mode callback/promise API, `auth-token` header injection) and not something the frontend package's generic `app.js` provides.
+
 ## [1.5.1] - 2026-07-27
 
 ### Fixed
