@@ -572,6 +572,8 @@
         $target.append($('<option>').val(r.id).text(r.name + ' (' + r.slug + ')'));
       } else if (kind === 'service' && (r.kind === 'host' || r.kind === 'service')) {
         $target.append($('<option>').val(r.id).text(r.name + ' (' + r.slug + ')'));
+      } else if (kind === 'oauth' && r.kind === 'service') {
+        $target.append($('<option>').val(r.id).text(r.name + ' (' + r.slug + ')'));
       }
     });
     if (selectedId) $target.val(selectedId);

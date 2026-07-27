@@ -4,6 +4,12 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.5.1] - 2026-07-27
+
+### Fixed
+- **`PUT /api/user/:uid` 500'd with `ObjectClassViolationError` (LDAP `0x41`) when setting `sshPublicKey`** on any account created before the `ldapPublicKey` auxiliary objectClass was added to new-user creation (e.g. the bootstrap `admin` account). `User.update`'s `sshPublicKey` handling and `User.addSSHkey` (`nodejs/models/user_ldap.js`) now add the `ldapPublicKey` objectClass first (ignoring `TypeOrValueExistsError` if already present), the same pattern already used for `dateOfBirth`/`theta42Person`.
+- **OAuth Integration parent dropdown was blank.** `populateHostDropdown` in `nodejs/views/directory.ejs` only built options for `kind === 'host'` and `kind === 'service'` — there was no branch for `kind === 'oauth'`, so choosing "OAuth Integration" in the Directory's add-resource modal left the parent-Service picker empty except the placeholder. Added the missing branch.
+
 ## [1.5.0] - 2026-07-26
 
 ### Changed

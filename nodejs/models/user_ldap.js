@@ -473,6 +473,19 @@ User.update = async function(data){
 			}
 
 			if(data.sshPublicKey){
+				// Ensure the auxiliary objectClass is present before setting the attribute
+				// -- accounts created before ldapPublicKey was added to addPosixAccount's
+				// objectclass list (e.g. the bootstrap admin) won't have it yet.
+				try {
+					await client.modify(this.dn, [
+						new Change({
+							operation: 'add',
+							modification: new Attribute({ type: 'objectClass', values: ['ldapPublicKey'] }),
+						}),
+					]);
+				} catch(e) {
+					if(e.name !== 'TypeOrValueExistsError') throw e;
+				}
 				await client.modify(this.dn, [
 					new Change({
 						operation: 'replace',
@@ -784,6 +797,19 @@ User.addSSHkey = async function(data) {
 	let result;
 	try {
 		await withClient(async (client) => {
+			// Ensure the auxiliary objectClass is present before setting the attribute
+			// -- accounts created before ldapPublicKey was added to addPosixAccount's
+			// objectclass list (e.g. the bootstrap admin) won't have it yet.
+			try {
+				await client.modify(user.dn, [
+					new Change({
+						operation: 'add',
+						modification: new Attribute({ type: 'objectClass', values: ['ldapPublicKey'] }),
+					}),
+				]);
+			} catch(e) {
+				if (e.name !== 'TypeOrValueExistsError') throw e;
+			}
 			await client.modify(user.dn, [
 				new Change({
 					operation: 'add',
