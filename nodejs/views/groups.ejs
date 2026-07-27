@@ -35,7 +35,7 @@
 	async function addedUser(message, group, user, $form){
 		let data = await app.group.get(group);
 		$.scope.groupCard.update('cn', group, processGroup(data.results));
-		app.util.actionMessage(message, $("#group-card-"+group), 'success');
+		app.messages.action(message, $("#group-card-"+group), 'success');
 		$('a[href="#'+$form.closest('.tab-pane').attr('id')+'"]').tab('show');
 		setTimeout(function(group){
 			$("body,html").animate({ scrollTop: $("#group-card-" + group).offset().top }, 0);
@@ -73,44 +73,44 @@
 	async function removeMember(groupCN, uid, btn) {
 		const $item = $(btn).closest('li');
 		$item.addClass('list-group-item-warning');
-		const confirmed = await app.util.actionConfirm(`Remove "${uid}" from "${groupCN}"?`, $item, 'warning');
+		const confirmed = await app.messages.confirm(`Remove "${uid}" from "${groupCN}"?`, $item, 'warning');
 		if (!confirmed) { $item.removeClass('list-group-item-warning'); return; }
 		try {
 			const data = await app.api.delete(`group/${groupCN}/${uid}`);
 			const groupData = await app.group.get(groupCN);
 			$.scope.groupCard.update('cn', groupCN, processGroup(groupData.results));
-			app.util.actionMessage(data.message, $('#group-card-' + groupCN), 'success');
+			app.messages.action(data.message, $('#group-card-' + groupCN), 'success');
 		} catch(e) {
 			$item.removeClass('list-group-item-warning');
-			app.util.actionMessage(e.message || 'Failed to remove member', $('#group-card-' + groupCN), 'danger');
+			app.messages.action(e.message || 'Failed to remove member', $('#group-card-' + groupCN), 'danger');
 		}
 	}
 
 	async function removeOwner(groupCN, uid, btn) {
 		const $item = $(btn).closest('li');
 		$item.addClass('list-group-item-warning');
-		const confirmed = await app.util.actionConfirm(`Remove "${uid}" as owner of "${groupCN}"?`, $item, 'warning');
+		const confirmed = await app.messages.confirm(`Remove "${uid}" as owner of "${groupCN}"?`, $item, 'warning');
 		if (!confirmed) { $item.removeClass('list-group-item-warning'); return; }
 		try {
 			const data = await app.api.delete(`group/owner/${groupCN}/${uid}`);
 			const groupData = await app.group.get(groupCN);
 			$.scope.groupCard.update('cn', groupCN, processGroup(groupData.results));
-			app.util.actionMessage(data.message, $('#group-card-' + groupCN), 'success');
+			app.messages.action(data.message, $('#group-card-' + groupCN), 'success');
 		} catch(e) {
 			$item.removeClass('list-group-item-warning');
-			app.util.actionMessage(e.message || 'Failed to remove owner', $('#group-card-' + groupCN), 'danger');
+			app.messages.action(e.message || 'Failed to remove owner', $('#group-card-' + groupCN), 'danger');
 		}
 	}
 
 	async function deleteGroup(cn, btn) {
 		const $card = $(btn).closest('.card');
-		const confirmed = await app.util.actionConfirm(`Delete group "${cn}"?`, $card, 'danger');
+		const confirmed = await app.messages.confirm(`Delete group "${cn}"?`, $card, 'danger');
 		if (!confirmed) return;
 		try {
 			await app.api.delete(`group/${cn}`);
 			$.scope.groupCard.remove('cn', cn);
 		} catch(e) {
-			app.util.actionMessage(e.message || 'Failed to delete group', $card, 'danger');
+			app.messages.action(e.message || 'Failed to delete group', $card, 'danger');
 		}
 	}
 

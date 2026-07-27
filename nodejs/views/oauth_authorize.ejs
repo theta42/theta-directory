@@ -39,7 +39,7 @@
 			app.api.post('oauth/authorize', oauthParams, function(error, data){
 				if(error){
 					$btn.prop('disabled', false).html('<i class="fa-solid fa-check"></i> Allow');
-					app.util.actionMessage(data.message || 'Authorization failed.', $('#authorize-card'), 'danger');
+					app.messages.action(data.message || 'Authorization failed.', $('#authorize-card'), 'danger');
 					return;
 				}
 				window.location.href = data.redirect_url;

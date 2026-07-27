@@ -79,7 +79,7 @@ function startImpersonate(uid){
 		$('#impersonateStopBtn').off('click').on('click', function(){
 			app.impersonate.revoke(data.uid, function(err){
 				$('#impersonateModal').modal('hide');
-				if(!err) app.util.actionMessage('Impersonation ended for ' + data.uid, $('body'), 'success');
+				if(!err) app.messages.action('Impersonation ended for ' + data.uid, $('body'), 'success');
 			});
 		});
 
