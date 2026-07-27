@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.6.1] - 2026-07-27
+
+### Fixed
+- **Removed every native `alert()`/`confirm()` call**, replacing them with `app.messages.action`/`confirm`/`toast`. Native `confirm()` blocks all further browser events on the page (discovered live, mid browser-verification of the 1.6.0 `app.messages`/`app.modal` adoption, on `directory.ejs`'s "Rotate Client Secret" — it froze the whole tab). Also deleted `app.user.remove`/`app.oauthClient.remove` in `public/js/app.js`, which had native `confirm()` guards and zero callers anywhere in the app.
+
 ## [1.6.0] - 2026-07-27
 
 ### Changed
