@@ -6,7 +6,7 @@
 	function renderUsers(){
 		app.user.list(function(error, data){
 			if(error){
-				app.util.actionMessage(data.message, $('#tab-people'), 'danger');
+				app.messages.action(data.message, $('#tab-people'), 'danger');
 				return;
 			}
 			$.scope.userRow.empty();
@@ -128,7 +128,7 @@
 	async function revokeInvite(tokenId, btn) {
 		$thisRow = $(btn).closest('tr');
 		$thisRow.addClass('table-warning');
-		let confirmation = await app.util.actionConfirm('Revoke selected invite token?', $thisRow, 'warning');
+		let confirmation = await app.messages.confirm('Revoke selected invite token?', $thisRow, 'warning');
 		if(!confirmation){
 			$thisRow.removeClass('table-warning');
 			return;
@@ -153,12 +153,12 @@
 	async function deleteUser(uid, btn){
 		const $row = $(btn).closest('tr');
 		$row.addClass('table-warning');
-		const confirmed = await app.util.actionConfirm(`Delete user "${uid}"?`, $row, 'warning');
+		const confirmed = await app.messages.confirm(`Delete user "${uid}"?`, $row, 'warning');
 		$row.removeClass('table-warning');
 		if (!confirmed) return;
 		app.api.delete('user/' + uid, function(error, data){
 			if (error) {
-				app.util.actionMessage(data.message || 'Failed to delete user', $row, 'danger');
+				app.messages.action(data.message || 'Failed to delete user', $row, 'danger');
 				return;
 			}
 			renderUsers();

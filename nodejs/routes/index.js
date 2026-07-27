@@ -28,7 +28,7 @@ const values ={
 // every deploy and isn't cache-busted/fingerprinted.
 mountStaticModules(router, {
   root: path.join(__dirname, '..'),
-  deps: ['bootstrap', 'mustache', 'jquery', '@fortawesome', 'moment', '@popper', 'jq-repeat'],
+  deps: ['bootstrap', 'mustache', 'jquery', '@fortawesome', 'moment', '@popper', 'jq-repeat', '@simpleworkjs/frontend'],
 });
 
 // Public health endpoint for container/orchestration healthchecks.

@@ -129,7 +129,7 @@
 		// trying the form out — make it a deliberate, confirmed action.
 		if (filterType === 'all' || filterType === 'all_active') {
 			const label = filterType === 'all' ? 'ALL users (including inactive)' : 'all ACTIVE users';
-			const confirmed = await app.util.actionConfirm(`Send this notification to ${label}?`, $compose, 'warning');
+			const confirmed = await app.messages.confirm(`Send this notification to ${label}?`, $compose, 'warning');
 			if (!confirmed) return;
 		}
 

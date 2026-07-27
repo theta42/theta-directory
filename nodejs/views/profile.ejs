@@ -27,10 +27,10 @@
 
 	async function removeFromGroup(cn, btn){
 		const $row = $(btn).closest('tr');
-		const confirmed = await app.util.actionConfirm(`Remove ${currentUser.uid} from "${cn}"?`, $row, 'warning');
+		const confirmed = await app.messages.confirm(`Remove ${currentUser.uid} from "${cn}"?`, $row, 'warning');
 		if (!confirmed) return;
 		app.api.delete('group/' + encodeURIComponent(cn) + '/' + encodeURIComponent(currentUser.uid), function(error, data){
-			if(error){ app.util.actionMessage((data && data.message) || 'Failed to remove from group', $row, 'danger'); return; }
+			if(error){ app.messages.action((data && data.message) || 'Failed to remove from group', $row, 'danger'); return; }
 			$.scope.mygroups.remove('cn', cn);
 		});
 	}
@@ -43,7 +43,7 @@
 		for(const cn of cns){
 			await new Promise(function(resolve){
 				app.api.put('group/' + encodeURIComponent(cn) + '/' + encodeURIComponent(currentUser.uid), {}, function(error, data){
-					if(error) app.util.actionMessage((data && data.message) || `Failed to add to "${cn}"`, $card, 'danger');
+					if(error) app.messages.action((data && data.message) || `Failed to add to "${cn}"`, $card, 'danger');
 					resolve();
 				});
 			});
@@ -64,10 +64,10 @@
 
 	async function removePersonalGroupMember(memberUid, btn){
 		const $row = $(btn).closest('tr');
-		const confirmed = await app.util.actionConfirm(`Remove ${memberUid} from ${currentUser.uid}'s group?`, $row, 'warning');
+		const confirmed = await app.messages.confirm(`Remove ${memberUid} from ${currentUser.uid}'s group?`, $row, 'warning');
 		if (!confirmed) return;
 		app.api.delete('user/' + encodeURIComponent(currentUser.uid) + '/group-member/' + encodeURIComponent(memberUid), function(error, data){
-			if(error){ app.util.actionMessage((data && data.message) || 'Failed to remove from group', $row, 'danger'); return; }
+			if(error){ app.messages.action((data && data.message) || 'Failed to remove from group', $row, 'danger'); return; }
 			$.scope.personalGroupMembers.remove('uid', memberUid);
 		});
 	}
@@ -80,7 +80,7 @@
 		for(const uid of uids){
 			await new Promise(function(resolve){
 				app.api.put('user/' + encodeURIComponent(currentUser.uid) + '/group-member/' + encodeURIComponent(uid), {}, function(error, data){
-					if(error) app.util.actionMessage((data && data.message) || `Failed to add "${uid}"`, $card, 'danger');
+					if(error) app.messages.action((data && data.message) || `Failed to add "${uid}"`, $card, 'danger');
 					resolve();
 				});
 			});
@@ -184,11 +184,11 @@
 
 	async function deleteUser(uid, btn){
 		const $card = $(btn).closest('.card');
-		const confirmed = await app.util.actionConfirm(`Delete user "${uid}"?`, $card, 'warning');
+		const confirmed = await app.messages.confirm(`Delete user "${uid}"?`, $card, 'warning');
 		if (!confirmed) return;
 		app.api.delete('user/' + uid, function(error, data){
 			if (error) {
-				app.util.actionMessage(data.message || 'Failed to delete user', $card, 'danger');
+				app.messages.action(data.message || 'Failed to delete user', $card, 'danger');
 				return;
 			}
 			window.location.href = '/users';
@@ -662,21 +662,21 @@
 	async function revokeToken(id, name, btn){
 		var $card = $(btn).closest('.card');
 		$card.addClass('table-warning');
-		var confirmed = await app.util.actionConfirm('Revoke API token "' + name + '"? It stops working immediately.', $card, 'warning');
+		var confirmed = await app.messages.confirm('Revoke API token "' + name + '"? It stops working immediately.', $card, 'warning');
 		$card.removeClass('table-warning');
 		if(!confirmed) return;
 		app.apiToken.remove({id: id}, function(error, data){
-			if(error){ app.util.actionMessage('Error: ' + data.message, $card, 'danger'); return; }
+			if(error){ app.messages.action('Error: ' + data.message, $card, 'danger'); return; }
 			$.scope.apiTokenCard.remove('id', id);
 		});
 	}
 
 	async function rotateToken(id, name, btn){
 		var $card = $(btn).closest('.card');
-		var confirmed = await app.util.actionConfirm('Rotate API token "' + name + '"? The old token stops working immediately.', $card, 'warning');
+		var confirmed = await app.messages.confirm('Rotate API token "' + name + '"? The old token stops working immediately.', $card, 'warning');
 		if(!confirmed) return;
 		app.apiToken.rotate({id: id}, function(error, data){
-			if(error){ app.util.actionMessage('Error: ' + data.message, $card, 'danger'); return; }
+			if(error){ app.messages.action('Error: ' + data.message, $card, 'danger'); return; }
 			showSecret(data.token);
 			tableAJAX();
 		});
@@ -700,7 +700,7 @@
 			expires_in_days: $('#edit-expires_in_days').val(),
 		};
 		app.apiToken.update(payload, function(error, data){
-			if(error){ app.util.actionMessage((data && data.message) || 'Update failed.', $msg.parent(), 'danger'); return; }
+			if(error){ app.messages.action((data && data.message) || 'Update failed.', $msg.parent(), 'danger'); return; }
 			editModal.hide();
 			tableAJAX();
 		});

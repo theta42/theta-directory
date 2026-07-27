@@ -714,7 +714,7 @@
       await loadResources();
       
       if (!id && data.kind === 'oauth' && res.results && res.results._raw_secret) {
-        app.util.alert('OAuth Secret', 'Save this client secret, it will not be shown again: <br><br><code>' + res.results._raw_secret + '</code>', 'success');
+        app.modal.open({title: 'OAuth Secret', bodyHtml: 'Save this client secret, it will not be shown again: <br><br><code>' + res.results._raw_secret + '</code>'});
       }
     } catch (err) {
       console.error(err);
@@ -729,7 +729,7 @@
     
     try {
       const res = await app.api.post(`directory-admin/resources/${id}/rotate-secret`);
-      app.util.alert('Secret Rotated', 'Save this NEW client secret, it will not be shown again: <br><br><code>' + res.secret + '</code>', 'success');
+      app.modal.open({title: 'Secret Rotated', bodyHtml: 'Save this NEW client secret, it will not be shown again: <br><br><code>' + res.secret + '</code>'});
     } catch (err) {
       console.error(err);
       alert(err.message || 'Failed to rotate secret');
