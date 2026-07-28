@@ -7,6 +7,22 @@
 		}
 	});
 
+	// Landing here with no explanation ("why am I on the SSO login page?") is
+	// exactly what happens when another app's "Log in with SSO" button sends
+	// an unauthenticated user through /oauth/authorize, which bounces them
+	// here with ?redirect=. Tell them what's happening instead of leaving it
+	// a mystery.
+	$(document).ready(function(){
+		var redirect = <%- JSON.stringify(redirect || '') %>;
+		if(redirect){
+			var isOauth = /\/oauth\/authorize/.test(redirect);
+			var message = isOauth
+				? 'Log in to continue — an application is requesting access to your account.'
+				: "Log in to continue to what you were doing — you'll be sent back afterward.";
+			app.messages.action(message, $('.card').first(), 'info');
+		}
+	});
+
 	function setOtpMethod(method) {
 		$('#otpMethodInput').val(method);
 		$('#otpMethodEmail').toggleClass('active', method === 'email').toggleClass('btn-secondary', method === 'email').toggleClass('btn-outline-secondary', method !== 'email');
