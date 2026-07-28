@@ -32,6 +32,33 @@
 		return value;
 	}
 
+	// app_sso_service_account is a marker group: membership hides an account
+	// from the Users page's People tab entirely (see users.ejs), which is
+	// exactly right for a non-person account but has silently made a real
+	// person's account look "gone" before (nothing else about it changes).
+	// Everywhere else in this dropdown just fires the PUT directly; only
+	// this one group gets a confirmation first.
+	function addMemberClick(event, groupCN, uid, el){
+		event.preventDefault();
+		const $el = $(el);
+		(async function(){
+			if (groupCN === 'app_sso_service_account') {
+				const ok = await app.messages.confirm(
+					`Mark "${uid}" as a service account? This hides them from the Users page's People tab (Service Accounts tab only) — only do this for a non-person account.`,
+					$el.closest('.card'), 'warning'
+				);
+				if (!ok) return;
+			}
+			try {
+				const data = await app.api.put(`group/${groupCN}/${uid}`, {});
+				await addedUser(data.message, groupCN, uid, $el);
+			} catch(e) {
+				app.messages.action(e.message || 'Failed to add member', $el.closest('.card'), 'danger');
+			}
+		})();
+		return false;
+	}
+
 	async function addedUser(message, group, user, $form){
 		let data = await app.group.get(group);
 		$.scope.groupCard.update('cn', group, processGroup(data.results));
@@ -214,7 +241,7 @@
 								</button>
 								<div class="dropdown-menu shadow-lg" aria-labelledby="group_add_member">
 								{{ #toAdd }}{{#.}}
-									<a class="dropdown-item" action="group/{{groupCN}}/{{uid}}" method="put" onclick="formAJAX(this)" evalAJAX="addedUser(data.message, '{{groupCN}}', '{{uid}}', $form);">
+									<a class="dropdown-item" href="#" onclick="return addMemberClick(event, '{{groupCN}}', '{{uid}}', this);">
 										<i class="fa-solid fa-user"></i> {{uid}}
 									</a>
 								{{/.}}{{ /toAdd }}
