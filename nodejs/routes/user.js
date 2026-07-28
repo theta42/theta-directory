@@ -49,7 +49,7 @@ router.post('/', async function(req, res, next){
 			}
 		}
 
-		return res.json({results: user});
+		return res.json({results: user, message: `User ${user.uid} created.`});
 	}catch(error){
 		next(error);
 	}
@@ -107,7 +107,7 @@ router.put('/password', async function(req, res, next){
 		const verif = await UserVerification.getOrCreate(req.user.uid);
 		await verif.update({ password_must_change: false });
 		User.clearCache();
-		return res.json({results: result});
+		return res.json({results: result, message: 'Password changed.'});
 	}catch(error){
 		next(error);
 	}
