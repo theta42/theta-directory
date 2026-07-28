@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.6.3] - 2026-07-28
+
+### Fixed
+- **Group membership changes (`PUT`/`DELETE /api/group/:group/:uid`) didn't invalidate the User cache**, so `isServiceAccount` (and anything else derived from `memberOf`) could stay stale for up to 5 minutes after a change. This is what caused a real "lost user" report — the account had landed in `app_sso_service_account` (which `users.ejs`'s People tab filters out entirely) and looked exactly like data loss, though nothing was ever deleted.
+
+### Added
+- **A confirmation before adding anyone to `app_sso_service_account`** via the Groups page — that group's whole purpose is to hide an account from the People tab, and there was no guardrail against doing that to a real person by mistake (which is how the bug above happened). Every other group's add-member flow is unchanged.
+
 ## [1.6.2] - 2026-07-28
 
 ### Fixed
