@@ -43,25 +43,33 @@ router.post('/resources', async (req, res, next) => {
     }
     
     req.body.owner = req.body.owner || req.user.uid;
-    
+
+    const now = Date.now();
+    req.body.created_by = req.body.created_by || req.user.uid;
+    req.body.created_on = now;
+    req.body.updated_by = req.user.uid;
+    req.body.updated_on = now;
+
     let r;
     if (req.body.kind === 'oauth') {
       const { OAuthClient } = require('../models/oauth_client');
-      // Pass created_by explicitly for the wrapper
+      // Pass created_by explicitly for the wrapper (overrides the generic
+      // assignment above -- this is OAuthClient-wrapper-specific behavior).
       req.body.created_by = req.body.owner;
       // In the UI we might pass slug, but OAuthClient wrapper expects name
       r = await OAuthClient.add(req.body);
     } else {
       r = await Resource.create(req.body);
     }
-    
+
     if ((r.kind === 'host' || r.kind === 'service' || r.kind === 'oauth') && req.body.hostId) {
       await ResourceEdge.create({ parentId: req.body.hostId, childId: r.id, relation: r.kind === 'oauth' ? 'oauth' : 'hosts' });
     }
-    
+
     if (r.kind === 'host' || r.kind === 'service') {
+      const siteSlug = await Resource.findAncestorSiteSlug(r.id);
       const createGroup = async (suffix, accessLevel) => {
-        const cn = `${r.slug}_${suffix}`;
+        const cn = siteSlug ? `${siteSlug}_${r.slug}_${suffix}` : `${r.slug}_${suffix}`;
         try {
           await Group.add({
             name: cn,
@@ -103,7 +111,10 @@ router.put('/resources/:id', async (req, res, next) => {
         r = await Resource.get(req.params.id);
     }
     if (!r) return res.status(404).json({ error: 'Not found' });
-    
+
+    req.body.updated_by = req.user.uid;
+    req.body.updated_on = Date.now();
+
     if (req.body.kind === 'host' && !req.body.hostId) {
       return res.status(400).json({ error: 'Hosts must have a parent Site or Host' });
     }

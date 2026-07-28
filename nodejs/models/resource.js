@@ -152,10 +152,36 @@ class Resource extends Model {
     owner: { type: 'string' },
     description: { type: 'text' },
     metadata: { type: 'json', default: {} },
+    // Not isRequired: @simpleworkjs/orm has no auto-timestamp hook, so these
+    // are set explicitly by the route handler on every create/update (see
+    // routes/api_directory_admin.js). Existing rows predating this change
+    // simply read back undefined -- callers must render a fallback.
+    created_by: { type: 'string' },
+    created_on: { type: 'integer' },
+    updated_by: { type: 'string' },
+    updated_on: { type: 'integer' },
     edgesAsParent: { type: 'hasMany', model: 'ResourceEdge', remoteKey: 'parentId' },
     edgesAsChild: { type: 'hasMany', model: 'ResourceEdge', remoteKey: 'childId' },
     groups: { type: 'hasMany', model: 'ResourceGroup', remoteKey: 'resourceId' }
   };
+
+  // Walk parent ResourceEdges from resourceId up to the nearest ancestor
+  // whose kind === 'site', returning its slug (or null if none exists -- a
+  // top-level resource with no site parent keeps its unprefixed group name).
+  static async findAncestorSiteSlug(resourceId, visited = new Set()) {
+    if (visited.has(resourceId)) return null;
+    visited.add(resourceId);
+
+    const parentEdges = await ResourceEdge.list({ where: { childId: resourceId } });
+    for (const edge of parentEdges) {
+      const parent = await this.get(edge.parentId);
+      if (!parent) continue;
+      if (parent.kind === 'site') return parent.slug;
+      const found = await this.findAncestorSiteSlug(parent.id, visited);
+      if (found) return found;
+    }
+    return null;
+  }
 }
 
 class ResourceEdge extends Model {

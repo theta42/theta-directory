@@ -60,6 +60,14 @@ router.get('/directory', function(req, res) {
   res.render('directory', {...values});
 });
 
+// Linkable deep-link to a single resource's modal, e.g. from the resource
+// modal's app.modal `url` option. Mirrors /users/:uid below: no server-side
+// use of :slug at all -- the client reads location.pathname itself and opens
+// the matching resource's modal once the page's own data has loaded.
+router.get('/directory/:slug', function(req, res) {
+  res.render('directory', {...values});
+});
+
 // Route removed since it's now in directory
 
 router.get('/onboarding', async function(req, res, next) {

@@ -78,252 +78,269 @@
   </div>
 </div>
 
-<!-- Edit Resource Modal -->
-<div class="modal fade" id="resourceModal" tabindex="-1">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header shadow">
-        <h5 class="modal-title" id="resourceModalTitle">Resource</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-      <div class="modal-body">
-        <div class="actionMessage mb-3" style="display:none"></div>
-        <input type="hidden" id="res-id">
-        
-        <div class="row mb-3">
-          <div class="col-6">
-            <label class="form-label">Name</label>
-            <input type="text" id="res-name" class="form-control shadow-sm">
-          </div>
-          <div class="col-6">
-            <label class="form-label">Slug</label>
-            <input type="text" id="res-slug" class="form-control shadow-sm font-monospace">
-          </div>
-        </div>
-        
-        <div class="row mb-3">
-          <div class="col-6">
-            <label class="form-label">Kind</label>
-            <select id="res-kind" class="form-select shadow-sm" onchange="toggleFormFields()">
-              <option value="site">Site</option>
-              <option value="host">Host</option>
-              <option value="service">Service (App)</option>
-              <option value="oauth">OAuth Integration</option>
-            </select>
-          </div>
-          <div class="col-6">
-            <label class="form-label">Sub Type</label>
-            <input type="text" id="res-subtype" class="form-control shadow-sm" placeholder="e.g. proxmox_node, web, etc.">
-          </div>
-        </div>
-        
-        <div class="row mb-3" id="site-details-container" style="display: none;">
-          <div class="col-12">
-            <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="res-is-current-site">
-              <label class="form-check-label" for="res-is-current-site">
-                Mark as Current Site
-              </label>
-            </div>
-          </div>
-        </div>
-        
-        <div class="row mb-3" id="host-parent-container" style="display: none;">
-          <div class="col-12">
-            <label class="form-label text-primary">Parent Resource <span class="text-danger">*</span></label>
-            <select id="res-host-id" class="form-select shadow-sm border-primary">
-              <option value="">-- Select Parent --</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="row mb-3">
-          <div class="col-6">
-            <label class="form-label">IP Address</label>
-            <input type="text" id="res-ip" class="form-control shadow-sm font-monospace" placeholder="192.168.1.x">
-          </div>
-          <div class="col-6">
-            <label class="form-label">Host / URI Address</label>
-            <input type="text" id="res-address" class="form-control shadow-sm font-monospace" placeholder="https://...">
-          </div>
-        </div>
-        
-        <div class="row mb-3" id="host-details-container" style="display: none;">
-          <div class="col-4">
-            <label class="form-label">VMID</label>
-            <input type="number" id="res-vmid" class="form-control shadow-sm" placeholder="e.g. 101">
-          </div>
-          <div class="col-4">
-            <label class="form-label">MAC Address</label>
-            <input type="text" id="res-mac" class="form-control shadow-sm font-monospace" placeholder="00:00:00:00:00:00">
-          </div>
-          <div class="col-4">
-            <label class="form-label">OS / Kernel</label>
-            <input type="text" id="res-os" class="form-control shadow-sm" placeholder="Ubuntu / 5.15">
-          </div>
-        </div>
-        
-        <div class="row mb-3" id="service-ports-container" style="display: none;">
-          <div class="col-6">
-            <label class="form-label">Internal Port</label>
-            <input type="number" id="res-port" class="form-control shadow-sm" placeholder="e.g. 8080">
-          </div>
-          <div class="col-6">
-            <label class="form-label">External Port</label>
-            <input type="number" id="res-external-port" class="form-control shadow-sm" placeholder="e.g. 443">
-            <small class="text-muted">Same as Internal if empty</small>
-          </div>
-        </div>
-
-        <div class="row mb-3" id="service-details-container" style="display: none;">
-          <div class="col-4">
-            <label class="form-label">Git Repo</label>
-            <input type="text" id="res-git-repo" class="form-control shadow-sm" placeholder="https://github.com/...">
-          </div>
-          <div class="col-4">
-            <label class="form-label">Install Path</label>
-            <input type="text" id="res-install-path" class="form-control shadow-sm" placeholder="/opt/app">
-          </div>
-          <div class="col-4">
-            <label class="form-label">Systemd Service</label>
-            <input type="text" id="res-systemd" class="form-control shadow-sm" placeholder="app.service">
-          </div>
-        </div>
-        
-        <div id="oauth-details-container" style="display: none;">
-          <hr>
-          <h5>OAuth Configuration</h5>
-          <div class="mb-3">
-            <label class="form-label">Redirect URIs <small class="text-muted">(one per line)</small></label>
-            <textarea id="res-redirect-uris" class="form-control shadow-sm font-monospace" rows="3"></textarea>
-            <small class="field-help text-muted d-block">
-              <code>*</code> matches one hostname label, <code>**</code> matches any number of labels.
-            </small>
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Scopes <small class="text-muted">(space separated)</small></label>
-            <input type="text" id="res-scopes" class="form-control shadow-sm" value="openid profile email groups">
-          </div>
-          <div class="mb-3">
-            <label class="form-label">Restrict to Groups <small class="text-muted">(space separated CNs, optional)</small></label>
-            <input type="text" id="res-allowed-groups" class="form-control shadow-sm">
-          </div>
-          <div class="row mb-3">
-            <div class="col-6">
-              <label class="form-label">Access Token TTL <small class="text-muted">(seconds)</small></label>
-              <input type="number" id="res-access-ttl" class="form-control shadow-sm" value="3600" min="60">
-            </div>
-            <div class="col-6">
-              <label class="form-label">Refresh Token TTL <small class="text-muted">(seconds)</small></label>
-              <input type="number" id="res-refresh-ttl" class="form-control shadow-sm" value="2592000" min="3600">
-            </div>
-          </div>
-          <div class="mb-3" id="oauth-rotate-container" style="display: none;">
-            <button class="btn btn-outline-warning" onclick="rotateSecret()">
-              <i class="fa-solid fa-arrows-rotate"></i> Rotate Client Secret
-            </button>
-            <small class="d-block text-muted mt-1">Rotating the secret will break any currently running clients until they are updated.</small>
-          </div>
-        </div>
-        
-        <div class="row mb-3">
-          <div class="col-4">
-            <div class="form-check form-switch mt-2">
-              <input class="form-check-input" type="checkbox" id="res-is-production">
-              <label class="form-check-label" for="res-is-production"><strong>Production</strong></label>
-            </div>
-          </div>
-          <div class="col-4" id="external-container" style="display: none;">
-            <div class="form-check form-switch mt-2">
-              <input class="form-check-input" type="checkbox" id="res-is-external">
-              <label class="form-check-label" for="res-is-external"><strong>External Reachable</strong></label>
-            </div>
-          </div>
-          <div class="col-4" id="public-container" style="display: none;">
-            <div class="form-check form-switch mt-2">
-              <input class="form-check-input" type="checkbox" id="res-is-public">
-              <label class="form-check-label" for="res-is-public"><strong>Public (No Auth)</strong></label>
-            </div>
-          </div>
-        </div>
-
-        <div class="mb-3">
-          <label class="form-label">Description</label>
-          <textarea id="res-description" class="form-control shadow-sm" rows="2"></textarea>
-        </div>
-        
-        <hr>
-        
-        <div id="edit-only-section" style="display: none;">
-          <h5>Associated LDAP Groups</h5>
-          <div class="mb-3">
-            <ul class="list-group mb-2 shadow-sm" id="groups-list" jq-repeat="groups">
-              <li class="list-group-item d-flex justify-content-between align-items-center">
-                <span>
-                  <i class="fa-solid fa-users text-muted me-2"></i> 
-                  <strong>{{groupCn}}</strong> 
-                  <span class="badge bg-primary ms-2">{{accessLevel}}</span>
-                </span>
-                <button class="btn btn-sm btn-outline-danger" onclick="removeGroup('{{id}}')"><i class="fa-solid fa-xmark"></i></button>
-              </li>
-            </ul>
-            <div class="input-group shadow-sm mt-2">
-              <input type="text" class="form-control" id="new-group-cn" placeholder="Group CN (e.g. app_emby_users)" list="ldap-groups-datalist">
-              <datalist id="ldap-groups-datalist"></datalist>
-              <select class="form-select" id="new-group-level" style="max-width: 140px;">
-                <option value="member">Member</option>
-                <option value="owner">Owner</option>
-              </select>
-              <button class="btn btn-success" onclick="addGroup()"><i class="fa-solid fa-plus"></i></button>
-            </div>
-          </div>
-          
-          <hr>
-          
-          <h5>Relationships (Graph Edges)</h5>
-          <div class="mb-3">
-            <ul class="list-group mb-2 shadow-sm" id="edges-list" jq-repeat="edges">
-              <li class="list-group-item d-flex justify-content-between align-items-center">
-                <span>
-                  {{#isParent}}
-                    <i class="fa-solid fa-arrow-down text-success me-2"></i> Has child: <strong>{{targetName}}</strong> <span class="badge bg-secondary ms-1">{{relation}}</span>
-                  {{/isParent}}
-                  {{^isParent}}
-                    <i class="fa-solid fa-arrow-up text-primary me-2"></i> Is child of: <strong>{{targetName}}</strong> <span class="badge bg-secondary ms-1">{{relation}}</span>
-                  {{/isParent}}
-                </span>
-                <button class="btn btn-sm btn-outline-danger" onclick="removeEdge('{{id}}')"><i class="fa-solid fa-xmark"></i></button>
-              </li>
-            </ul>
-            <div class="input-group shadow-sm mt-2">
-              <select class="form-select" id="new-edge-dir" style="max-width: 140px;">
-                <option value="parent">Has child</option>
-                <option value="child">Is child of</option>
-              </select>
-              <select class="form-select" id="new-edge-target">
-                <option value="">-- Select Resource --</option>
-              </select>
-              <input type="text" class="form-control" id="new-edge-relation" placeholder="Relation (e.g. hosts)" style="max-width: 150px;">
-              <button class="btn btn-success" onclick="addEdge()"><i class="fa-solid fa-plus"></i></button>
-            </div>
-          </div>
-        </div>
-        
-      </div>
-      <div class="modal-footer">
-        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-        <button type="button" class="btn btn-primary" onclick="saveResource()">
-          <i class="fa-solid fa-floppy-disk"></i> Save Resource
-        </button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <script>
   app.auth.forceLogin(['app_sso_admin', 'app_sso_directory_admin']);
-  
-  var resourceModal = new bootstrap.Modal(document.getElementById('resourceModal'));
+
+  // --- Resource modal tab content, built once. Populated via .val() in
+  //     openAddModal/openEditModal AFTER app.modal.open() has (re)built the
+  //     DOM from these strings -- order matters, unlike the old always-in-DOM
+  //     static modal. ---
+
+  var generalTabHtml = `
+    <div class="actionMessage mb-3" style="display:none"></div>
+    <input type="hidden" id="res-id">
+
+    <div class="row mb-3">
+      <div class="col-6">
+        <label class="form-label">Name</label>
+        <input type="text" id="res-name" class="form-control shadow-sm">
+      </div>
+      <div class="col-6">
+        <label class="form-label">Slug</label>
+        <input type="text" id="res-slug" class="form-control shadow-sm font-monospace">
+      </div>
+    </div>
+
+    <div class="row mb-3">
+      <div class="col-6">
+        <label class="form-label">Kind</label>
+        <select id="res-kind" class="form-select shadow-sm" onchange="toggleFormFields()">
+          <option value="site">Site</option>
+          <option value="host">Host</option>
+          <option value="service">Service (App)</option>
+          <option value="oauth">OAuth Integration</option>
+        </select>
+      </div>
+      <div class="col-6">
+        <label class="form-label">Sub Type</label>
+        <input type="text" id="res-subtype" class="form-control shadow-sm" placeholder="e.g. proxmox_node, web, etc.">
+      </div>
+    </div>
+
+    <div class="row mb-3">
+      <div class="col-6">
+        <label class="form-label">IP Address</label>
+        <input type="text" id="res-ip" class="form-control shadow-sm font-monospace" placeholder="192.168.1.x">
+      </div>
+      <div class="col-6">
+        <label class="form-label">Host / URI Address</label>
+        <input type="text" id="res-address" class="form-control shadow-sm font-monospace" placeholder="https://...">
+      </div>
+    </div>
+
+    <div class="row mb-3">
+      <div class="col-6">
+        <div class="form-check form-switch mt-2">
+          <input class="form-check-input" type="checkbox" id="res-is-production">
+          <label class="form-check-label" for="res-is-production"><strong>Production</strong></label>
+        </div>
+      </div>
+    </div>
+
+    <div class="mb-3">
+      <label class="form-label">Description</label>
+      <textarea id="res-description" class="form-control shadow-sm" rows="2"></textarea>
+    </div>
+  `;
+
+  var detailsTabHtml = `
+    <div class="row mb-3" id="site-details-container" style="display: none;">
+      <div class="col-12">
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" id="res-is-current-site">
+          <label class="form-check-label" for="res-is-current-site">
+            Mark as Current Site
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <div class="row mb-3" id="host-parent-container" style="display: none;">
+      <div class="col-12">
+        <label class="form-label text-primary">Parent Resource <span class="text-danger">*</span></label>
+        <select id="res-host-id" class="form-select shadow-sm border-primary">
+          <option value="">-- Select Parent --</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="row mb-3" id="host-details-container" style="display: none;">
+      <div class="col-4">
+        <label class="form-label">VMID</label>
+        <input type="number" id="res-vmid" class="form-control shadow-sm" placeholder="e.g. 101">
+      </div>
+      <div class="col-4">
+        <label class="form-label">MAC Address</label>
+        <input type="text" id="res-mac" class="form-control shadow-sm font-monospace" placeholder="00:00:00:00:00:00">
+      </div>
+      <div class="col-4">
+        <label class="form-label">OS / Kernel</label>
+        <input type="text" id="res-os" class="form-control shadow-sm" placeholder="Ubuntu / 5.15">
+      </div>
+    </div>
+
+    <div class="row mb-3" id="service-ports-container" style="display: none;">
+      <div class="col-6">
+        <label class="form-label">Internal Port</label>
+        <input type="number" id="res-port" class="form-control shadow-sm" placeholder="e.g. 8080">
+      </div>
+      <div class="col-6">
+        <label class="form-label">External Port</label>
+        <input type="number" id="res-external-port" class="form-control shadow-sm" placeholder="e.g. 443">
+        <small class="text-muted">Same as Internal if empty</small>
+      </div>
+    </div>
+
+    <div class="row mb-3" id="service-details-container" style="display: none;">
+      <div class="col-4">
+        <label class="form-label">Git Repo</label>
+        <input type="text" id="res-git-repo" class="form-control shadow-sm" placeholder="https://github.com/...">
+      </div>
+      <div class="col-4">
+        <label class="form-label">Install Path</label>
+        <input type="text" id="res-install-path" class="form-control shadow-sm" placeholder="/opt/app">
+      </div>
+      <div class="col-4">
+        <label class="form-label">Systemd Service</label>
+        <input type="text" id="res-systemd" class="form-control shadow-sm" placeholder="app.service">
+      </div>
+    </div>
+
+    <div id="oauth-details-container" style="display: none;">
+      <hr>
+      <h5>OAuth Configuration</h5>
+      <div class="mb-3">
+        <label class="form-label">Redirect URIs <small class="text-muted">(one per line)</small></label>
+        <textarea id="res-redirect-uris" class="form-control shadow-sm font-monospace" rows="3"></textarea>
+        <small class="field-help text-muted d-block">
+          <code>*</code> matches one hostname label, <code>**</code> matches any number of labels.
+        </small>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Scopes <small class="text-muted">(space separated)</small></label>
+        <input type="text" id="res-scopes" class="form-control shadow-sm" value="openid profile email groups">
+      </div>
+      <div class="mb-3">
+        <label class="form-label">Restrict to Groups <small class="text-muted">(space separated CNs, optional)</small></label>
+        <input type="text" id="res-allowed-groups" class="form-control shadow-sm">
+      </div>
+      <div class="row mb-3">
+        <div class="col-6">
+          <label class="form-label">Access Token TTL <small class="text-muted">(seconds)</small></label>
+          <input type="number" id="res-access-ttl" class="form-control shadow-sm" value="3600" min="60">
+        </div>
+        <div class="col-6">
+          <label class="form-label">Refresh Token TTL <small class="text-muted">(seconds)</small></label>
+          <input type="number" id="res-refresh-ttl" class="form-control shadow-sm" value="2592000" min="3600">
+        </div>
+      </div>
+      <div class="mb-3" id="oauth-rotate-container" style="display: none;">
+        <button class="btn btn-outline-warning" onclick="rotateSecret()">
+          <i class="fa-solid fa-arrows-rotate"></i> Rotate Client Secret
+        </button>
+        <small class="d-block text-muted mt-1">Rotating the secret will break any currently running clients until they are updated.</small>
+      </div>
+    </div>
+
+    <div class="row mb-3">
+      <div class="col-6" id="external-container" style="display: none;">
+        <div class="form-check form-switch mt-2">
+          <input class="form-check-input" type="checkbox" id="res-is-external">
+          <label class="form-check-label" for="res-is-external"><strong>External Reachable</strong></label>
+        </div>
+      </div>
+      <div class="col-6" id="public-container" style="display: none;">
+        <div class="form-check form-switch mt-2">
+          <input class="form-check-input" type="checkbox" id="res-is-public">
+          <label class="form-check-label" for="res-is-public"><strong>Public (No Auth)</strong></label>
+        </div>
+      </div>
+    </div>
+  `;
+
+  var groupsTabHtml = `
+    <div class="mb-3">
+      <ul class="list-group mb-2 shadow-sm" id="groups-list"></ul>
+      <div class="input-group shadow-sm mt-2">
+        <input type="text" class="form-control" id="new-group-cn" placeholder="Group CN (e.g. app_emby_users)" list="ldap-groups-datalist">
+        <datalist id="ldap-groups-datalist"></datalist>
+        <select class="form-select" id="new-group-level" style="max-width: 140px;">
+          <option value="member">Member</option>
+          <option value="owner">Owner</option>
+        </select>
+        <button class="btn btn-success" onclick="addGroup()"><i class="fa-solid fa-plus"></i></button>
+      </div>
+    </div>
+  `;
+
+  var childrenTabHtml = `
+    <div class="mb-3">
+      <ul class="list-group mb-2 shadow-sm" id="children-list"></ul>
+      <button class="btn btn-success btn-sm" onclick="openAddModal($('#res-id').val(), $('#res-kind').val())">
+        <i class="fa-solid fa-plus"></i> Add Child Resource
+      </button>
+    </div>
+
+    <hr>
+
+    <h6 class="text-muted">Other Relationships (advanced)</h6>
+    <div class="mb-3">
+      <ul class="list-group mb-2 shadow-sm" id="edges-list"></ul>
+      <div class="input-group shadow-sm mt-2">
+        <select class="form-select" id="new-edge-dir" style="max-width: 140px;">
+          <option value="parent">Has child</option>
+          <option value="child">Is child of</option>
+        </select>
+        <select class="form-select" id="new-edge-target">
+          <option value="">-- Select Resource --</option>
+        </select>
+        <input type="text" class="form-control" id="new-edge-relation" placeholder="Relation (e.g. hosts)" style="max-width: 150px;">
+        <button class="btn btn-success" onclick="addEdge()"><i class="fa-solid fa-plus"></i></button>
+      </div>
+    </div>
+  `;
+
+  // Shared by openAddModal/openEditModal: builds the tabbed/footer/(optionally
+  // URL-tracked) modal DOM. Callers then populate fields via .val() and hide
+  // the Groups/Children tabs in add-mode (no resource id to scope them to).
+  function openResourceModal(title, id) {
+    app.modal.open({
+      title: title,
+      size: 'lg',
+      tabs: [
+        {id: 'general', label: 'General', bodyHtml: generalTabHtml, active: true},
+        {id: 'details', label: 'Details', bodyHtml: detailsTabHtml},
+        {id: 'groups', label: 'Associated LDAP Groups', bodyHtml: groupsTabHtml},
+        {id: 'children', label: 'Children', bodyHtml: childrenTabHtml},
+      ],
+      footer: {
+        metaHtml: id ? app.modal.formatAudit(resourcesById[id], {formatDate: function(ms){ return moment(ms).format('YYYY-MM-DD HH:mm'); }}) : '',
+        buttonsHtml: app.modal.footerButtons({onSave: 'saveResource()', saveLabel: 'Save Resource'}),
+      },
+      url: id ? {path: '/directory/' + resourcesById[id].slug} : null,
+    });
+    $('#sw-modal-tab-groups-btn, #sw-modal-tab-children-btn').closest('li').toggle(!!id);
+  }
+
+  function refreshChildrenUI(resourceId) {
+    const kids = allEdges.filter(e => e.parentId === resourceId)
+      .map(e => resourcesById[e.childId]).filter(Boolean);
+    const $list = $('#children-list').empty();
+    if (!kids.length) {
+      $list.append('<li class="list-group-item text-muted">No child resources.</li>');
+      return;
+    }
+    for (const kid of kids) {
+      const $li = $('<li class="list-group-item d-flex justify-content-between align-items-center"></li>');
+      $('<a href="#" class="text-reset text-decoration-none"></a>')
+        .text(kid.name + ' (' + kid.slug + ')')
+        .on('click', function(e){ e.preventDefault(); openEditModal(kid.id); })
+        .appendTo($li);
+      $('<span class="badge bg-secondary"></span>').text(kid.kind).appendTo($li);
+      $list.append($li);
+    }
+  }
+
   var resourcesById = {};
   var allGroups = [];
   var allEdges = [];
@@ -331,6 +348,11 @@
   
   $(document).ready(async function() {
     await loadResources();
+    const slug = app.modal.deepLinkSlug('/directory');
+    if (slug) {
+      const match = Object.values(resourcesById).find(r => r.slug === slug);
+      if (match) openEditModal(match.id);
+    }
   });
   
   async function loadResources() {
@@ -480,7 +502,10 @@
     populateHostDropdown($('#res-host-id').val());
   }
 
-  $('#res-name, #res-kind').on('input change', function() {
+  // Delegated (not direct) since app.modal.open() rebuilds the modal body
+  // from scratch every call -- a direct .on() bind here would silently stop
+  // firing after the first Add/Edit.
+  app.modal.on('input change', '#res-name, #res-kind', function() {
     const id = $('#res-id').val();
     if (!id && $('#res-name').val()) {
       const name = $('#res-name').val();
@@ -489,18 +514,18 @@
       if (kind === 'service') prefix = 'app_';
       if (kind === 'host') prefix = 'host_';
       if (kind === 'site') prefix = 'site_';
-      
+
       const slug = prefix + name.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
       $('#res-slug').val(slug);
     }
   });
 
   function openAddModal(parentId, parentKind) {
-    $('#resourceModalTitle').html('<i class="fa-solid fa-plus"></i> Add Resource');
+    openResourceModal('Add Resource', null);
     $('#res-id').val('');
     $('#res-name').val('');
     $('#res-slug').val('');
-    
+
     let defaultKind = 'service';
     if (parentKind === 'site') defaultKind = 'host';
     if (parentKind === 'host') defaultKind = 'service';
@@ -531,12 +556,9 @@
     $('#res-is-external').prop('checked', false);
     $('#res-is-public').prop('checked', false);
     $('#res-is-current-site').prop('checked', false);
-    $('#edit-only-section').hide();
-    
+
     populateHostDropdown(parentId || '');
     toggleFormFields();
-    
-    resourceModal.show();
   }
   
   var ldapGroupsCache = null;
@@ -573,31 +595,59 @@
     if (selectedId) $target.val(selectedId);
   }
 
+  // Plain DOM rendering, not jq-repeat: #groups-list is injected fresh into
+  // the modal body on every app.modal.open() call, and jq-repeat's
+  // MutationObserver-based (re)registration for a same-id element that's
+  // destroyed and recreated runs asynchronously -- populating it
+  // synchronously right after open() (as this function is called) would race
+  // that and silently lose the pushed data on the second and later opens.
   function refreshGroupsUI(resourceId) {
     const myGroups = allGroups.filter(g => g.resourceId === resourceId);
-    $.scope.groups.empty();
+    const $list = $('#groups-list').empty();
+    if (!myGroups.length) {
+      $list.append('<li class="list-group-item text-muted">No associated groups.</li>');
+      return;
+    }
     for (const g of myGroups) {
-      $.scope.groups.push(g);
+      const $li = $('<li class="list-group-item d-flex justify-content-between align-items-center"></li>');
+      const $span = $('<span></span>');
+      $span.append('<i class="fa-solid fa-users text-muted me-2"></i>');
+      $('<strong></strong>').text(g.groupCn).appendTo($span);
+      $('<span class="badge bg-primary ms-2"></span>').text(g.accessLevel).appendTo($span);
+      $li.append($span);
+      $('<button class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-xmark"></i></button>')
+        .on('click', function(){ removeGroup(g.id); })
+        .appendTo($li);
+      $list.append($li);
     }
   }
 
   function refreshEdgesUI(resourceId) {
     const myEdges = allEdges.filter(e => e.parentId === resourceId || e.childId === resourceId);
-    $.scope.edges.empty();
+    const $list = $('#edges-list').empty();
+    if (!myEdges.length) {
+      $list.append('<li class="list-group-item text-muted">No other relationships.</li>');
+    }
     for (const e of myEdges) {
       const isParent = e.parentId === resourceId;
       const targetId = isParent ? e.childId : e.parentId;
       const target = resourcesById[targetId];
       if (!target) continue;
-      
-      $.scope.edges.push({
-        id: e.id,
-        isParent: isParent,
-        relation: e.relation,
-        targetName: target.name + ' (' + target.slug + ')'
-      });
+
+      const $li = $('<li class="list-group-item d-flex justify-content-between align-items-center"></li>');
+      const $span = $('<span></span>');
+      $span.append(isParent
+        ? '<i class="fa-solid fa-arrow-down text-success me-2"></i> Has child: '
+        : '<i class="fa-solid fa-arrow-up text-primary me-2"></i> Is child of: ');
+      $('<strong></strong>').text(target.name + ' (' + target.slug + ')').appendTo($span);
+      $('<span class="badge bg-secondary ms-1"></span>').text(e.relation).appendTo($span);
+      $li.append($span);
+      $('<button class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-xmark"></i></button>')
+        .on('click', function(){ removeEdge(e.id); })
+        .appendTo($li);
+      $list.append($li);
     }
-    
+
     const $target = $('#new-edge-target');
     $target.empty().append('<option value="">-- Select Resource --</option>');
     Object.values(resourcesById).forEach(r => {
@@ -610,8 +660,8 @@
   async function openEditModal(id) {
     const r = resourcesById[id];
     if (!r) return;
-    
-    $('#resourceModalTitle').html('<i class="fa-solid fa-pen-to-square"></i> Edit Resource');
+
+    openResourceModal('Edit Resource', id);
     $('#res-id').val(r.id);
     $('#res-name').val(r.name);
     $('#res-slug').val(r.slug);
@@ -649,14 +699,11 @@
     const parentEdge = allEdges.find(e => e.childId === r.id && (e.relation === 'hosts' || e.relation === 'oauth'));
     populateHostDropdown(parentEdge ? parentEdge.parentId : '');
     toggleFormFields();
-    
-    $('#edit-only-section').show();
-    
+
     refreshGroupsUI(r.id);
     refreshEdgesUI(r.id);
+    refreshChildrenUI(r.id);
     await loadLdapGroups();
-    
-    resourceModal.show();
   }
   
   async function saveResource() {
@@ -704,22 +751,22 @@
         res = await app.api.post('directory-admin/resources', data);
       }
       
-      resourceModal.hide();
+      app.modal.close();
       await loadResources();
-      
+
       if (!id && data.kind === 'oauth' && res.results && res.results._raw_secret) {
         app.modal.open({title: 'OAuth Secret', bodyHtml: 'Save this client secret, it will not be shown again: <br><br><code>' + res.results._raw_secret + '</code>'});
       }
     } catch (err) {
       console.error(err);
-      app.messages.action(err.message || 'Failed to save', $('#resourceModal'), 'danger');
+      app.messages.action(err.message || 'Failed to save', app.modal.body(), 'danger');
     }
   }
 
   async function rotateSecret() {
     const id = $('#res-id').val();
     if (!id) return;
-    const ok = await app.messages.confirm('Are you sure you want to rotate the OAuth secret? Any existing integrations using the old secret will break.', $('#resourceModal'), 'warning');
+    const ok = await app.messages.confirm('Are you sure you want to rotate the OAuth secret? Any existing integrations using the old secret will break.', app.modal.body(), 'warning');
     if (!ok) return;
 
     try {
@@ -727,7 +774,7 @@
       app.modal.open({title: 'Secret Rotated', bodyHtml: 'Save this NEW client secret, it will not be shown again: <br><br><code>' + res.secret + '</code>'});
     } catch (err) {
       console.error(err);
-      app.messages.action(err.message || 'Failed to rotate secret', $('#resourceModal'), 'danger');
+      app.messages.action(err.message || 'Failed to rotate secret', app.modal.body(), 'danger');
     }
   }
 
@@ -736,7 +783,7 @@
     const groupCn = $('#new-group-cn').val().trim();
     const accessLevel = $('#new-group-level').val();
     
-    if (!groupCn) return app.messages.action('Group CN is required', $('#resourceModal'), 'danger');
+    if (!groupCn) return app.messages.action('Group CN is required', app.modal.body(), 'danger');
     try {
       const res = await app.api.post('directory-admin/groups', {
         resourceId,
@@ -748,7 +795,7 @@
       $('#new-group-cn').val('');
     } catch (err) {
       console.error(err);
-      app.messages.action('Failed to add group', $('#resourceModal'), 'danger');
+      app.messages.action('Failed to add group', app.modal.body(), 'danger');
     }
   }
 
@@ -759,7 +806,7 @@
       refreshGroupsUI($('#res-id').val());
     } catch (err) {
       console.error(err);
-      app.messages.action('Failed to remove group', $('#resourceModal'), 'danger');
+      app.messages.action('Failed to remove group', app.modal.body(), 'danger');
     }
   }
 
@@ -769,7 +816,7 @@
     const targetId = $('#new-edge-target').val();
     const relation = $('#new-edge-relation').val().trim() || 'hosts';
     
-    if (!targetId) return app.messages.action('Select a target resource', $('#resourceModal'), 'danger');
+    if (!targetId) return app.messages.action('Select a target resource', app.modal.body(), 'danger');
     
     const data = { relation };
     if (dir === 'parent') {
@@ -787,7 +834,7 @@
       $('#new-edge-target').val('');
     } catch (err) {
       console.error(err);
-      app.messages.action('Failed to add edge', $('#resourceModal'), 'danger');
+      app.messages.action('Failed to add edge', app.modal.body(), 'danger');
     }
   }
 
@@ -798,14 +845,14 @@
       refreshEdgesUI($('#res-id').val());
     } catch (err) {
       console.error(err);
-      app.messages.action('Failed to remove edge', $('#resourceModal'), 'danger');
+      app.messages.action('Failed to remove edge', app.modal.body(), 'danger');
     }
   }
 
   async function deleteResource(id) {
-    // Called from the outer table's row button, not from inside
-    // #resourceModal — target the page's own card so the confirm/error
-    // renders somewhere actually visible.
+    // Called from the outer table's row button, not from inside the resource
+    // modal — target the page's own card so the confirm/error renders
+    // somewhere actually visible.
     const $target = $('#resources-list');
     const ok = await app.messages.confirm('Are you sure you want to delete this resource? All relationships will be destroyed.', $target, 'danger');
     if (!ok) return;
