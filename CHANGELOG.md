@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.8.1] - 2026-07-28
+
+### Fixed
+- **The resource modal's "Associated LDAP Groups" autocomplete went empty after the first Add/Edit** — `loadLdapGroups()`'s fetch-once cache guard (`if (ldapGroupsCache) return;`) also skipped repopulating the `<datalist>` on every call after the first, but the modal body (including that `<datalist>`) is rebuilt fresh and empty on every `app.modal.open()`. Now the fetch is still cached, but the datalist is always repopulated.
+
 ## [1.8.0] - 2026-07-28
 
 ### Added

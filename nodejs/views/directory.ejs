@@ -563,10 +563,15 @@
   
   var ldapGroupsCache = null;
   async function loadLdapGroups() {
-    if (ldapGroupsCache) return;
     try {
-      const res = await app.api.get('group');
-      ldapGroupsCache = res.results;
+      if (!ldapGroupsCache) {
+        const res = await app.api.get('group');
+        ldapGroupsCache = res.results;
+      }
+      // Re-populate every call, not just the first -- #ldap-groups-datalist
+      // is rebuilt fresh (empty) on every app.modal.open(), so returning
+      // early here on a cache hit left the second and later modal opens
+      // with no autocomplete options at all.
       const $datalist = $('#ldap-groups-datalist');
       $datalist.empty();
       for (const cn of ldapGroupsCache) {
