@@ -4,6 +4,23 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.8.0] - 2026-07-28
+
+### Added
+- **Directory resource modal: General / Details / Associated LDAP Groups / Children tabs**, replacing one long form. The new Children tab lists a resource's existing children and lets you add another right from the modal.
+- **Resource audit trail**: `created_by`/`created_on`/`updated_by`/`updated_on`, shown in the modal's new footer (mirrors the convention already used by proxy's `Host` and jump-host's `ApiToken`). Existing resources predating this change show "—" until next edited.
+- **Linkable resource URLs**: `GET /directory/:slug` plus a client-side deep-link check make a resource's modal directly bookmarkable/shareable; the address bar updates to `/directory/{slug}` while its modal is open and reverts on close (including via the browser Back button).
+- **Auto-created LDAP groups are now prefixed with their nearest ancestor Site's slug** (e.g. `site_local_myhost_access` instead of `myhost_access`), so groups for same-named hosts/services under different sites no longer collide or look identical. Resources with no Site ancestor keep the old unprefixed naming.
+
+### Changed
+- `@simpleworkjs/frontend` bumped to 0.2.6: `app.modal` gained the `tabs`/`footer`/`url` options (all opt-in, existing callers unaffected) plus `showTab`/`on`/`deepLinkSlug`/`formatAudit`/`footerButtons` helpers — the shared building blocks behind this release's modal work, reusable by future entity modals in any of the 3 apps.
+
+### Fixed
+- The Directory's Associated LDAP Groups / Relationships lists no longer risk silently dropping their contents on a second modal open (a `jq-repeat`/DOM-rebuild timing race, now rendered manually instead).
+
+### Operational note
+The new `Resource` audit fields require a schema migration on any existing deployment: `ALTER TABLE Resource ADD COLUMN created_by VARCHAR(255); ALTER TABLE Resource ADD COLUMN created_on INTEGER; ALTER TABLE Resource ADD COLUMN updated_by VARCHAR(255); ALTER TABLE Resource ADD COLUMN updated_on INTEGER;` (adjust types for non-sqlite dialects) — `@simpleworkjs/orm`'s `sync()` only creates missing tables, it never alters existing ones.
+
 ## [1.7.0] - 2026-07-28
 
 ### Fixed
