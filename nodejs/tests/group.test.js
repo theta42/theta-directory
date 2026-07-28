@@ -151,6 +151,32 @@ describe('Groups — member management', () => {
 		const members = Array.isArray(group.member) ? group.member : [group.member];
 		expect(members.some(dn => dn && dn.includes(MEMBER_UID))).toBe(false);
 	});
+
+	// Regression: adding/removing a member here didn't clear User's LRU
+	// cache (ttl 5 minutes), so isServiceAccount -- derived from
+	// app_sso_service_account membership at GET /api/user/:uid time -- could
+	// stay wrong for up to 5 minutes after the group change. In production
+	// this hid a real person's account from the Users page's "People" tab
+	// (it filters out anything with isServiceAccount) for however long the
+	// stale cache entry lived, which looked exactly like the account had
+	// vanished.
+	test('PUT app_sso_service_account/:uid immediately flips isServiceAccount (no stale cache)', async () => {
+		const added = await request(app)
+			.put(`/api/group/app_sso_service_account/${MEMBER_UID}`)
+			.set('auth-token', token);
+		expect(added.status).toBe(200);
+
+		const afterAdd = await request(app).get(`/api/user/${MEMBER_UID}`).set('auth-token', token);
+		expect(afterAdd.body.results.isServiceAccount).toBeTruthy();
+
+		const removed = await request(app)
+			.delete(`/api/group/app_sso_service_account/${MEMBER_UID}`)
+			.set('auth-token', token);
+		expect(removed.status).toBe(200);
+
+		const afterRemove = await request(app).get(`/api/user/${MEMBER_UID}`).set('auth-token', token);
+		expect(afterRemove.body.results.isServiceAccount).toBeFalsy();
+	});
 });
 
 describe('Groups — owner management', () => {
