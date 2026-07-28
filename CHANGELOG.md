@@ -4,6 +4,19 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.7.0] - 2026-07-28
+
+### Fixed
+- **`formAJAX`'s loading indicator showed literal HTML** ("&lt;div class=..."), not a spinner — it passed raw markup to `app.messages.action`, which HTML-escapes its message by design. Replaced with plain text.
+- **`POST /api/user/` (create) and `PUT /api/user/password` had no `message` field** in their response, so the success notification rendered empty. Added messages matching every other route's convention.
+- **The user landing on `/login` with a `?redirect=` had no explanation why** — happens whenever another app's "Log in with SSO" bounces an unauthenticated user through `/oauth/authorize`. Now shows a contextual banner explaining what's happening.
+
+### Changed
+- **Directory: tree view is now the only view** (the list/tree toggle is gone) — simpler, one code path.
+- **Directory: clicking a resource's name opens its detail modal**, not just the pencil/edit icon.
+
+Found via a fresh production install's feedback — see the [theta-env v1.13.0 release](https://github.com/theta42/theta-env/releases) for the full cross-repo summary.
+
 ## [1.6.3] - 2026-07-28
 
 ### Fixed
