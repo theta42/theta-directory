@@ -82,8 +82,13 @@ router.put('/:group/:uid', async function(req, res, next){
 
 		var group = await Group.get(req.params.group);
 		var user = await User.get(req.params.uid);
+		const results = await group.addMember(user);
+		// Group membership feeds directly into cached-User-derived state
+		// (isServiceAccount, isAdmin, group-gated nav/UI) -- without this,
+		// a membership change here is invisible for up to the cache's TTL.
+		User.clearCache();
 		return res.json({
-			results: await group.addMember(user),
+			results,
 			message: `Added user ${req.params.uid} to ${req.params.group} group.`
 		});
 	}catch(error){
@@ -98,8 +103,10 @@ router.delete('/:group/:uid', async function(req, res, next){
 
 		var group = await Group.get(req.params.group);
 		var user = await User.get(req.params.uid);
+		const results = await group.removeMember(user);
+		User.clearCache();
 		return res.json({
-			results: await group.removeMember(user),
+			results,
 			message: `Removed user ${req.params.uid} from ${req.params.group} group.`
 		});
 	}catch(error){
