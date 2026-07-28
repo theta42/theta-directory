@@ -15,12 +15,6 @@
                           <option value="kind">Kind</option>
                           <option value="env">Environment</option>
                         </select>
-                        <div class="btn-group btn-group-sm shadow-sm" role="group">
-                          <input type="radio" class="btn-check" name="viewMode" id="view-list" value="list" autocomplete="off" checked onchange="renderTable()">
-                          <label class="btn btn-outline-secondary" for="view-list"><i class="fa-solid fa-list"></i></label>
-                          <input type="radio" class="btn-check" name="viewMode" id="view-tree" value="tree" autocomplete="off" onchange="renderTable()">
-                          <label class="btn btn-outline-secondary" for="view-tree"><i class="fa-solid fa-folder-tree"></i></label>
-                        </div>
 					    <button class="btn btn-sm btn-primary ms-1 shadow-sm" onclick="openAddModal()">
 					        <i class="fas fa-plus"></i> Add Resource
 					    </button>
@@ -49,7 +43,12 @@
                   {{{indentHtml}}}
                   <span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
                 </td>
-                <td><strong>{{name}}</strong><br><small class="text-muted">{{slug}}</small></td>
+                <td>
+                  <a href="#" class="text-reset text-decoration-none" onclick="openEditModal('{{id}}'); return false;" title="View details">
+                    <strong>{{name}}</strong>
+                  </a>
+                  <br><small class="text-muted">{{slug}}</small>
+                </td>
                 <td>
                   {{#metadata.isProduction}}<span class="badge bg-danger">Prod</span>{{/metadata.isProduction}}
                   {{^metadata.isProduction}}<span class="badge bg-info">Dev</span>{{/metadata.isProduction}}
@@ -376,8 +375,7 @@
   function renderTable() {
     const filter = $('#search-filter').val().toLowerCase();
     const sort = $('#sort-by').val();
-    const viewMode = $('input[name="viewMode"]:checked').val();
-    
+
     let filtered = rawResources.filter(r => {
       if (!filter) return true;
       return (r.name || '').toLowerCase().includes(filter) ||
@@ -402,42 +400,38 @@
 
     let finalRenderList = [];
 
-    if (viewMode === 'tree') {
-      const map = {};
-      const roots = [];
-      filtered.forEach(r => { map[r.id] = { ...r, children: [] }; });
-      
-      filtered.forEach(r => {
-        const node = map[r.id];
-        if (node.parentId && map[node.parentId]) {
-           map[node.parentId].children.push(node);
-        } else {
-           roots.push(node);
-        }
-      });
-      
-      const flatten = (nodes, depth) => {
-         nodes.forEach(n => {
-           let indentHtml = '';
-           for(let i = 0; i < depth; i++) {
-              indentHtml += '<span style="display:inline-block; width: 1.5rem;"></span>';
-           }
-           if (depth > 0) {
-              indentHtml += '<i class="fa-solid fa-turn-up fa-rotate-90 text-muted me-2"></i>';
-           }
-           n.indentHtml = indentHtml;
-           finalRenderList.push(n);
-           if (n.children.length > 0) {
-             flatten(n.children, depth + 1);
-           }
-         });
-      };
-      
-      flatten(roots, 0);
-    } else {
-      finalRenderList = filtered.map(r => ({ ...r, indentHtml: '' }));
-    }
-    
+    const map = {};
+    const roots = [];
+    filtered.forEach(r => { map[r.id] = { ...r, children: [] }; });
+
+    filtered.forEach(r => {
+      const node = map[r.id];
+      if (node.parentId && map[node.parentId]) {
+         map[node.parentId].children.push(node);
+      } else {
+         roots.push(node);
+      }
+    });
+
+    const flatten = (nodes, depth) => {
+       nodes.forEach(n => {
+         let indentHtml = '';
+         for(let i = 0; i < depth; i++) {
+            indentHtml += '<span style="display:inline-block; width: 1.5rem;"></span>';
+         }
+         if (depth > 0) {
+            indentHtml += '<i class="fa-solid fa-turn-up fa-rotate-90 text-muted me-2"></i>';
+         }
+         n.indentHtml = indentHtml;
+         finalRenderList.push(n);
+         if (n.children.length > 0) {
+           flatten(n.children, depth + 1);
+         }
+       });
+    };
+
+    flatten(roots, 0);
+
     $.scope.resources.empty();
     for (const r of finalRenderList) {
       $.scope.resources.push(r);
