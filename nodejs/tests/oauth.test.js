@@ -69,6 +69,51 @@ describe('OAuth client management API — /api/oauth/client', () => {
 		expect(res.body.results).not.toHaveProperty('client_secret_hash');
 	});
 
+	test('PUT persists — a changed name survives a fresh GET', async () => {
+		const created = await request(app)
+			.post('/api/oauth/client/')
+			.set('auth-token', token)
+			.send({ name: 'put-persist-test', redirect_uris: REDIRECT_URI });
+		expect(created.status).toBe(200);
+		const id = created.body.results.client_id;
+
+		const updated = await request(app)
+			.put(`/api/oauth/client/${id}`)
+			.set('auth-token', token)
+			.send({ name: 'put-persist-test-renamed' });
+		expect(updated.status).toBe(200);
+		expect(updated.body.results.name).toBe('put-persist-test-renamed');
+
+		const fetched = await request(app).get(`/api/oauth/client/${id}`).set('auth-token', token);
+		expect(fetched.status).toBe(200);
+		expect(fetched.body.results.name).toBe('put-persist-test-renamed');
+
+		await request(app).delete(`/api/oauth/client/${id}`).set('auth-token', token);
+	});
+
+	// Regression: this route called client.remove(), but OAuthClient wraps
+	// @simpleworkjs/orm's Resource model, whose instance method is .delete()
+	// — .remove() doesn't exist on it (unlike the model-redis Tables
+	// elsewhere in this app, e.g. api_token.js, which really do have
+	// .remove()). The route's try/catch turned the resulting TypeError into
+	// a plain 500 JSON response rather than a thrown exception, so every
+	// prior DELETE call in this file's cleanup hooks silently "succeeded"
+	// from Jest's point of view while leaving the client un-deleted.
+	test('DELETE persists — the client is actually gone, not just a 200', async () => {
+		const created = await request(app)
+			.post('/api/oauth/client/')
+			.set('auth-token', token)
+			.send({ name: 'delete-persist-test', redirect_uris: REDIRECT_URI });
+		expect(created.status).toBe(200);
+		const id = created.body.results.client_id;
+
+		const deleted = await request(app).delete(`/api/oauth/client/${id}`).set('auth-token', token);
+		expect(deleted.status).toBe(200);
+
+		const fetched = await request(app).get(`/api/oauth/client/${id}`).set('auth-token', token);
+		expect(fetched.status).toBe(404);
+	});
+
 	test('list then rotate a client by its returned client_id (the bootstrap path)', async () => {
 		// Reproduces exactly what the theta-env bootstrap does: create, list,
 		// find by name, rotate by the client_id from the list response. Uses a
@@ -90,7 +135,11 @@ describe('OAuth client management API — /api/oauth/client', () => {
 		expect(rotated.status).toBe(200);
 		expect(rotated.body.client_secret).toBeTruthy();
 
-		await request(app).delete(`/api/oauth/client/${found.client_id}`).set('auth-token', token);
+		const deleted = await request(app).delete(`/api/oauth/client/${found.client_id}`).set('auth-token', token);
+		expect(deleted.status).toBe(200);
+
+		const afterDelete = await request(app).get(`/api/oauth/client/${found.client_id}`).set('auth-token', token);
+		expect(afterDelete.status).toBe(404);
 	});
 
 	test('GET /:id unknown id returns 404, not 500', async () => {

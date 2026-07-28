@@ -97,7 +97,7 @@ router.delete('/:client_id', async function(req, res, next) {
 		await permission.byGroup(req.user, [ADMIN_GROUP]);
 
 		const client = await OAuthClient.get(req.params.client_id);
-		await client.remove();
+		await client.delete();
 
 		return res.json({
 			client_id: req.params.client_id,
