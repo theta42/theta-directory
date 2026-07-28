@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.6.2] - 2026-07-28
+
+### Fixed
+- **`DELETE /api/oauth/client/:id` 500'd** (`client.remove is not a function`) — `OAuthClient` wraps `@simpleworkjs/orm`'s `Resource` model, whose instance delete method is `.delete()`, not `.remove()`. The Directory Management UI was unaffected (its own delete routes already used `.delete()` correctly); only this legacy/raw API endpoint was broken. Found live against a real deployment's SSO API.
+
+### Added
+- **Regression tests**: PUT/DELETE on `/api/oauth/client/:id` now verify persistence with a follow-up GET rather than trusting the mutating response alone (this is what would have caught the bug above). A static check across all views/client-side scripts fails CI if any native `alert()`/`confirm()`/`prompt()` call appears — these block all further browser events on the page and were fully removed in 1.6.1.
+
 ## [1.6.1] - 2026-07-27
 
 ### Fixed
