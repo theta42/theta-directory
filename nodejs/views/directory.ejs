@@ -756,11 +756,19 @@
         res = await app.api.post('directory-admin/resources', data);
       }
       
-      app.modal.close();
       await loadResources();
 
       if (!id && data.kind === 'oauth' && res.results && res.results._raw_secret) {
+        // Deliberately no app.modal.close() before this -- app.modal is a
+        // singleton, and close() immediately followed by open() in the same
+        // tick collides with Bootstrap's hide-transition guard (show()
+        // silently no-ops while _isTransitioning is still true from the
+        // just-started hide()). open() alone already overwrites the
+        // (already-visible) modal's content in place. The await above made
+        // this race unlikely to lose in practice, but not guaranteed to.
         app.modal.open({title: 'OAuth Secret', bodyHtml: 'Save this client secret, it will not be shown again: <br><br><code>' + res.results._raw_secret + '</code>'});
+      } else {
+        app.modal.close();
       }
     } catch (err) {
       console.error(err);
