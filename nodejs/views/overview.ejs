@@ -1,7 +1,7 @@
 <%- include('top') %>
 
 <script type="text/javascript">
-	app.auth.forceLogin('app_sso_admin');
+	app.auth.forceLogin(['app_sso_admin', 'admin']);
 
 	// ── Overview (stats, recent signups, inactive users) ────────────────────
 	async function loadDashboard() {
@@ -46,7 +46,7 @@
 
 	async function loadMetrics() {
 		try {
-			const data = await app.api.get('metrics/executive');
+			const data = await app.api.get('metrics/overview');
 			if (data && data.results) {
 				const renderList = (items, id) => {
 					const el = document.getElementById(id);
@@ -213,7 +213,7 @@
 <div class="container mt-4">
 	<div class="row mb-3">
 		<div class="col-12">
-			<h4 class="mb-0"><i class="fa-solid fa-gauge-high"></i> Executive Dashboard</h4>
+			<h4 class="mb-0"><i class="fa-solid fa-gauge-high"></i> Overview</h4>
 		</div>
 	</div>
 

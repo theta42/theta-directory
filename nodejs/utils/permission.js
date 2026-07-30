@@ -2,7 +2,16 @@
 
 const {Group} = require('../models/group_ldap');
 
+const SUPER_ADMIN_GROUP = 'app_super_admin';
+
 let byGroup = async function(user, groups, ownerOf){
+	try{
+		let superAdmin = await Group.get(SUPER_ADMIN_GROUP);
+		if(superAdmin.member.includes(user.dn)) return true
+	}catch(error){
+		// group not found, continue checking
+	}
+
 	for(let group of groups){
 		try{
 			group = await Group.get(group);
@@ -28,4 +37,4 @@ let byGroup = async function(user, groups, ownerOf){
 	throw error;
 }
 
-module.exports = {byGroup};
+module.exports = {byGroup, SUPER_ADMIN_GROUP};

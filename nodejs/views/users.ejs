@@ -223,7 +223,7 @@
 	}
 
 	(async function(){
-		await app.auth.forceLogin('app_sso_admin');
+		await app.auth.forceLogin(['app_sso_admin', 'admin']);
 
 		$(document).ready(function(){
 			renderUsers();
