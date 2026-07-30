@@ -64,9 +64,7 @@
 		$.scope.groupCard.update('cn', group, processGroup(data.results));
 		app.messages.action(message, $("#group-card-"+group), 'success');
 		$('a[href="#'+$form.closest('.tab-pane').attr('id')+'"]').tab('show');
-		setTimeout(function(group){
-			$("body,html").animate({ scrollTop: $("#group-card-" + group).offset().top }, 0);
-		}, 400, group);
+		setTimeout(function(){ app.util.revealItem($("#group-card-" + group)); }, 400);
 	}
 
 	function applySort() {
@@ -91,10 +89,11 @@
 		$('#groupCount').text(groups.length + ' of ' + allGroups.length + ' group' + (allGroups.length !== 1 ? 's' : ''));
 	}
 
-	async function tableAJAX() {
+	async function tableAJAX(revealCn) {
 		let data = await app.group.list();
 		allGroups = data.results.map(processGroup);
 		applyFilters();
+		if (revealCn) setTimeout(function(){ app.util.revealItem($('#group-card-' + revealCn)); }, 100);
 	}
 
 	async function removeMember(groupCN, uid, btn) {
@@ -150,7 +149,7 @@
 </script>
 <div class="container mt-4">
 	
-	<div class="d-flex flex-wrap gap-2 align-items-center">
+	<div class="d-flex flex-wrap gap-2 align-items-center sticky-top bg-body py-2" style="top: var(--sw-content-offset, 0);">
 		<div class="input-group" style="flex: 1 1 200px;">
 			<span class="input-group-text"><i class="fa-solid fa-magnifying-glass"></i></span>
 			<input type="text" id="groupSearch" class="form-control" placeholder="Search groups…" oninput="applyFilters()">
@@ -173,7 +172,7 @@
 				</div>
 				<div class="card-header actionMessage" style="display:none"></div>
 				<div class="card-body">
-					<form action="group/" method="post" onsubmit="formAJAX(this)" evalAJAX="tableAJAX('')">
+					<form action="group/" method="post" onsubmit="formAJAX(this)" evalAJAX="tableAJAX(data.results.cn)">
 						<div class="mb-3">
 							<label class="form-label">Name</label>
 							<input type="text" class="form-control shadow" name="name" placeholder="app_gitea_admin" validate=":3" />
