@@ -78,11 +78,12 @@ router.get('/me', async function(req, res, next){
 
 		// The shared client framework gates the UI on a single effective-rights
 		// flag (the OIDC-client apps send the same key). Here "admin" means
-		// membership in app_sso_admin; group-level gating still reads memberOf.
+		// membership in app_sso_admin or the cross-app app_super_admin group;
+		// group-level gating still reads memberOf.
 		const groups = (user.memberOf || []).map(function(dn){
 			return String(dn).split(',')[0].replace(/^cn=/i, '');
 		});
-		user.isAdmin = groups.includes('app_sso_admin');
+		user.isAdmin = groups.includes('app_sso_admin') || groups.includes(permission.SUPER_ADMIN_GROUP);
 
 		return res.json(user);
 	}catch(error){

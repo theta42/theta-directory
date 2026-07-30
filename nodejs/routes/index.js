@@ -48,13 +48,14 @@ router.get('/tos', async function(req, res, next) {
 
 // Admin dashboard (stats + recent/inactive users) and Notifications
 // (broadcast + history) merged into one page.
-router.get('/executive', function(req, res) {
-  res.render('executive', {...values});
+router.get('/overview', function(req, res) {
+  res.render('overview', {...values});
 });
 
-router.get('/admin', (req, res) => res.redirect(301, '/executive'));
-router.get('/notifications', (req, res) => res.redirect(301, '/executive'));
-router.get('/dashboard', (req, res) => res.redirect(301, '/executive'));
+router.get('/admin', (req, res) => res.redirect(301, '/overview'));
+router.get('/notifications', (req, res) => res.redirect(301, '/overview'));
+router.get('/dashboard', (req, res) => res.redirect(301, '/overview'));
+router.get('/executive', (req, res) => res.redirect(301, '/overview'));
 
 router.get('/directory', function(req, res) {
   res.render('directory', {...values});

@@ -3,8 +3,8 @@ const router = require('express').Router();
 const permission = require('../utils/permission');
 const metrics = require('../utils/metrics');
 
-// /api/metrics/executive
-router.get('/executive', async (req, res, next) => {
+// /api/metrics/overview
+router.get('/overview', async (req, res, next) => {
     try {
         await permission.byGroup(req.user, ['app_sso_admin']);
         

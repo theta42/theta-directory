@@ -22,7 +22,7 @@ one command).
 
 ## Screenshots
 
-<a href="images/dashboard.png" target="_blank"><img src="images/dashboard.png" alt="Executive dashboard" width="49%"></a>
+<a href="images/dashboard.png" target="_blank"><img src="images/dashboard.png" alt="Overview dashboard" width="49%"></a>
 <a href="images/users.png" target="_blank"><img src="images/users.png" alt="User list" width="49%"></a>
 <a href="images/groups.png" target="_blank"><img src="images/groups.png" alt="Groups" width="49%"></a>
 <a href="images/directory.png" target="_blank"><img src="images/directory.png" alt="Directory & inventory" width="49%"></a>

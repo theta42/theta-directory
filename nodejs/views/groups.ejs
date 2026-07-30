@@ -140,7 +140,7 @@
 		}
 	}
 
-	app.auth.forceLogin('app_sso_admin');
+	app.auth.forceLogin(['app_sso_admin', 'admin']);
 
 	$(document).ready(async function(){
 		userlist = (await app.user.list()).results;
