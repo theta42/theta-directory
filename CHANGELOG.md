@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.10.0] - 2026-07-30
+
+### Added
+- **`app_super_admin` cross-app group**: members are full admins here regardless of `app_sso_admin` membership. Bypassed centrally in `utils/permission.js`'s `byGroup`, folded into `GET /api/user/me`'s `isAdmin` flag, and added to nav/`forceLogin` gates. The same group is now also recognized by proxy and jump-host, and by `ldap-client`'s SSSD access filter (SSH login on every host).
+
+### Changed
+- **Renamed the Executive page to Overview** (route, view, `/api/metrics/overview`, nav label, docs). `/executive` kept as a 301 redirect alongside the existing `/admin`, `/notifications`, `/dashboard` legacy redirects.
+
 ## [1.9.0] - 2026-07-28
 
 ### Added
