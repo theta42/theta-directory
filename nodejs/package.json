@@ -26,7 +26,7 @@
     "@simpleworkjs/app-stack": "^1.0.0",
     "@simpleworkjs/conf": "^1.2.0",
     "@simpleworkjs/directory-schema": "^1.0.0",
-    "@simpleworkjs/frontend": "^0.2.6",
+    "@simpleworkjs/frontend": "^0.2.7",
     "@simpleworkjs/ldap": "^1.0.0",
     "@simpleworkjs/orm": "^0.2.8",
     "bcrypt": "^6.0.0",

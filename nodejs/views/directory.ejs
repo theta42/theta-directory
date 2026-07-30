@@ -29,31 +29,25 @@
 				<table class="card-body table table-striped mb-0">
             <thead>
               <tr>
-                <th class="ps-3">Kind</th>
-                <th>Name</th>
-                <th>Env</th>
-                <th>Host</th>
+                <th class="ps-3">Resource</th>
                 <th>IP / Address</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody id="resources-list" jq-repeat="resources">
-              <tr>
-                <td class="ps-3 text-nowrap">
+              <tr id="resource-row-{{id}}">
+                <td class="ps-3">
                   {{{indentHtml}}}
                   <span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
-                </td>
-                <td>
+                  {{#metadata.isProduction}}<span class="badge bg-danger">Prod</span>{{/metadata.isProduction}}
+                  {{^metadata.isProduction}}<span class="badge bg-info">Dev</span>{{/metadata.isProduction}}
+                  <span class="badge bg-light text-dark border">{{hostName}}</span>
+                  <br>
                   <a href="#" class="text-reset text-decoration-none" onclick="openEditModal('{{id}}'); return false;" title="View details">
                     <strong>{{name}}</strong>
                   </a>
-                  <br><small class="text-muted">{{slug}}</small>
+                  <small class="text-muted">{{slug}}</small>
                 </td>
-                <td>
-                  {{#metadata.isProduction}}<span class="badge bg-danger">Prod</span>{{/metadata.isProduction}}
-                  {{^metadata.isProduction}}<span class="badge bg-info">Dev</span>{{/metadata.isProduction}}
-                </td>
-                <td><span class="badge bg-light text-dark border">{{hostName}}</span></td>
                 <td>
                   {{#metadata.ip}}<div><small>IP:</small> {{metadata.ip}}</div>{{/metadata.ip}}
                   {{#metadata.address}}<div><small>URL:</small> {{metadata.address}}</div>{{/metadata.address}}
@@ -259,7 +253,8 @@
   `;
 
   var groupsTabHtml = `
-    <div class="mb-3">
+    <div class="mb-3" id="groups-tab-container">
+      <div class="actionMessage" style="display:none"></div>
       <ul class="list-group mb-2 shadow-sm" id="groups-list"></ul>
       <div class="input-group shadow-sm mt-2">
         <input type="text" class="form-control" id="new-group-cn" placeholder="Group CN (e.g. app_emby_users)" list="ldap-groups-datalist">
@@ -606,7 +601,94 @@
   // destroyed and recreated runs asynchronously -- populating it
   // synchronously right after open() (as this function is called) would race
   // that and silently lose the pushed data on the second and later opens.
-  function refreshGroupsUI(resourceId) {
+  // uid from a member/owner DN, e.g. "cn=jdoe,ou=people,..." -> "jdoe".
+  function uidFromDn(dn) {
+    const m = dn.match(/cn=[a-zA-Z0-9_\-@.]+/);
+    return m ? m[0].replace('cn=', '') : dn;
+  }
+
+  var directoryUserCache = null;
+  async function loadDirectoryUsers() {
+    if (!directoryUserCache) {
+      const data = await app.user.list();
+      directoryUserCache = data.results;
+    }
+    return directoryUserCache;
+  }
+
+  // Renders one associated group's member/owner management block: a
+  // collapsible member list (remove button per member) plus an "add member"
+  // dropdown of users not already in the group. Fetches the live LDAP group
+  // detail (member/owner DN arrays) rather than relying on `allGroups`, which
+  // only holds the resource<->group association record, not membership.
+  async function renderGroupMembership(g, resourceId) {
+    const $li = $('<li class="list-group-item"></li>');
+    const $head = $('<div class="d-flex justify-content-between align-items-center"></div>');
+    const $span = $('<span></span>');
+    $span.append('<i class="fa-solid fa-users text-muted me-2"></i>');
+    $('<strong></strong>').text(g.groupCn).appendTo($span);
+    $('<span class="badge bg-primary ms-2"></span>').text(g.accessLevel).appendTo($span);
+    $head.append($span);
+
+    const collapseId = 'group-members-' + g.id;
+    const $actions = $('<span></span>');
+    $('<button type="button" class="btn btn-sm btn-outline-secondary me-1" data-bs-toggle="collapse"><i class="fa-solid fa-user-group"></i> Members</button>')
+      .attr('data-bs-target', '#' + collapseId)
+      .appendTo($actions);
+    $('<button type="button" class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-xmark"></i></button>')
+      .on('click', function(){ removeGroup(g.id); })
+      .appendTo($actions);
+    $head.append($actions);
+    $li.append($head);
+
+    const $collapse = $('<div class="collapse mt-2"></div>').attr('id', collapseId);
+    $li.append($collapse);
+
+    let detail, userlist;
+    try {
+      [detail, userlist] = await Promise.all([
+        app.group.get(g.groupCn).then(d => d.results),
+        loadDirectoryUsers(),
+      ]);
+    } catch (err) {
+      console.error(err);
+      $collapse.append('<p class="text-danger small mb-0">Failed to load group membership.</p>');
+      return $li;
+    }
+
+    const memberDns = Array.isArray(detail.member) ? detail.member : (detail.member ? [detail.member] : []);
+    const $memberList = $('<ul class="list-group list-group-flush mb-2"></ul>');
+    if (!memberDns.length) {
+      $memberList.append('<li class="list-group-item text-muted px-0">No members.</li>');
+    }
+    for (const dn of memberDns) {
+      const uid = uidFromDn(dn);
+      const $mLi = $('<li class="list-group-item d-flex justify-content-between align-items-center px-0"></li>');
+      $('<span></span>').append('<i class="fa-solid fa-user me-1"></i>').append(document.createTextNode(uid)).appendTo($mLi);
+      $('<button type="button" class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-user-slash"></i></button>')
+        .on('click', function(){ removeResourceGroupMember(g.groupCn, uid, resourceId); })
+        .appendTo($mLi);
+      $memberList.append($mLi);
+    }
+    $collapse.append($memberList);
+
+    const toAdd = userlist.filter(function(u){ return !memberDns.includes(u.dn); });
+    const $dropdown = $('<div class="dropdown"></div>');
+    $('<button type="button" class="btn btn-sm btn-secondary dropdown-toggle" data-bs-toggle="dropdown"><i class="fa-solid fa-user-plus"></i> Add member</button>')
+      .appendTo($dropdown);
+    const $menu = $('<div class="dropdown-menu shadow-lg" style="max-height: 240px; overflow-y: auto;"></div>');
+    for (const u of toAdd) {
+      $('<a class="dropdown-item" href="#"></a>').text(u.uid)
+        .on('click', function(e){ e.preventDefault(); addResourceGroupMember(g.groupCn, u.uid, resourceId); })
+        .appendTo($menu);
+    }
+    $dropdown.append($menu);
+    $collapse.append($dropdown);
+
+    return $li;
+  }
+
+  async function refreshGroupsUI(resourceId) {
     const myGroups = allGroups.filter(g => g.resourceId === resourceId);
     const $list = $('#groups-list').empty();
     if (!myGroups.length) {
@@ -614,16 +696,30 @@
       return;
     }
     for (const g of myGroups) {
-      const $li = $('<li class="list-group-item d-flex justify-content-between align-items-center"></li>');
-      const $span = $('<span></span>');
-      $span.append('<i class="fa-solid fa-users text-muted me-2"></i>');
-      $('<strong></strong>').text(g.groupCn).appendTo($span);
-      $('<span class="badge bg-primary ms-2"></span>').text(g.accessLevel).appendTo($span);
-      $li.append($span);
-      $('<button class="btn btn-sm btn-outline-danger"><i class="fa-solid fa-xmark"></i></button>')
-        .on('click', function(){ removeGroup(g.id); })
-        .appendTo($li);
-      $list.append($li);
+      $list.append(await renderGroupMembership(g, resourceId));
+    }
+  }
+
+  async function addResourceGroupMember(groupCn, uid, resourceId) {
+    try {
+      const data = await app.api.put('group/' + groupCn + '/' + uid, {});
+      await refreshGroupsUI(resourceId);
+      app.messages.action(data.message, $('#groups-tab-container'), 'success');
+      app.util.revealItem($('#groups-list'));
+    } catch (err) {
+      app.messages.action((err && err.message) || 'Failed to add member', $('#groups-tab-container'), 'danger');
+    }
+  }
+
+  async function removeResourceGroupMember(groupCn, uid, resourceId) {
+    const confirmed = await app.messages.confirm('Remove "' + uid + '" from "' + groupCn + '"?', $('#groups-tab-container'), 'warning');
+    if (!confirmed) return;
+    try {
+      const data = await app.api.delete('group/' + groupCn + '/' + uid);
+      await refreshGroupsUI(resourceId);
+      app.messages.action(data.message, $('#groups-tab-container'), 'success');
+    } catch (err) {
+      app.messages.action((err && err.message) || 'Failed to remove member', $('#groups-tab-container'), 'danger');
     }
   }
 
@@ -757,6 +853,8 @@
       }
       
       await loadResources();
+      const savedId = id || (res.results && res.results.id);
+      if (savedId) setTimeout(function(){ app.util.revealItem($('#resource-row-' + savedId)); }, 400);
 
       if (!id && data.kind === 'oauth' && res.results && res.results._raw_secret) {
         // Deliberately no app.modal.close() before this -- app.modal is a
