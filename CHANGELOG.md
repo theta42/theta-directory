@@ -4,6 +4,17 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.9.0] - 2026-07-28
+
+### Added
+- **Directory modal's Associated LDAP Groups tab now supports full membership management**: view, add, and remove members/owners of each associated group directly from the tab, reusing the same `PUT`/`DELETE group/:group/:uid` routes and member-mapping pattern already used on the Groups page.
+- **`app.util.revealItem()`** (in the shared `app-base.js`, byte-identical across the 3 apps): scrolls a just-added/-edited element into view and flashes its background. Wired into the Directory table, the Groups tab's member list, and the Groups page's create-group flow.
+
+### Changed
+- **Groups page's search/sort bar is now sticky**, staying visible while scrolling through a long group list. Introduces `--sw-content-offset` (set in `top.ejs` alongside `#spa-shell`'s margin-top) so an in-page sticky element can offset itself below the fixed navbar/update-banner instead of being hidden behind them.
+- **Directory table**: Kind/Name/Env/Host merged into a single "Resource" column.
+- `@simpleworkjs/frontend` bumped to `^0.2.7`.
+
 ## [1.8.3] - 2026-07-28
 
 ### Changed
