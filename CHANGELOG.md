@@ -4,6 +4,14 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [Unreleased]
+
+### Changed
+- **Catalog page (`/`) redesigned**: Removed the portal banner; "My Access" section now has tabs separating Services and Hosts; icons support both Font Awesome classes and image URLs (http/https).
+
+### Fixed
+- **Profile page redesigned as a single card with tabs**: Password reset is now a modal button; "My groups", "My Services", "Security & Usage Stats", and "Members of X's group" are now tabs on the main profile card instead of separate cards; metrics display fixed to properly load and show service usage data.
+
 ## [1.11.0] - 2026-07-31
 
 Closes the end-user half of the directory. The admin side could describe the lab; the user side could not tell anyone what they had or how to use it, and several of the paths meant to do so were silently returning nothing.
