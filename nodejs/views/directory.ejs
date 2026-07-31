@@ -49,12 +49,9 @@
                   <span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
                   {{#metadata.isProduction}}<span class="badge bg-danger">Prod</span>{{/metadata.isProduction}}
                   {{^metadata.isProduction}}<span class="badge bg-info">Dev</span>{{/metadata.isProduction}}
-                  <span class="badge bg-light text-dark border">{{hostName}}</span>
-                  <br>
-                  <a href="#" class="text-reset text-decoration-none" onclick="openEditModal('{{id}}'); return false;" title="View details">
+                  <a href="#" class="text-reset text-decoration-none ms-2" onclick="openEditModal('{{id}}'); return false;" title="View details">
                     <strong>{{name}}</strong>
                   </a>
-                  <small class="text-muted">{{slug}}</small>
                 </td>
                 <td>
                   {{#metadata.ip}}<div><small>IP:</small> {{metadata.ip}}</div>{{/metadata.ip}}

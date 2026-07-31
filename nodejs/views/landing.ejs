@@ -1,15 +1,6 @@
 <%- include('top') %>
 
 <style>
-.portal-banner {
-    background-color: var(--bs-primary);
-    color: white;
-    padding: 2.5rem 1rem;
-    margin-bottom: 2rem;
-    border-radius: .5rem;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-}
-.portal-banner h1 { font-weight: 700; }
 .catalog-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
@@ -23,7 +14,19 @@
 }
 .service-card:hover { transform: translateY(-3px); box-shadow: 0 .5rem 1rem rgba(0,0,0,.15)!important; }
 .service-card .card-body { flex: 1; }
-.card-icon { font-size: 1.4rem; width: 1.8rem; text-align: center; }
+.card-icon {
+    font-size: 1.4rem;
+    width: 1.8rem;
+    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+.card-icon-img {
+    width: 1.8rem;
+    height: 1.8rem;
+    object-fit: contain;
+}
 .howto code {
     display: block;
     background: var(--bs-tertiary-bg, #f1f3f5);
@@ -37,12 +40,6 @@
 </style>
 
 <div class="container mt-4">
-    <div class="portal-banner text-center">
-        <h1><%- name %> Portal</h1>
-        <p class="lead mb-3">Everything the lab offers — what you can reach, and how to reach it.</p>
-        <a href="/profile" class="btn btn-light shadow-sm"><i class="fa-solid fa-user"></i> My Profile</a>
-    </div>
-
     <div class="row mb-4">
         <div class="col-md-8">
             <input type="text" id="catalog-search" class="form-control shadow-sm"
@@ -68,8 +65,36 @@
         <ul class="list-group mb-5 shadow-sm" id="approvals"></ul>
     </div>
 
-    <h3 class="mb-3"><i class="fa-solid fa-layer-group text-success"></i> My Access</h3>
-    <div class="catalog-grid mb-5" id="my-services"></div>
+    <!-- My Access section with tabs -->
+    <div class="card shadow mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span><i class="fa-solid fa-layer-group text-success"></i> My Access</span>
+        </div>
+        <div class="px-3 pt-3 border-bottom">
+            <ul class="nav nav-tabs border-bottom-0" role="tablist">
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#my-services-tab" type="button" role="tab">
+                        <i class="fa-solid fa-cube"></i> Services
+                    </button>
+                </li>
+                <li class="nav-item" role="presentation">
+                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#my-hosts-tab" type="button" role="tab">
+                        <i class="fa-solid fa-server"></i> Hosts
+                    </button>
+                </li>
+            </ul>
+        </div>
+        <div class="card-body">
+            <div class="tab-content">
+                <div class="tab-pane fade show active" id="my-services-tab" role="tabpanel">
+                    <div class="catalog-grid" id="my-services"></div>
+                </div>
+                <div class="tab-pane fade" id="my-hosts-tab" role="tabpanel">
+                    <div class="catalog-grid" id="my-hosts"></div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <h3 class="mb-3"><i class="fa-solid fa-compass text-secondary"></i> Discover More</h3>
     <p class="text-muted small">Things you don't have access to yet. Request what you need.</p>
@@ -97,6 +122,17 @@
         return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
             return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
         });
+    }
+
+    // Render icon as either Font Awesome class or <img> for URL
+    function renderIcon(icon, kind) {
+        if (!icon) icon = KIND_ICONS[kind] || 'fa-solid fa-cube';
+        // If it starts with http, treat it as an image URL
+        if (/^https?:\/\//i.test(icon)) {
+            return '<img src="' + esc(icon) + '" alt="" class="card-icon-img">';
+        }
+        // Otherwise it's a Font Awesome class
+        return '<i class="' + esc(icon) + ' card-icon"></i>';
     }
 
     // "How do I actually use this?" — the question the directory exists to
@@ -142,7 +178,6 @@
 
     function cardHtml(r, accessible) {
         var md = r.metadata || {};
-        var icon = md.icon || KIND_ICONS[r.kind] || 'fa-solid fa-cube';
         var blurb = md.tagline || r.description || 'No description provided';
         var href = accessible ? linkFor(r) : null;
         var lines = accessible ? howTo(r) : [];
@@ -166,10 +201,12 @@
                    + '<i class="fa-solid fa-hand"></i> Request access</button>';
         }
 
+        var iconHtml = renderIcon(md.icon, r.kind);
+
         return '<div class="card shadow-sm service-card ' + (accessible ? 'border-success' : '') + '">'
             + '<div class="card-body">'
             +   '<h5 class="card-title d-flex align-items-start gap-2">'
-            +     '<i class="' + esc(icon) + ' card-icon ' + (accessible ? 'text-success' : 'text-secondary') + '"></i>'
+            +     iconHtml
             +     '<span>' + esc(r.name) + '</span>'
             +   '</h5>'
             +   '<div class="mb-2"><span class="badge bg-secondary">' + esc(r.kind)
@@ -235,7 +272,12 @@
     }
 
     function renderAll() {
-        renderGrid('my-services', state.mine, true);
+        // Split mine into services and hosts
+        var myServices = state.mine.filter(function(r) { return r.kind === 'service' || r.kind === 'oauth'; });
+        var myHosts = state.mine.filter(function(r) { return r.kind === 'host'; });
+
+        renderGrid('my-services', myServices, true);
+        renderGrid('my-hosts', myHosts, true);
         renderGrid('other-services', state.others, false);
         renderRequests();
         renderApprovals();
