@@ -76,10 +76,21 @@ fi
 # ── Locate the OpenLDAP module directory ────────────────────────────────────
 # slapd.conf needs `modulepath` to find pw-sha2/ppolicy/memberof/refint. The
 # path varies by distro; auto-detect rather than hardcode.
+# /opt/openldap/libexec/openldap is first: that is the from-source build (see
+# Dockerfile.openldap), which is the only one carrying the nestgroup overlay.
 MODULE_PATH=""
-for p in /usr/lib/openldap /usr/lib/ldap /usr/local/lib/openldap /opt/local/lib/openldap; do
+for p in /opt/openldap/libexec/openldap /usr/lib/openldap /usr/lib/ldap /usr/local/lib/openldap /opt/local/lib/openldap; do
     if [[ -d "$p" ]]; then MODULE_PATH="$p"; break; fi
 done
+
+# Nested-group support is only available when slapd was built with the
+# nestgroup overlay. Detect rather than assume, so this entrypoint still
+# produces a working slapd.conf against a distro OpenLDAP (where the app falls
+# back to resolving nesting itself -- see nodejs/models/group_ldap.js).
+NESTGROUP_AVAILABLE=0
+if [[ -n "$MODULE_PATH" && -f "$MODULE_PATH/nestgroup.so" ]]; then
+    NESTGROUP_AVAILABLE=1
+fi
 
 # ── TLS certificate for LDAPS / StartTLS ────────────────────────────────────
 # Legacy apps (e.g. the theta42/proxy, Gitea, Emby) bind to LDAP directly over the
@@ -140,6 +151,7 @@ moduleload      ppolicy
 moduleload      memberof
 moduleload      refint
 moduleload      auditlog
+NESTGROUP_MODULE_PLACEHOLDER
 SYNCPROV_MODULE_PLACEHOLDER
 
 # TLS (LDAPS on 636 + StartTLS on 389). Cert/key paths are fixed; the files are
@@ -188,6 +200,8 @@ memberof-memberof-ad memberOf
 overlay         refint
 refint_attributes memberOf member manager owner
 
+NESTGROUP_OVERLAY_PLACEHOLDER
+
 # auditlog overlay (LDIF audit trail of all changes)
 overlay         auditlog
 auditlog        /var/lib/ldap/auditlog.ldif
@@ -219,6 +233,37 @@ if [[ -n "$MODULE_PATH" ]]; then
     sed -i "s|^SLAPMODULEPATH$|modulepath      ${MODULE_PATH}|" /etc/openldap/slapd.conf
 else
     sed -i "/^SLAPMODULEPATH$/d" /etc/openldap/slapd.conf
+fi
+
+# ── Nested groups (nestgroup overlay) ──
+# Three of the four flags, deliberately:
+#
+#   member-filter     (member=X) finds parent groups transitively. This is what
+#                     Group.list(dn) rides on -- the core access question.
+#   memberof-filter   (memberOf=X) matches members of nested groups. This is
+#                     what SSSD's ldap_access_filter uses, so SSH/sudo inherit
+#                     nesting without any client-side walking.
+#   memberof-values   expands memberOf when reading a user, so anything that
+#                     reads the attribute rather than searching still sees the
+#                     full picture.
+#
+# member-values is deliberately NOT enabled. It expands the `member` attribute
+# when reading a *group*, which sounds symmetric but destroys the distinction
+# between "listed on this group" and "reachable through a nested one" -- and
+# that distinction is not recoverable afterwards, because the raw values are
+# simply not returned. The Groups UI needs it to show nested groups as nested
+# rather than as a crowd of phantom users, and un-nesting needs it to know what
+# it is actually removing. Transitive *answers* come from the filter flags and
+# from Group.effectiveMembers(), which computes the closure explicitly.
+if [[ "$NESTGROUP_AVAILABLE" == "1" ]]; then
+    info "nestgroup overlay available — nested groups resolved server-side"
+    sed -i "s|^NESTGROUP_MODULE_PLACEHOLDER$|moduleload      nestgroup|" /etc/openldap/slapd.conf
+    NESTGROUP_BLOCK="# nestgroup overlay (server-side nested group evaluation)\noverlay         nestgroup\nnestgroup-base  ou=groups,${LDAP_BASE_DN}\nnestgroup-flags member-filter memberof-filter memberof-values"
+    sed -i "s|^NESTGROUP_OVERLAY_PLACEHOLDER$|${NESTGROUP_BLOCK}|" /etc/openldap/slapd.conf
+else
+    info "nestgroup overlay not present in ${MODULE_PATH:-<no module path>} — nested groups will be resolved by the app instead"
+    sed -i "/^NESTGROUP_MODULE_PLACEHOLDER$/d" /etc/openldap/slapd.conf
+    sed -i "/^NESTGROUP_OVERLAY_PLACEHOLDER$/d" /etc/openldap/slapd.conf
 fi
 
 # ── Multi-Master Replication Configuration ──
@@ -310,7 +355,7 @@ EOF
     # Required SSO groups. The app gates admin/invite/oauth-admin on these;
     # app_sso_service_account is a marker (not a permission gate) for
     # non-person accounts -- see the Users page.
-    for group in app_sso_admin app_sso_invite app_sso_oauth_admin app_sso_service_account; do
+    for group in app_super_admin app_sso_admin app_sso_invite app_sso_oauth_admin app_sso_service_account; do
         ldapadd -x -D "$LDAP_BIND_DN" -w "$LDAP_ADMIN_PASS" -H ldap://localhost:389 << EOF || true
 dn: cn=${group},ou=groups,${LDAP_BASE_DN}
 objectClass: groupOfNames
@@ -320,6 +365,27 @@ description: ${ORG_NAME} ${group} group
 member: ${LDAP_BIND_DN}
 EOF
     done
+
+    # Nest app_super_admin into the SSO admin groups, so cross-app super admins
+    # hold those rights by membership rather than by a special case in app code.
+    # This is what makes the privilege visible to every consumer -- SSSD, sudo,
+    # anything binding LDAP directly -- instead of only to callers that happen
+    # to route through utils/permission.js.
+    #
+    # app_sso_service_account is deliberately excluded: it is a marker for
+    # non-person accounts, not a permission, and nesting admins into it would
+    # misclassify them as service accounts on the Users page.
+    if [[ "$NESTGROUP_AVAILABLE" == "1" ]]; then
+        for group in app_sso_admin app_sso_invite app_sso_oauth_admin; do
+            ldapmodify -x -D "$LDAP_BIND_DN" -w "$LDAP_ADMIN_PASS" -H ldap://localhost:389 >/dev/null 2>&1 << EOF || true
+dn: cn=${group},ou=groups,${LDAP_BASE_DN}
+changetype: modify
+add: member
+member: cn=app_super_admin,ou=groups,${LDAP_BASE_DN}
+EOF
+        done
+        info "Nested app_super_admin into the SSO admin groups"
+    fi
 
     info "LDAP directory initialized"
 else
@@ -380,6 +446,14 @@ if [[ "${SECRETS_JS_MODE:-0}" != 1 ]]; then
     export app_ldap__bindPassword="${app_ldap__bindPassword:-$LDAP_ADMIN_PASS}"
     export app_ldap__userBase="${app_ldap__userBase:-ou=people,${LDAP_BASE_DN}}"
     export app_ldap__groupBase="${app_ldap__groupBase:-ou=groups,${LDAP_BASE_DN}}"
+    # Tell the app whether slapd resolves nested groups for it. When true the app
+    # trusts a plain (member=) search to be transitive; when false it computes
+    # the closure itself. Getting this wrong in the "true" direction silently
+    # under-grants, so it is derived from the same nestgroup.so probe that
+    # decides whether the overlay is configured at all -- never hardcoded.
+    if [[ "$NESTGROUP_AVAILABLE" == "1" ]]; then
+        export app_ldap__nestedGroupsServerSide="${app_ldap__nestedGroupsServerSide:-true}"
+    fi
     export app_oauth__jwtSecret="${app_oauth__jwtSecret:-$JWT_SECRET}"
     # OIDC issuer advertised in /.well-known/openid-configuration. Default to the
     # public https URL on the SSO subdomain of the LDAP domain; override with

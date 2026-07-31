@@ -4,9 +4,38 @@
 	var userlist;
 	var allGroups = [];
 
+	// A member DN under the groups base is a nested group, not a person. Both
+	// live in the same `member` attribute, so they have to be told apart here --
+	// otherwise a nested group renders as a user whose name happens to be the
+	// group's, and its remove button calls the user endpoint and 404s.
+	function isGroupDn(dn){
+		return /,ou=groups,/i.test(String(dn));
+	}
+
 	function processGroup(value){
 		if (!Array.isArray(value.member)) value.member = value.member ? [value.member] : [];
 		if (!Array.isArray(value.owner))  value.owner  = value.owner  ? [value.owner]  : [];
+
+		// Split before anything else consumes `member`.
+		value.nested = value.member.filter(isGroupDn).map(function(dn){
+			return {
+				dn: dn,
+				cn: dn.match(/cn=[^,]+/)[0].replace('cn=', ''),
+				groupCN: value.cn
+			};
+		});
+		value.member = value.member.filter(function(dn){ return !isGroupDn(dn); });
+		value.nestedCount = value.nested.length;
+		value.hasNested = value.nestedCount > 0;
+
+		// Candidates to nest: every other group not already nested here. Self is
+		// excluded; deeper loops are refused server-side by Group.wouldCycle,
+		// which is the only place that can see the whole graph.
+		var nestedDns = value.nested.map(function(g){ return g.dn.toLowerCase(); });
+		value.toNest = allGroups.filter(function(g){
+			return g.cn !== value.cn && nestedDns.indexOf(String(g.dn).toLowerCase()) === -1;
+		}).map(function(g){ return {cn: g.cn, groupCN: value.cn}; });
+
 		value.toAdd = userlist.filter(function(user){
 			return !value.member.includes(user.dn);
 		});
@@ -91,9 +120,49 @@
 
 	async function tableAJAX(revealCn) {
 		let data = await app.group.list();
+		// processGroup builds each card's "nest a group" list from allGroups, so
+		// it has to see the full set before the map runs -- assigning only the
+		// mapped result would leave every dropdown empty on first load (and one
+		// render stale thereafter). The raw entries carry the cn/dn it needs.
+		allGroups = data.results;
 		allGroups = data.results.map(processGroup);
 		applyFilters();
 		if (revealCn) setTimeout(function(){ app.util.revealItem($('#group-card-' + revealCn)); }, 100);
+	}
+
+	function addNestedClick(event, groupCN, childCN, el){
+		event.preventDefault();
+		const $card = $('#group-card-' + groupCN);
+		(async function(){
+			try {
+				const data = await app.api.put(`group/${groupCN}/nested/${childCN}`, {});
+				const groupData = await app.group.get(groupCN);
+				$.scope.groupCard.update('cn', groupCN, processGroup(groupData.results));
+				app.messages.action(data.message, $card, 'success');
+			} catch(e) {
+				// 409 here is the cycle guard or an already-nested group -- both
+				// carry a specific server message worth showing verbatim.
+				app.messages.action((e && e.message) || 'Failed to nest group', $card, 'danger');
+			}
+		})();
+	}
+
+	async function removeNested(groupCN, childCN, btn) {
+		const $item = $(btn).closest('li');
+		$item.addClass('list-group-item-warning');
+		const confirmed = await app.messages.confirm(
+			`Remove "${childCN}" from "${groupCN}"? Its members lose access granted through this group.`,
+			$item, 'warning');
+		if (!confirmed) { $item.removeClass('list-group-item-warning'); return; }
+		try {
+			const data = await app.api.delete(`group/${groupCN}/nested/${childCN}`);
+			const groupData = await app.group.get(groupCN);
+			$.scope.groupCard.update('cn', groupCN, processGroup(groupData.results));
+			app.messages.action(data.message, $('#group-card-' + groupCN), 'success');
+		} catch(e) {
+			$item.removeClass('list-group-item-warning');
+			app.messages.action(e.message || 'Failed to un-nest group', $('#group-card-' + groupCN), 'danger');
+		}
 	}
 
 	async function removeMember(groupCN, uid, btn) {
@@ -204,6 +273,12 @@
 							</a>
 						</li>
 						<li class="nav-item">
+							<a class="nav-link" id="group-nested-tab-{{cn}}" data-bs-toggle="tab" data-bs-target="#group-nested-{{cn}}" href="#group-nested-{{cn}}" role="tab" aria-controls="nested" aria-selected="false">
+								<i class="fa-solid fa-layer-group"></i>
+								Nested{{#hasNested}} <span class="badge bg-secondary">{{nestedCount}}</span>{{/hasNested}}
+							</a>
+						</li>
+						<li class="nav-item">
 							<a class="nav-link" id="group-admins-tab-{{cn}}" data-bs-toggle="tab" data-bs-target="#group-admins-{{cn}}" href="#group-admins-{{cn}}" role="tab" aria-controls="admin" aria-selected="false">
 								<i class="fa-solid fa-user-tie"></i>
 								Owners
@@ -245,6 +320,35 @@
 									</a>
 								{{/.}}{{ /toAdd }}
 								
+								</div>
+							</div>
+						</div>
+
+						<div class="tab-pane fade" id="group-nested-{{cn}}" role="tabpanel" aria-labelledby="nested-tab">
+							<p class="text-muted small mb-2">
+								Everyone in a nested group is a member of this one, at any depth.
+							</p>
+							<ul class="list-group">
+							{{ #nested }}
+								<li id="group-card-{{groupCN}}-nested-{{cn}}" class="list-group-item shadow">
+									<i class="fa-solid fa-layer-group"></i> {{ cn }}
+									<button type="button" onclick="removeNested('{{groupCN}}', '{{cn}}', this)" class="btn btn-sm btn-danger float-end">
+										<i class="fa-solid fa-link-slash"></i>
+									</button>
+								</li>
+							{{ /nested }}
+							{{ ^hasNested }}
+								<li class="list-group-item text-muted fst-italic">No groups nested here.</li>
+							{{ /hasNested }}
+							</ul>
+							<div class="dropdown mt-2">
+								<button class="btn btn-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" aria-haspopup="true" aria-expanded="false">
+									<i class="fa-solid fa-diagram-project"></i> Nest a group
+								</button>
+								<div class="dropdown-menu" style="max-height: 300px; overflow-y: auto;">
+								{{ #toNest }}
+									<a class="dropdown-item" href="#" onclick="addNestedClick(event, '{{groupCN}}', '{{cn}}', this)">{{ cn }}</a>
+								{{ /toNest }}
 								</div>
 							</div>
 						</div>

@@ -336,6 +336,17 @@ OAuth client). Note: re-running bootstrap resets the bootstrap-admin and
 service-account passwords to the values in `./config/sso-secrets.js`; non-theta
 OAuth clients live in SSO Redis and are preserved by the volume.
 
+> **Note — the bundled slapd is built from source.** The all-in-one image
+> compiles OpenLDAP from a pinned upstream commit to get the `nestgroup`
+> overlay (nested groups; see `docs/directory.md`), because no 2.6.x release
+> ships it. One consequence: master uses **LMDB 1.0.0**, whose on-disk format is
+> mutually unreadable with the 0.9.x in OpenLDAP 2.6.x
+> (`MDB_INVALID: File is not an LMDB file`). Moving a directory between a 2.6.x
+> image and this one is a `slapcat` → `slapadd` reload, not a restart — the same
+> shape as "Restore — LDAP only" above. Verify after a rebuild:
+> `docker compose logs sso-manager | grep nestgroup` should report the overlay
+> as available.
+
 ---
 
 ## Method 2: Bare metal (Debian/Ubuntu)

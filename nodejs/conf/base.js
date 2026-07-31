@@ -29,6 +29,11 @@ module.exports = {
 		// public 636 port forward. See docs/ldap.md.
 		ldapsHost: '',
 		ldapsPort: 636,
+		// True when slapd carries the `nestgroup` overlay, which resolves nested
+		// groups server-side. Set automatically by docker-entrypoint.sh for the
+		// all-in-one image; leave false when pointing at a stock OpenLDAP (no
+		// 2.6.x release ships nestgroup) and the app resolves nesting itself.
+		nestedGroupsServerSide: false,
 		// New users/personal groups (see addPosixAccount/addPosixGroup in
 		// models/user_ldap.js) get the next uid/gidNumber >= uidGidMin.
 		// Existing entries >= uidGidReservedFloor are ignored when computing
@@ -59,6 +64,16 @@ module.exports = {
 		user: 'noreply@example.com',
 		pass: '__in secrets file__',
 		from: 'SSO Manager <noreply@example.com>',
+	},
+	directory: {
+		// Public SSH jump host fronting the lab, if there is one (the jump-host
+		// component). When set, a host card in the catalog shows the real
+		// invocation — `ssh <uid>_-_<slug>@<jumpHost>` — instead of a bare
+		// `ssh <uid>@<ip>` that only works from inside the LAN. Empty is fine;
+		// the card falls back to the direct form.
+		jumpHost: '',
+		// Default SSH port assumed when a host carries no metadata.sshPort.
+		defaultSshPort: 22,
 	},
 	service: {
 		updateCheck: {

@@ -4,6 +4,7 @@ const router = require('express').Router();
 const {User} = require('../models/user');
 const {Group} = require('../models/group_ldap');
 const permission = require('../utils/permission');
+const {groupCns} = require('../utils/user_groups');
 const {UserVerification} = require('../models/verification');
 const {InviteToken} = require('../models/token');
 
@@ -78,11 +79,17 @@ router.get('/me', async function(req, res, next){
 
 		// The shared client framework gates the UI on a single effective-rights
 		// flag (the OIDC-client apps send the same key). Here "admin" means
-		// membership in app_sso_admin or the cross-app app_super_admin group;
-		// group-level gating still reads memberOf.
-		const groups = (user.memberOf || []).map(function(dn){
-			return String(dn).split(',')[0].replace(/^cn=/i, '');
-		});
+		// membership in app_sso_admin or the cross-app app_super_admin group.
+		//
+		// Resolved via groupCns rather than read off `memberOf` directly: with
+		// nested groups, memberOf is only transitive when the directory carries
+		// the nestgroup overlay. Against a server without it, an admin who holds
+		// the group through nesting would get isAdmin=false here and silently
+		// lose the whole admin UI -- while still passing every server-side
+		// permission check, which resolves nesting properly. groupCns gives the
+		// same answer in both modes.
+		const groups = await groupCns(user);
+		user.groups = groups;
 		user.isAdmin = groups.includes('app_sso_admin') || groups.includes(permission.SUPER_ADMIN_GROUP);
 
 		return res.json(user);

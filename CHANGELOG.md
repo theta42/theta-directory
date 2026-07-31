@@ -4,6 +4,47 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.11.0] - 2026-07-31
+
+Closes the end-user half of the directory. The admin side could describe the lab; the user side could not tell anyone what they had or how to use it, and several of the paths meant to do so were silently returning nothing.
+
+### Fixed
+- **`GET /api/discovery/me` returned only `isPublic` resources for every human caller.** It resolved the caller's groups from `req.user.groups`, which does not exist — `req.user` is a `User` carrying `memberOf` (DNs). The empty list failed open into "no group-granted resources", so "My Services" on the profile page and the portal's service list were blank for everyone. The same bug made `isDirectoryAdmin()` false for real directory admins, silently downgrading them to the public metadata projection. Group CNs now come from `utils/user_groups.js`.
+- **The portal's "Discover More Services" was dead for every non-admin.** It called the admin-gated `directory-admin/resources` and swallowed the 403 into an empty array — so the one discovery feature never rendered for the audience it existed for. It now calls `/api/discovery/resources`.
+- **Services reported no address.** `/api/discovery/me` had reimplemented `Resource.getMyAccess` without its parent-walking address resolution, leaving clients to guess `address || ip`, which is exactly wrong for a service that is reached at its host's IP. Both paths now share `Resource.withResolvedAddress()`.
+- **Approving access for a user already in the target group threw a 500** and left the request stuck pending. `groupOfNames` requires at least one member, so a resource's auto-created groups are seeded with the creator's DN; the grant is now idempotent.
+- **`DELETE /api/directory-admin/resources/:id` deleted the resource before its edges and group links.** With no transaction, a failure mid-way orphaned rows pointing at a nonexistent id — invisible in the UI and poisonous to `getGraph()`. Dependents go first now.
+- `PUT /api/directory-admin/resources/:id` validated the body only after loading the row, and carried a dead if/else whose branches were identical.
+- `/api/directory-admin/audit-logs` shelled out to `tail` three times via `execSync`; replaced with a bounded async file read (no `child_process`, at most the trailing 256 KB).
+
+### Added
+- **End-user catalog at `/`**, and the first ungated nav item — previously every nav entry was admin-only and a normal user had no signposted destination. Search/filter, per-kind icons, and a **how to reach it** block per card: the URL for a service, the SSH invocation for a host (using the jump-host `uid_-_slug@host` grammar when `directory.jumpHost` is configured).
+- **Self-service access requests** — `AccessRequest` model plus `/api/access-requests` (create, list own, list decidable, approve, deny, withdraw). Approving performs the LDAP group add, so LDAP remains the access-control truth. Requests target a resource's `member`-level group, never its `_admin` one. Replaces the "coming soon" stub.
+- **Admin access visibility**: an Access column on the directory table showing member and group counts (and flagging links whose LDAP group has been deleted), plus a "what can this user reach" lookup — the reverse question, which previously had no UI at all. Backed by `GET /api/directory-admin/access-summary` and `/user-access/:uid`.
+- `conf.directory` — `jumpHost` and `defaultSshPort`, the connection conventions the catalog renders.
+- `tests/access_request.test.js` — the request → approve → grant-is-real loop end to end, including the regression guard for the `user.groups` bug.
+
+### Added — nested groups
+- **A group can now contain another group.** `groupOfNames.member` accepts any DN, so nesting needs no new schema; what it needs is *resolution*, which no released OpenLDAP performs — `memberOf` and `(member=X)` both return direct membership only. Two halves:
+  - **Server-side**: the all-in-one image now builds slapd from a pinned OpenLDAP master commit (`350e9eb3`) to get the **`nestgroup`** overlay (ITS#10161), enabled with `member-filter memberof-filter memberof-values`. `member-values` is deliberately omitted — it expands `member` when reading a group, which destroys the distinction between "listed here" and "reachable via nesting" and is not recoverable afterwards. `pw-sha2` is built from contrib in the same stage; without it every existing `{SSHA512}` password would be unverifiable.
+  - **Client-side**: `Group.list(dn)` computes the transitive closure itself (cycle-detected, depth-capped) when the server can't, selected by `conf.ldap.nestedGroupsServerSide` — which `docker-entrypoint.sh` derives from probing for `nestgroup.so` rather than hardcoding. Both paths are covered by the full suite.
+- `PUT`/`DELETE /api/group/:group/nested/:child` and `GET /api/group/:group/effective`, plus a **Nested** tab on each group card. Cycles are refused (409) rather than silently depth-truncated.
+- **`app_super_admin` is now seeded** (it never was) and nested into `app_sso_admin` / `app_sso_invite` / `app_sso_oauth_admin`, so the privilege is real LDAP membership visible to SSSD and sudo — not just a special case in `utils/permission.js`. Not nested into `app_sso_service_account`, which marks non-person accounts rather than granting anything.
+- Creating a directory resource nests `app_super_admin → <slug>_admin` and `<slug>_admin → <slug>_access`. Both previously required adding every super admin to every new group by hand, so they drifted.
+- `ldap_group_nesting_level = 5` in ldap-client's SSSD template, for hosts pointed at a server without `nestgroup`. Against the bundled slapd the existing `memberof=` access filter is already transitive, so SSH login inherits nesting for free.
+
+### Fixed
+- `PUT /api/group/:group/:uid` returned a bare **500** when the user was already a member — common, since `groupOfNames` requires a member and so seeds whoever created the group. Now a 409 that says so.
+- Un-nesting (or removing) the last member of a group returned a 500 `ObjectClassViolationError`; now a 409 explaining that a group must keep at least one member.
+- `GET /api/user/me` derived `isAdmin` from `memberOf`, which is only transitive when `nestgroup` is present. Against a stock server an admin holding their group via nesting would get `isAdmin=false` and lose the entire admin UI while still passing every server-side permission check.
+- `utils/permission.js`'s `byGroup` checked `group.member.includes(user.dn)` per group, seeing only direct membership.
+- `/api/directory-admin/access-summary` counted `member` values; it now counts the transitive closure, which matters precisely because `app_super_admin` is nested into every resource's admin group.
+- Broken `api.html` link in the published docs (`API.md` lives at the repo root, so Jekyll never rendered one); pointed at the source, and added an API entry to the docs nav.
+
+### Changed
+- `@simpleworkjs/directory-schema` bumped to `^1.1.0`, which declares the ten metadata keys the admin form has always written but the schema never listed (`port`, `externalPort`, `isExternalReachable`, `os`, `gitRepo`, `isCurrentSite` as public; `vmid`, `macAddress`, `installPath`, `systemdService` as admin-only). Undeclared keys are dropped for non-admin callers, which blanked the portal's `OS:` field, hid every service's port from users, and left machine tokens unable to read the port mapping the firewall consumer exists to render.
+- Resource metadata now includes `icon` and `tagline`, collected on the admin form (with a live icon preview) and rendered on the catalog cards.
+
 ## [1.10.0] - 2026-07-30
 
 ### Added

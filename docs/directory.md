@@ -54,6 +54,28 @@ Resources carry a flexible `metadata` JSON object that can store essential conte
 - **Install Path**: The filesystem path where the service is installed (e.g. `/opt/app`).
 - **Systemd Service**: The systemd unit name for the service (e.g. `app.service`).
 
+### Who sees which metadata
+
+Metadata keys are declared in `@simpleworkjs/directory-schema` with an `admin` flag, and every API response is passed through its projection. There are three tiers:
+
+- **Public** — returned to any authenticated caller, including machine (`ServiceToken`) callers: `ip`, `address`, `sshPort`, `fqdn`, `dnsNames`, `port`, `externalPort`, `portMappings`, `isExternalReachable`, `os`, `gitRepo`, `subType`, `icon`, `tagline`, `isPublic`, `isProduction`, `requestable`, `isCurrentSite`.
+- **Admin-only** — only for members of `app_sso_directory_admin` / `app_sso_admin`: `vmid`, `macAddress`, `installPath`, `systemdService`, and the OAuth config keys (`redirect_uris`, `scopes`, `allowed_groups`, `token_lifetime`).
+- **Never returned** — `client_secret_hash`, plus any key matching `/secret|password|privatekey/i`. Stripped on every path, admins included.
+
+Note that machine tokens are deliberately *not* admins, so anything a machine consumer needs (the firewall generator reads `port` / `externalPort` / `isExternalReachable`) has to be in the public tier. A metadata key that isn't declared at all is treated as admin-only and will silently vanish for normal users — if you add a field to the admin form, declare it in the schema package too.
+
+## Catalog & access requests
+
+The site root (`/`) is the end-user catalog — the only ungated page in the nav. It shows:
+
+- **My Access** — everything the signed-in user can reach (`GET /api/discovery/me`), each card carrying a **how to reach it** block: the URL for a service, or the SSH invocation for a host. When `directory.jumpHost` is set in the config, host cards render the jump-host form `ssh <uid>_-_<slug>@<jumpHost>`; otherwise they fall back to a direct `ssh <uid>@<ip>`.
+- **Discover More** — everything else in the directory, with a **Request access** button.
+- **My Requests** / **Awaiting My Approval** — pending requests, and the approve/deny queue for anyone who owns a requested resource.
+
+A request is a proposal to join an LDAP group. It targets the resource's `member`-level group (the `_access` one, never `_admin`), and approving it performs the LDAP group add — so LDAP stays the single access-control truth and the table is just the audit trail. Approvals are idempotent: approving for someone already in the group succeeds rather than erroring.
+
+Requests are decided by the resource's `owner`, or by any directory admin. Mark a resource `metadata.requestable = false` to keep it out of self-service.
+
 ## Navigating the UI
 
 The Directory Management interface provides a **Tree View** toggle that visually nests your resources, making it easy to comprehend your network topography at a glance. You can also filter, search, and sort your entire infrastructure inventory. From the tree view, you can click the green `+` icon next to any resource to instantly add a child resource beneath it.
@@ -104,4 +126,14 @@ All of the above uses the same admin API the UI does (group `app_sso_directory_a
 - `GET/POST /api/directory-admin/resources`, `PUT/DELETE /api/directory-admin/resources/:id`
 - `GET/POST/DELETE /api/directory-admin/edges` — parent/child links (`hosts`, `oauth` relations)
 - `GET/POST/DELETE /api/directory-admin/groups` — resource ↔ LDAP group links
+- `GET /api/directory-admin/access-summary` — per-resource group + member counts (the Access column)
+- `GET /api/directory-admin/user-access/:uid` — the reverse lookup: every resource a given user can reach, and via which group
 - Read-only graph views (any authenticated user): `GET /api/discovery/resources`, `/api/discovery/resources/:slug`, `/api/discovery/graph`, `/api/discovery/me`
+
+Access requests are open to any authenticated user; deciding is gated per-resource inside the router (resource owner or directory admin):
+
+- `POST /api/access-requests` — `{slug | resourceId, groupCn?, note?}`
+- `GET /api/access-requests/mine` — the caller's own history
+- `GET /api/access-requests` — pending requests the caller may decide
+- `POST /api/access-requests/:id/approve` · `POST /api/access-requests/:id/deny`
+- `DELETE /api/access-requests/:id` — the requester withdraws their own pending request

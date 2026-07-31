@@ -103,6 +103,40 @@ class Resource extends Model {
     return { resources: resObjs, edges };
   }
 
+  // Stamp `resolvedAddress` on each resource: its own address/ip if it has one,
+  // otherwise the nearest ancestor's. A service usually carries no address of
+  // its own -- it is reached at the host it runs on -- so "how do I reach this"
+  // is only answerable from the graph, never from the row alone. Every caller
+  // that answers that question for a user (getMyAccess, GET /api/discovery/me)
+  // must go through here, or services come back unreachable.
+  static async withResolvedAddress(resources) {
+    if (!resources || !resources.length) return [];
+    const graph = await this.getGraph();
+
+    const resolve = (resId, visited = new Set()) => {
+      if (visited.has(resId)) return null; // prevent cycles
+      visited.add(resId);
+
+      const res = graph.resources.find(r => r.id === resId);
+      if (!res) return null;
+      if (res.metadata && res.metadata.address) return res.metadata.address;
+      if (res.metadata && res.metadata.ip) return res.metadata.ip;
+
+      for (const edge of graph.edges.filter(e => e.childId === resId)) {
+        const found = resolve(edge.parentId, visited);
+        if (found) return found;
+      }
+      return null;
+    };
+
+    return resources.map(r => {
+      const data = r.toJSON ? r.toJSON() : { ...r };
+      data.metadata = data.metadata || {};
+      data.resolvedAddress = resolve(data.id);
+      return data;
+    });
+  }
+
   static async getMyAccess(userDn) {
     const userGroups = await Group.list(userDn);
     if (!userGroups || userGroups.length === 0) return [];
@@ -110,38 +144,11 @@ class Resource extends Model {
     const resourceGroups = await ResourceGroup.list({
       where: { groupCn: { in: userGroups } }
     });
-    
+
     const resourceIds = [...new Set(resourceGroups.map(rg => rg.resourceId))];
     if (resourceIds.length === 0) return [];
-    
-    const resources = await this.list({ where: { id: { in: resourceIds } } });
-    
-    // Resolve inherited addresses from the graph
-    const graph = await this.getGraph();
-    
-    function resolveHost(resId, visited = new Set()) {
-      if (visited.has(resId)) return null; // prevent cycles
-      visited.add(resId);
-      
-      const res = graph.resources.find(r => r.id === resId);
-      if (!res) return null;
-      if (res.metadata && res.metadata.address) return res.metadata.address;
-      if (res.metadata && res.metadata.ip) return res.metadata.ip;
-      
-      const parentEdges = graph.edges.filter(e => e.childId === resId);
-      for (const edge of parentEdges) {
-        const found = resolveHost(edge.parentId, visited);
-        if (found) return found;
-      }
-      return null;
-    }
-    
-    return resources.map(r => {
-      const data = { ...r };
-      data.metadata = data.metadata || {};
-      data.resolvedAddress = resolveHost(r.id);
-      return data;
-    });
+
+    return this.withResolvedAddress(await this.list({ where: { id: { in: resourceIds } } }));
   }
 
   static fields = {

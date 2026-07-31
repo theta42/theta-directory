@@ -38,6 +38,10 @@ module.exports = {
 	// app-base.js, which reveals .group-required-<cn> for each group the user is
 	// in (plus the synthetic `admin` group when user/me reports isAdmin).
 	nav: [
+		// Ungated on purpose: the catalog is the one page that exists for
+		// ordinary users. Before this, every nav item was admin-only and a
+		// non-admin had no signposted destination at all.
+		{href: '/', icon: 'fa-solid fa-compass', label: 'Catalog', groups: []},
 		{href: '/users', icon: 'fa-solid fa-users', label: 'Users', groups: ['app_sso_admin', 'admin']},
 		{href: '/groups', icon: 'fa-solid fa-users-viewfinder', label: 'Groups', groups: ['app_sso_admin', 'admin']},
 		{href: '/directory', icon: 'fa-solid fa-server', label: 'Directory', groups: ['app_sso_admin', 'app_sso_directory_admin', 'admin']},

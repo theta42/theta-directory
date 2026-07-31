@@ -91,6 +91,9 @@ app.use('/api/group', middleware.auth, require('./routes/group'));
 app.use('/api/notification', middleware.auth, require('./routes/notification'));
 app.use('/api/discovery', middleware.auth, require('./routes/discovery'));
 app.use('/api/directory-admin', middleware.auth, require('./routes/api_directory_admin'));
+// Self-service access requests — any authenticated user may ask; deciding is
+// gated per-resource inside the router (owner or directory admin).
+app.use('/api/access-requests', middleware.auth, require('./routes/access_request'));
 app.use('/api/update-check', middleware.auth, require('./routes/update_check'));
 app.use('/api/tos', middleware.auth, require('./routes/tos'));
 app.use('/api/metrics', middleware.auth, require('./routes/api_metrics'));

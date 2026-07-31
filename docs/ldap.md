@@ -59,8 +59,41 @@ way or use `slappasswd -h '{SSHA512}'`.
 Groups are `cn=<name>,ou=groups,<base>` (`groupOfNames`) with a `member`
 attribute listing member DNs. The `memberOf` overlay populates reverse
 membership (`memberOf` on the user); `refint` keeps it consistent on
-add/remove. **Admin permission checks read the group's `member` list**, not
-`memberOf` on the user.
+add/remove.
+
+Note that `groupOfNames` requires **at least one member**, which has two
+consequences worth knowing: whoever creates a group is automatically seeded
+into it, and removing the last member (user *or* nested group) is refused with
+a 409 rather than leaving an invalid entry behind.
+
+### Nested groups
+
+A `member` DN may be another group's, not just a user's — that is how nesting
+is stored, with no extra schema. Everyone in the nested group is a member of
+the outer one, at any depth. Manage it on the **Groups** page under each
+group's *Nested* tab, or via the API:
+
+```
+PUT    /api/group/:group/nested/:child    nest :child inside :group
+DELETE /api/group/:group/nested/:child    un-nest
+GET    /api/group/:group/effective        direct users, nested groups, and the
+                                          full transitive set of users
+```
+
+Cycles are refused (409) rather than truncated — a loop makes "who is in this
+group" unanswerable. Two standing relationships are wired automatically: the
+cross-app `app_super_admin` is nested into every resource's `<slug>_admin`
+group, and each `<slug>_admin` into its `<slug>_access` group, so administering
+something implies being able to use it.
+
+**Resolving nesting is a client-side job on stock OpenLDAP.** No 2.6.x release
+can evaluate nested groups; `memberOf` and a `(member=X)` filter both return
+direct membership only. The bundled slapd is therefore built from source with
+the `nestgroup` overlay (see *Modules + overlays* below), and the app is told so
+via `ldap.nestedGroupsServerSide`. Against any other server the app computes the
+closure itself — same answers, more queries. Either way, **never read `memberOf`
+directly to make an access decision**; use `utils/user_groups.js`'s `groupCns()`,
+which is correct in both modes.
 
 ### Personal groups
 
@@ -75,15 +108,15 @@ instead from the owning user's own profile page ("Members of `<uid>`'s
 group", admin-only) — add other accounts as supplementary members, e.g. to
 share write access to files owned by this group.
 
-The SSO requires three groups (seeded automatically by the entrypoint /
-`install.sh`):
+The SSO seeds these groups automatically (entrypoint / `install.sh`):
 
 | Group | Grants |
 |-------|--------|
+| `app_super_admin` | cross-app super admin. Nested into the three below, so its members hold those rights transitively rather than by a special case in app code — and the privilege is visible to LDAP-native consumers (SSSD, sudo) too. |
 | `app_sso_admin` | full admin (users, groups, settings) |
 | `app_sso_oauth_admin` | OAuth client management |
 | `app_sso_invite` | invitation management |
-| `app_sso_service_account` | not a permission — marks a `posixAccount` as a non-person service account (see *Service accounts* below) |
+| `app_sso_service_account` | not a permission — marks a `posixAccount` as a non-person service account (see *Service accounts* below). Deliberately **not** nested into, since it changes how an account is displayed rather than what it may do. |
 
 ## TLS (LDAPS / StartTLS)
 
@@ -308,11 +341,37 @@ needs:
 
 - **Modules:** `pw-sha2` (the app stores user passwords as `{SSHA512}`),
   `ppolicy`, `memberof`, `refint`.
+- **Optional — `nestgroup`:** server-side nested-group evaluation. Not in any
+  released OpenLDAP (added to master as ITS#10161 in March 2024; 2.7 is still
+  unreleased), so the bundled image builds slapd from a pinned upstream commit.
+  Without it the app resolves nesting itself and everything still works — leave
+  `ldap.nestedGroupsServerSide` at `false`. With it, set that to `true` and
+  configure:
+
+  ```
+  overlay         nestgroup
+  nestgroup-base  ou=groups,<base>
+  nestgroup-flags member-filter memberof-filter memberof-values
+  ```
+
+  Flags are **space-separated**; the comma form the man page's `{a, b, c}`
+  notation suggests is rejected. `member-values` is deliberately omitted — it
+  expands the `member` attribute when reading a group, which destroys the
+  distinction between "listed here" and "reachable through a nested group", and
+  the raw values are then unrecoverable. Transitive answers come from the filter
+  flags and from `GET /api/group/:group/effective`.
+
+  One more consequence of building from master: it ships **LMDB 1.0.0**, whose
+  on-disk format is mutually unreadable with the 0.9.x in 2.6.x
+  (`MDB_INVALID: File is not an LMDB file`). Moving a directory between the two
+  is a `slapcat` → `slapadd` reload, not a restart.
 - **Custom schema:** the `theta42Person` auxiliary objectClass with
   `dateOfBirth` — see `ops/ldap-setup.sh` for the LDIF.
 - **Directory tree:** `ou=people`, `ou=groups`, `ou=policies` under the base DN,
   a default `pwdPolicy` at `cn=ppolicy,ou=policies,<base>`.
-- **Required groups:** `app_sso_admin`, `app_sso_invite`, `app_sso_oauth_admin`.
+- **Required groups:** `app_sso_admin`, `app_sso_invite`, `app_sso_oauth_admin`,
+  and `app_super_admin` (the cross-app super-admin group; the bundled entrypoint
+  also nests it into the first three).
 
 `ops/ldap-setup.sh -p <admin-password>` configures all of the above
 idempotently against a running slapd (auto-detects the database holding your

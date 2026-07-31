@@ -14,6 +14,7 @@ require('./api_token');
 
 const { init } = require('@simpleworkjs/orm');
 const { Resource, ResourceEdge, ResourceGroup } = require('./resource');
+const { AccessRequest } = require('./access_request');
 
 async function initORM() {
   const ormConf = conf.orm || {
@@ -28,7 +29,7 @@ async function initORM() {
     await init({
       conf: { orm: ormConf },
       models: [
-        Resource, ResourceEdge, ResourceGroup,
+        Resource, ResourceEdge, ResourceGroup, AccessRequest,
         Token, AuthToken, InviteToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken
       ]
     });

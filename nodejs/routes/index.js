@@ -17,6 +17,13 @@ const values ={
   titleIcon: conf.environment !== 'production' ? `<i class="fa-brands fa-dev"></i>` : '',
   name: conf.name,
   logo: conf.logo,
+  // Connection conventions the catalog needs to render "how to reach this"
+  // (conf/base.js `directory`). Safe to expose: a jump-host name and a default
+  // port are public connection info, not credentials.
+  directoryConf: {
+    jumpHost: (conf.directory && conf.directory.jumpHost) || '',
+    defaultSshPort: (conf.directory && conf.directory.defaultSshPort) || 22,
+  },
   ...buildInfo,
 }
 

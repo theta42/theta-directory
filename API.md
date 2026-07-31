@@ -703,6 +703,10 @@ The authenticated user is automatically set as the group owner.
 { "results": true, "message": "Added user uid to group group." }
 ```
 
+Returns `409` if the user is already a member — common in practice, since
+`groupOfNames` requires at least one member and so seeds whoever created the
+group into it.
+
 ---
 
 ### Remove User from Group
@@ -712,6 +716,66 @@ The authenticated user is automatically set as the group owner.
 **Response:**
 ```json
 { "results": true, "message": "Removed user uid from group group." }
+```
+
+---
+
+### Nest a Group Inside Another
+
+**`PUT /api/group/:group/nested/:child`** — `app_sso_admin` or group owner
+
+Makes `:child` a member of `:group`, so everyone in `:child` is a member of
+`:group` at any depth.
+
+**Response:**
+```json
+{ "results": { "cn": "group", "member": ["..."] }, "message": "Nested child inside group." }
+```
+
+**Errors:**
+
+| Status | When |
+|--------|------|
+| `400` | `:group` and `:child` are the same group |
+| `409` | already nested, or the nesting would create a loop (`:child` already contains `:group`, directly or transitively) |
+
+---
+
+### Un-nest a Group
+
+**`DELETE /api/group/:group/nested/:child`** — `app_sso_admin` or group owner
+
+**Response:**
+```json
+{ "results": { "cn": "group", "member": ["..."] }, "message": "Removed child from group." }
+```
+
+**Errors:**
+
+| Status | When |
+|--------|------|
+| `409` | `:child` is the only member — `groupOfNames` requires at least one |
+
+---
+
+### Effective Membership
+
+**`GET /api/group/:group/effective`** — Any authenticated user
+
+Who a group actually grants. `direct` is users listed on the group itself
+(never groups); `nestedGroups` is what is nested into it; `effective` is every
+user reachable through the whole chain.
+
+**Response:**
+```json
+{
+  "results": {
+    "cn": "app_gitea_access",
+    "direct": ["cn=alice,ou=people,dc=example,dc=com"],
+    "nestedGroups": [{ "cn": "developers", "dn": "cn=developers,ou=groups,dc=example,dc=com" }],
+    "effective": ["cn=alice,ou=people,dc=example,dc=com", "cn=bob,ou=people,dc=example,dc=com"]
+  }
+}
 ```
 
 ---
