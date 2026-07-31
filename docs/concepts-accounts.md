@@ -53,6 +53,29 @@ photo server. Once a group exists, add or remove members from the
 **Groups** page, and point the other app's "who's allowed in" setting at
 that group's name.
 
+### Groups inside groups
+
+A group can contain another group, not just people — the *Nested* tab on any
+group card. Everyone in the inner group counts as a member of the outer one,
+however many levels deep it goes.
+
+This is mostly a way to stop repeating yourself. Make one `developers` group,
+nest it into the handful of things developers should reach, and adding a new
+developer to that one group grants all of them at once — instead of adding them
+to each individually and slowly drifting out of sync. The app already does this
+for itself: super admins are nested into every resource's admin group, and each
+admin group into its access group, so "can administer it" always implies "can
+use it".
+
+Two things it won't let you do: put a group inside itself (directly or round a
+longer loop), and empty a group completely — every group must keep at least one
+member.
+
+A note if you also manage the directory by hand: a group's member list shows
+what is *directly* listed on it. Someone who gets in through a nested group is
+a real member but won't appear there — the **Nested** tab shows what is nested,
+and the API's `effective` view lists everyone who actually gets in.
+
 ## Every account's personal group
 
 Separately from the groups above, every single account — person or

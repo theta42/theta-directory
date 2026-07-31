@@ -8,7 +8,7 @@ description: A plain-language guide to personal access tokens in SSO Manager.
 
 This page explains what an API token is and when you'd want one. For the
 full list of API endpoints a token can call, see the
-[API reference](api.html).
+[API reference](https://github.com/theta42/sso-manager-node/blob/master/API.md).
 
 ## What's an API token, in plain terms?
 
@@ -54,6 +54,6 @@ it stops working right away.
 ## Want more detail?
 
 This page doesn't attempt to list every API endpoint or show request/
-response examples — for that, see the full [API reference](api.html).
+response examples — for that, see the full [API reference](https://github.com/theta42/sso-manager-node/blob/master/API.md).
 
 [← Back to Home](index.html)

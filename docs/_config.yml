@@ -34,6 +34,11 @@ nav:
   - title: Directory
     page: /directory.html
     icon: fa-server
+  # API.md lives at the repo root, not under docs/, so Jekyll never renders an
+  # api.html for it — link the source directly, same as the Changelog.
+  - title: API
+    url: https://github.com/theta42/sso-manager-node/blob/master/API.md
+    icon: fa-code
   - title: Changelog
     url: https://github.com/theta42/sso-manager-node/blob/master/CHANGELOG.md
     icon: fa-list

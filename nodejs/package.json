@@ -1,6 +1,6 @@
 {
   "name": "t42-sso-manager",
-  "version": "1.10.0",
+  "version": "1.11.0",
   "description": "A very simple LDAP management and SSO system",
   "author": [
     {
@@ -25,7 +25,7 @@
     "@popperjs/core": "^2.11.8",
     "@simpleworkjs/app-stack": "^1.0.0",
     "@simpleworkjs/conf": "^1.2.0",
-    "@simpleworkjs/directory-schema": "^1.0.0",
+    "@simpleworkjs/directory-schema": "^1.1.0",
     "@simpleworkjs/frontend": "^0.2.7",
     "@simpleworkjs/ldap": "^1.0.0",
     "@simpleworkjs/orm": "^0.2.8",

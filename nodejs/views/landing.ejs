@@ -1,136 +1,329 @@
 <%- include('top') %>
 
 <style>
-/* App Portal styling using Bootstrap defaults */
 .portal-banner {
     background-color: var(--bs-primary);
     color: white;
-    padding: 3rem 1rem;
+    padding: 2.5rem 1rem;
     margin-bottom: 2rem;
     border-radius: .5rem;
     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
 }
-.portal-banner h1 {
-    font-weight: 700;
-}
-.carousel-container {
-    display: flex;
-    overflow-x: auto;
-    gap: 1.5rem;
-    padding-bottom: 1.5rem;
-    scrollbar-width: thin;
+.portal-banner h1 { font-weight: 700; }
+.catalog-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 1.25rem;
 }
 .service-card {
-    min-width: 280px;
     height: 100%;
-    transition: transform 0.2s, box-shadow 0.2s;
-    cursor: pointer;
+    transition: transform .15s, box-shadow .15s;
     display: flex;
     flex-direction: column;
 }
-.service-card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 .5rem 1rem rgba(0,0,0,.15)!important;
+.service-card:hover { transform: translateY(-3px); box-shadow: 0 .5rem 1rem rgba(0,0,0,.15)!important; }
+.service-card .card-body { flex: 1; }
+.card-icon { font-size: 1.4rem; width: 1.8rem; text-align: center; }
+.howto code {
+    display: block;
+    background: var(--bs-tertiary-bg, #f1f3f5);
+    color: var(--bs-body-color);
+    padding: .4rem .6rem;
+    border-radius: .25rem;
+    font-size: .8rem;
+    word-break: break-all;
 }
-.service-card .card-body {
-    flex: 1;
-}
+.empty-note { color: var(--bs-secondary-color, #6c757d); font-style: italic; }
 </style>
 
 <div class="container mt-4">
     <div class="portal-banner text-center">
-        <h1>SSO Portal</h1>
-        <p class="lead">Explore and access all your services in one place.</p>
-        <a href="/profile" class="btn btn-light shadow-sm mt-2"><i class="fa-solid fa-user"></i> My Profile</a>
+        <h1><%- name %> Portal</h1>
+        <p class="lead mb-3">Everything the lab offers — what you can reach, and how to reach it.</p>
+        <a href="/profile" class="btn btn-light shadow-sm"><i class="fa-solid fa-user"></i> My Profile</a>
     </div>
 
-    <h3 class="mb-3"><i class="fa-solid fa-layer-group text-primary"></i> My Apps & Services</h3>
-    <div class="carousel-container mb-5" id="my-services" jq-repeat="myservices">
-        <a href="{{resolvedAddress}}" target="_blank" style="text-decoration: none; color: inherit; min-width: 280px;">
-            <div class="card shadow-sm service-card border-success">
-                <div class="card-body">
-                    <h5 class="card-title text-success"><i class="fa-solid fa-rocket"></i> {{name}}</h5>
-                    <p class="card-text text-muted mb-1">{{kind}}{{#metadata.subType}} - {{metadata.subType}}{{/metadata.subType}}</p>
-                    <p class="card-text text-truncate small" title="{{description}}">{{description}}</p>
-                </div>
-                <div class="card-footer bg-transparent border-top-0 pt-0">
-                    <span class="badge bg-success">Access Granted</span>
-                </div>
-            </div>
-        </a>
+    <div class="row mb-4">
+        <div class="col-md-8">
+            <input type="text" id="catalog-search" class="form-control shadow-sm"
+                   placeholder="Search services and hosts..." onkeyup="renderAll()">
+        </div>
+        <div class="col-md-4 mt-2 mt-md-0">
+            <select id="catalog-kind" class="form-select shadow-sm" onchange="renderAll()">
+                <option value="">All kinds</option>
+                <option value="service">Services &amp; apps</option>
+                <option value="host">Hosts</option>
+                <option value="site">Sites</option>
+            </select>
+        </div>
     </div>
 
-    <h3 class="mb-3"><i class="fa-solid fa-compass text-secondary"></i> Discover More Services</h3>
-    <div class="carousel-container mb-5" id="other-services" jq-repeat="otherservices">
-        <div class="card shadow-sm service-card" style="min-width: 280px;" onclick="requestAccess('{{id}}')">
-            <div class="card-body">
-                <h5 class="card-title"><i class="fa-solid fa-cloud"></i> {{name}}</h5>
-                <p class="card-text text-muted mb-1">{{kind}}{{#metadata.subType}} - {{metadata.subType}}{{/metadata.subType}}</p>
-                <p class="card-text text-truncate small" title="{{description}}">{{description}}</p>
-            </div>
-            <div class="card-footer bg-transparent border-top-0 pt-0">
-                <span class="badge bg-secondary">Request Access</span>
-            </div>
-        </div>
+    <div id="my-requests-section" style="display:none;">
+        <h3 class="mb-3"><i class="fa-solid fa-hourglass-half text-warning"></i> My Requests</h3>
+        <ul class="list-group mb-5 shadow-sm" id="my-requests"></ul>
     </div>
-    
-    <h3 class="mb-3"><i class="fa-solid fa-server text-info"></i> Hosts & Infrastructure</h3>
-    <div class="carousel-container mb-5" id="hosts" jq-repeat="hosts">
-        <div class="card shadow-sm service-card" style="min-width: 280px;">
-            <div class="card-body">
-                <h5 class="card-title"><i class="fa-solid fa-desktop"></i> {{name}}</h5>
-                <p class="card-text text-muted mb-1">IP: {{metadata.ip}}</p>
-                <p class="card-text small mb-0">OS: {{metadata.os}}</p>
-            </div>
-        </div>
+
+    <div id="approvals-section" style="display:none;">
+        <h3 class="mb-3"><i class="fa-solid fa-user-check text-danger"></i> Awaiting My Approval</h3>
+        <ul class="list-group mb-5 shadow-sm" id="approvals"></ul>
     </div>
+
+    <h3 class="mb-3"><i class="fa-solid fa-layer-group text-success"></i> My Access</h3>
+    <div class="catalog-grid mb-5" id="my-services"></div>
+
+    <h3 class="mb-3"><i class="fa-solid fa-compass text-secondary"></i> Discover More</h3>
+    <p class="text-muted small">Things you don't have access to yet. Request what you need.</p>
+    <div class="catalog-grid mb-5" id="other-services"></div>
 </div>
 
 <script type="text/javascript">
     app.auth.forceLogin();
-    
-    $(document).ready(async function() {
-        try {
-            let res = await app.api.get('discovery/me');
-            let allAccessible = res.results || [];
-            
-            let allRes = await app.api.get('directory-admin/resources').catch(e => { return {results:[]}; });
-            
-            let myServices = [];
-            let otherServices = [];
-            let hosts = [];
-            
-            allAccessible.forEach(r => {
-                r.resolvedAddress = (r.metadata && r.metadata.address) || (r.metadata && r.metadata.ip) || '#';
-                r.description = r.description || 'No description provided';
-                if (r.kind === 'service' || r.kind === 'oauth') myServices.push(r);
-                if (r.kind === 'host') hosts.push(r);
-            });
-            
-            if (allRes && allRes.results) {
-                allRes.results.forEach(r => {
-                    r.description = r.description || 'No description provided';
-                    if (r.kind === 'service' && !myServices.find(s => s.id === r.id)) {
-                        otherServices.push(r);
-                    }
-                });
-            }
-            
-            $.scope.myservices.empty();
-            $.scope.myservices.push(...myServices);
-            
-            $.scope.otherservices.empty();
-            $.scope.otherservices.push(...otherServices);
-            
-            $.scope.hosts.empty();
-            $.scope.hosts.push(...hosts);
-            
-        } catch (e) {
-            console.error('Failed to load discovery data:', e);
-        }
-    });
-    
-    function requestAccess(id) {
-        app.modal.open({title: 'Access Request', bodyHtml: 'This feature is coming soon!'});
+
+    // Connection conventions from conf/base.js `directory`, injected server-side
+    // so the "how to reach this" block renders the invocation that actually
+    // works in this deployment rather than a guess.
+    var DIRECTORY_CONF = <%- JSON.stringify(directoryConf) %>;
+
+    var state = { mine: [], others: [], requests: [], approvals: [], uid: null };
+
+    var KIND_ICONS = {
+        site:    'fa-solid fa-city',
+        host:    'fa-solid fa-server',
+        service: 'fa-solid fa-cube',
+        oauth:   'fa-solid fa-key'
+    };
+
+    function esc(s) {
+        return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
+            return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+        });
     }
+
+    // "How do I actually use this?" — the question the directory exists to
+    // answer and the one the old portal never did. Everything here is derived
+    // from directory metadata; nothing is hardcoded per-service.
+    function howTo(r) {
+        var md = r.metadata || {};
+        var addr = r.resolvedAddress || md.address || md.ip;
+        var lines = [];
+
+        if (r.kind === 'host') {
+            var sshPort = md.sshPort || DIRECTORY_CONF.defaultSshPort;
+            var portArg = String(sshPort) === '22' ? '' : ' -p ' + sshPort;
+            if (DIRECTORY_CONF.jumpHost) {
+                // The jump-host username grammar: one string, no interactive
+                // menu, so it works in WinSCP/FileZilla as well as a terminal.
+                lines.push('ssh ' + state.uid + '_-_' + r.slug + '@' + DIRECTORY_CONF.jumpHost + portArg);
+            } else if (addr) {
+                lines.push('ssh ' + state.uid + '@' + addr + portArg);
+            }
+        } else if (addr) {
+            var isUrl = /^https?:\/\//i.test(addr);
+            if (isUrl) {
+                lines.push(addr);
+            } else {
+                var port = md.externalPort || md.port;
+                lines.push(port ? 'https://' + addr + ':' + port : 'https://' + addr);
+            }
+        }
+
+        if (md.gitRepo) lines.push('Source: ' + md.gitRepo);
+        return lines;
+    }
+
+    function linkFor(r) {
+        var md = r.metadata || {};
+        var addr = r.resolvedAddress || md.address || md.ip;
+        if (!addr || r.kind === 'host') return null;
+        if (/^https?:\/\//i.test(addr)) return addr;
+        var port = md.externalPort || md.port;
+        return port ? 'https://' + addr + ':' + port : 'https://' + addr;
+    }
+
+    function cardHtml(r, accessible) {
+        var md = r.metadata || {};
+        var icon = md.icon || KIND_ICONS[r.kind] || 'fa-solid fa-cube';
+        var blurb = md.tagline || r.description || 'No description provided';
+        var href = accessible ? linkFor(r) : null;
+        var lines = accessible ? howTo(r) : [];
+
+        var badges = '';
+        if (md.isProduction) badges += '<span class="badge bg-danger ms-1">Prod</span>';
+        if (md.isExternalReachable) badges += '<span class="badge bg-info ms-1">External</span>';
+        if (md.os) badges += '<span class="badge bg-light text-dark border ms-1">' + esc(md.os) + '</span>';
+
+        var footer;
+        if (accessible) {
+            footer = href
+                ? '<a class="btn btn-sm btn-success w-100" target="_blank" rel="noopener" href="' + esc(href) + '">Open <i class="fa-solid fa-arrow-up-right-from-square"></i></a>'
+                : '<span class="badge bg-success">Access granted</span>';
+        } else if (md.requestable === false) {
+            footer = '<span class="badge bg-secondary">Not requestable</span>';
+        } else if (state.requests.some(function(q){ return q.resourceId === r.id && q.status === 'pending'; })) {
+            footer = '<span class="badge bg-warning text-dark">Request pending</span>';
+        } else {
+            footer = '<button class="btn btn-sm btn-outline-primary w-100" onclick="requestAccess(\'' + esc(r.id) + '\')">'
+                   + '<i class="fa-solid fa-hand"></i> Request access</button>';
+        }
+
+        return '<div class="card shadow-sm service-card ' + (accessible ? 'border-success' : '') + '">'
+            + '<div class="card-body">'
+            +   '<h5 class="card-title d-flex align-items-start gap-2">'
+            +     '<i class="' + esc(icon) + ' card-icon ' + (accessible ? 'text-success' : 'text-secondary') + '"></i>'
+            +     '<span>' + esc(r.name) + '</span>'
+            +   '</h5>'
+            +   '<div class="mb-2"><span class="badge bg-secondary">' + esc(r.kind)
+            +     (md.subType ? ' · ' + esc(md.subType) : '') + '</span>' + badges + '</div>'
+            +   '<p class="card-text small text-muted">' + esc(blurb) + '</p>'
+            +   (lines.length
+                  ? '<div class="howto small"><div class="text-muted mb-1">How to reach it</div>'
+                    + lines.map(function(l){ return '<code>' + esc(l) + '</code>'; }).join('')
+                    + '</div>'
+                  : '')
+            + '</div>'
+            + '<div class="card-footer bg-transparent border-top-0">' + footer + '</div>'
+            + '</div>';
+    }
+
+    function matchesFilter(r) {
+        var q = ($('#catalog-search').val() || '').toLowerCase();
+        var kind = $('#catalog-kind').val() || '';
+        if (kind && r.kind !== kind) return false;
+        if (!q) return true;
+        var md = r.metadata || {};
+        return [r.name, r.slug, r.description, md.tagline, md.subType, md.ip, md.address]
+            .filter(Boolean).join(' ').toLowerCase().indexOf(q) !== -1;
+    }
+
+    function renderGrid(elId, list, accessible) {
+        var items = list.filter(matchesFilter);
+        var el = document.getElementById(elId);
+        if (!items.length) {
+            el.innerHTML = '<p class="empty-note">Nothing to show here.</p>';
+            return;
+        }
+        el.innerHTML = items.map(function(r){ return cardHtml(r, accessible); }).join('');
+    }
+
+    function renderRequests() {
+        var open = state.requests.filter(function(q){ return q.status === 'pending'; });
+        document.getElementById('my-requests-section').style.display = open.length ? '' : 'none';
+        document.getElementById('my-requests').innerHTML = open.map(function(q){
+            var label = q.resource ? q.resource.name : q.groupCn;
+            return '<li class="list-group-item d-flex justify-content-between align-items-center">'
+                + '<span><strong>' + esc(label) + '</strong> '
+                + '<small class="text-muted">via <code>' + esc(q.groupCn) + '</code></small></span>'
+                + '<button class="btn btn-sm btn-outline-danger" onclick="withdraw(\'' + esc(q.id) + '\')">Withdraw</button>'
+                + '</li>';
+        }).join('');
+    }
+
+    function renderApprovals() {
+        document.getElementById('approvals-section').style.display = state.approvals.length ? '' : 'none';
+        document.getElementById('approvals').innerHTML = state.approvals.map(function(q){
+            var label = q.resource ? q.resource.name : q.groupCn;
+            return '<li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-2">'
+                + '<span><strong>' + esc(q.uid) + '</strong> requests <strong>' + esc(label) + '</strong> '
+                + '<small class="text-muted">(<code>' + esc(q.groupCn) + '</code>)</small>'
+                + (q.note ? '<br><small class="text-muted">' + esc(q.note) + '</small>' : '')
+                + '</span>'
+                + '<span class="d-flex gap-2">'
+                +   '<button class="btn btn-sm btn-success" onclick="decide(\'' + esc(q.id) + '\',\'approve\')">Approve</button>'
+                +   '<button class="btn btn-sm btn-outline-danger" onclick="decide(\'' + esc(q.id) + '\',\'deny\')">Deny</button>'
+                + '</span></li>';
+        }).join('');
+    }
+
+    function renderAll() {
+        renderGrid('my-services', state.mine, true);
+        renderGrid('other-services', state.others, false);
+        renderRequests();
+        renderApprovals();
+    }
+
+    async function load() {
+        var me = await app.auth.asyncUser;
+        state.uid = me.uid;
+
+        // Both endpoints are the *discovery* API, not directory-admin. The old
+        // portal called directory-admin/resources and swallowed the 403, so
+        // "Discover More" was permanently empty for every non-admin — i.e. for
+        // exactly the people it was built for.
+        var mineRes = await app.api.get('discovery/me');
+        var allRes  = await app.api.get('discovery/resources');
+
+        state.mine = (mineRes.results || []).filter(function(r){ return r.kind !== 'site'; });
+        var mineIds = {};
+        state.mine.forEach(function(r){ mineIds[r.id] = true; });
+        state.others = (allRes.results || []).filter(function(r){
+            return !mineIds[r.id] && r.kind !== 'site' && r.kind !== 'oauth';
+        });
+
+        // Requests are best-effort: a failure here must not blank the catalog.
+        try {
+            var mineReq = await app.api.get('access-requests/mine');
+            state.requests = mineReq.results || [];
+        } catch (e) { state.requests = []; }
+        try {
+            var pending = await app.api.get('access-requests');
+            state.approvals = pending.results || [];
+        } catch (e) { state.approvals = []; }
+
+        renderAll();
+    }
+
+    async function requestAccess(id) {
+        var resource = state.others.find(function(r){ return r.id === id; });
+        if (!resource) return;
+        app.modal.open({
+            title: 'Request access to ' + resource.name,
+            bodyHtml: '<div class="actionMessage" style="display:none"></div>'
+                + '<p class="text-muted small">Your request goes to the resource owner for approval.</p>'
+                + '<label class="form-label">Why do you need it? <span class="text-muted">(optional)</span></label>'
+                + '<textarea id="req-note" class="form-control" rows="3"></textarea>',
+            footer: {
+                buttonsHtml: '<button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>'
+                    + '<button class="btn btn-primary ms-2" onclick="submitRequest(\'' + esc(id) + '\')">Send request</button>'
+            }
+        });
+    }
+
+    async function submitRequest(id) {
+        try {
+            await app.api.post('access-requests', { resourceId: id, note: $('#req-note').val() });
+            app.modal.close();
+            app.messages.toast('Request sent', 'success');
+            await load();
+        } catch (err) {
+            app.messages.action((err && err.message) || 'Could not send request', app.modal.body(), 'danger');
+        }
+    }
+
+    async function withdraw(id) {
+        try {
+            await app.api.delete('access-requests/' + id);
+            await load();
+        } catch (err) {
+            app.messages.toast((err && err.message) || 'Could not withdraw', 'danger');
+        }
+    }
+
+    async function decide(id, action) {
+        try {
+            await app.api.post('access-requests/' + id + '/' + action, {});
+            app.messages.toast('Request ' + (action === 'approve' ? 'approved' : 'denied'), 'success');
+            await load();
+        } catch (err) {
+            app.messages.toast((err && err.message) || 'Could not update request', 'danger');
+        }
+    }
+
+    $(document).ready(function() {
+        load().catch(function(e){
+            console.error('Failed to load catalog:', e);
+            app.messages.toast('Could not load the catalog', 'danger');
+        });
+    });
 </script>
+
+<%- include("bottom") %>

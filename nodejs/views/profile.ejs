@@ -92,8 +92,14 @@
 	async function renderMyServices(){
 		try{
 			let res = await app.api.get('discovery/me');
+			// The server already resolves this by walking the graph, so a service
+			// with no address of its own inherits its host's. Only fall back
+			// locally when it genuinely resolved to nothing.
 			res.results.forEach(r => {
-				r.resolvedAddress = (r.metadata && r.metadata.address) || (r.metadata && r.metadata.ip) || 'N/A';
+				r.resolvedAddress = r.resolvedAddress
+					|| (r.metadata && r.metadata.address)
+					|| (r.metadata && r.metadata.ip)
+					|| 'N/A';
 			});
 			$.scope.myservices.empty();
 			$.scope.myservices.push(...res.results);

@@ -33,39 +33,118 @@ RUN if [ -n "$GIT_COMMIT" ]; then \
         && git rev-parse --short HEAD > /commit.txt; } 2>/dev/null || echo unknown > /commit.txt; \
     fi
 
+# ── OpenLDAP from source ─────────────────────────────────────────────────────
+# We build slapd from OpenLDAP master rather than installing Alpine's packages,
+# for exactly one feature: the `nestgroup` overlay (ITS#10161, Howard Chu,
+# 2024-03-21), which evaluates nested groups server-side. Nothing in any 2.6.x
+# release can do this -- verified: 2.6.13 ships 26 overlay modules and
+# nestgroup is not among them -- and the alternative is resolving nesting
+# separately in every consumer (this app, SSSD on each host, jump-host, proxy),
+# where any consumer that forgets silently under-grants access.
+#
+# Consequence to know about: master ships LMDB 1.0.0, whose on-disk format the
+# 0.9.x used by 2.6.x cannot read, and vice versa
+# ("MDB_INVALID: File is not an LMDB file"). Moving an existing directory onto
+# this image is a slapcat/slapadd migration, not a restart. See DEPLOYMENT.md.
+FROM node:20-alpine AS ldapbuild
+
+# groff is not optional despite producing nothing we ship: the build descends
+# into doc/man unconditionally and its Makefile calls soelim, which groff
+# provides. Without it the whole `make` fails at the man-page stage
+# ("soelim: not found") long after slapd itself has compiled fine.
+RUN apk add --no-cache \
+        build-base autoconf automake libtool \
+        openssl-dev cyrus-sasl-dev \
+        git make pkgconf util-linux-dev groff
+
+# Pinned to an exact commit, not a branch tip. This is the directory server the
+# whole lab authenticates against; an unpinned `master` would mean every image
+# rebuild silently ships whatever landed upstream that morning, and a bad day on
+# master would take out logins with no way to tell what changed.
+#
+# TODO: drop this whole from-source stage once nestgroup ships in a release.
+# It is master-only today (ITS#10161, 2024-03-21); the 2.7 roadmap has slipped
+# from Fall 2024 to Fall 2025 and is still unreleased. When 2.7 lands with
+# nestgroup, revert to `apk add openldap openldap-overlay-nestgroup ...` --
+# the entrypoint already probes for nestgroup.so and needs no change, and the
+# app already keys off app_ldap__nestedGroupsServerSide either way.
+ARG OPENLDAP_COMMIT=350e9eb38b2270c2bad97c61ee02e85fb8f3196d
+
+WORKDIR /src
+RUN git init -q . \
+    && git remote add origin https://git.openldap.org/openldap/openldap.git \
+    && git fetch -q --depth 1 origin "${OPENLDAP_COMMIT}" \
+    && git checkout -q FETCH_HEAD \
+    && git rev-parse HEAD > /opt-openldap-commit.txt
+
+# Overlays are built as loadable modules (=mod) because docker-entrypoint.sh
+# `moduleload`s them individually; nestgroup joins that set.
+RUN ./configure \
+        --prefix=/opt/openldap \
+        --enable-slapd \
+        --enable-modules \
+        --enable-mdb \
+        --enable-memberof=mod \
+        --enable-refint=mod \
+        --enable-ppolicy=mod \
+        --enable-dynlist=mod \
+        --enable-nestgroup=mod \
+        --enable-syncprov=mod \
+        --enable-auditlog=mod \
+        --with-tls=openssl \
+        --with-cyrus-sasl \
+    && make depend \
+    && make -j"$(nproc)" \
+    && make install
+
+# pw-sha2 provides {SSHA512}, which every existing user password is stored as.
+# It lives in contrib and is not covered by the configure flags above, so it is
+# built separately against the just-built tree -- omitting it would make every
+# user password unverifiable.
+RUN cd contrib/slapd-modules/passwd/sha2 \
+    && make prefix=/opt/openldap OPENLDAP_SRC=/src \
+    && cp .libs/pw-sha2.so* /opt/openldap/libexec/openldap/
+
 FROM node:20-alpine
 
-# Install OpenLDAP and required packages.
-# Alpine splits OpenLDAP into many small subpackages; there is no catch-all
-# "openldap-overlays" package. We install exactly the backends/overlays/modules
-# the app depends on:
-#   openldap-back-mdb     : the mdb backend (slapd.conf uses `database mdb`)
-#   openldap-overlay-ppolicy   : ppolicy module + overlay (account locking)
-#   openldap-overlay-memberof  : reverse group membership
-#   openldap-overlay-refint    : referential integrity on group members
-#   openldap-passwd-sha2       : pw-sha2 module ({SSHA512} user password hashing)
-# Note: Alpine does NOT ship a ppolicy.schema file — on OpenLDAP 2.6 the ppolicy
-# schema is built into ppolicy.so and registered when the module loads, so
-# docker-entrypoint.sh loads it via `moduleload ppolicy` (no schema include).
-#   openssl : used by docker-entrypoint.sh to generate a JWT secret
+# Runtime libraries the from-source slapd links against, plus the app's own
+# deps. No openldap* packages here: everything LDAP comes from /opt/openldap.
+# libltdl (module loading -- slapd is useless without it, since every overlay
+# is a loadable module) and libuuid are pulled in by the source build but are
+# NOT dependencies of anything else here, so they must be named explicitly;
+# omitting them fails at runtime with "Error relocating ... lt_dlopenext:
+# symbol not found", not at build time.
 RUN apk add --no-cache \
-    openldap \
-    openldap-clients \
-    openldap-back-mdb \
-    openldap-overlay-ppolicy \
-    openldap-overlay-memberof \
-    openldap-overlay-refint \
-    openldap-overlay-syncprov \
-    openldap-overlay-auditlog \
-    openldap-passwd-sha2 \
+    openssl \
+    libsasl \
+    libltdl \
+    libuuid \
     dumb-init \
     bash \
-    openssl \
     redis \
     && rm -rf /var/cache/apk/*
 
-# The openldap package already creates the `ldap` user/group, which slapd runs
-# as (see -u ldap -g ldap in docker-entrypoint.sh). Nothing to add here.
+COPY --from=ldapbuild /opt/openldap /opt/openldap
+# Which upstream commit this slapd was built from — so a running container can
+# answer "what am I actually running" without rebuilding.
+COPY --from=ldapbuild /opt-openldap-commit.txt /opt/openldap/COMMIT
+
+# The Alpine openldap package used to create these; nothing does now, and
+# docker-entrypoint.sh runs slapd as -u ldap -g ldap.
+RUN addgroup -S ldap 2>/dev/null || true \
+    && adduser -S -D -H -G ldap ldap 2>/dev/null || true
+
+# docker-entrypoint.sh invokes slapd/slappasswd/ldapadd/ldapsearch by bare name
+# and probes a list of candidate module directories, so putting the from-source
+# tree first on PATH is all that is needed to redirect it. Schemas are symlinked
+# into the conventional location because the entrypoint's slapd.conf includes
+# /etc/openldap/schema/*.schema, and the app's own schemas (theta42, sudo,
+# openssh-lpk) are copied there too.
+ENV PATH="/opt/openldap/bin:/opt/openldap/sbin:/opt/openldap/libexec:${PATH}"
+RUN mkdir -p /etc/openldap/schema \
+    && for f in /opt/openldap/etc/openldap/schema/*.schema; do \
+         ln -sf "$f" "/etc/openldap/schema/$(basename "$f")"; \
+       done
 
 WORKDIR /app
 
