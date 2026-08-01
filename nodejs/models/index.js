@@ -15,7 +15,7 @@ require('./api_token');
 const { init } = require('@simpleworkjs/orm');
 const { Resource, ResourceEdge, ResourceGroup } = require('./resource');
 const { AccessRequest } = require('./access_request');
-
+const { Webhook } = require('./webhook');
 async function initORM() {
   const ormConf = conf.orm || {
     dialect: 'sqlite',
@@ -29,7 +29,7 @@ async function initORM() {
     await init({
       conf: { orm: ormConf },
       models: [
-        Resource, ResourceEdge, ResourceGroup, AccessRequest,
+        Resource, ResourceEdge, ResourceGroup, AccessRequest, Webhook,
         Token, AuthToken, InviteToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken
       ]
     });

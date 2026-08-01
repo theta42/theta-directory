@@ -68,6 +68,18 @@ router.get('/directory', function(req, res) {
   res.render('directory', {...values});
 });
 
+router.get('/discovery', function(req, res, next) {
+  res.redirect('/directory');
+});
+
+router.get('/plugins',  function(req, res, next) {
+  res.redirect('/directory');
+});
+
+router.get('/vault',  function(req, res, next) {
+  res.render('vaultwarden', {...values});
+});
+
 // Linkable deep-link to a single resource's modal, e.g. from the resource
 // modal's app.modal `url` option. Mirrors /users/:uid below: no server-side
 // use of :slug at all -- the client reads location.pathname itself and opens
@@ -97,6 +109,10 @@ router.get('/profile', async function(req, res, next) {
 
 router.get('/users', async function(req, res, next) {
   res.render('users', {...values});
+});
+
+router.get('/conf', async function(req, res, next) {
+  res.render('conf', {...values});
 });
 
 router.get('/login', async function(req, res, next) {

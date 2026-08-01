@@ -31,9 +31,17 @@ const models = require('../models');
  * Initialize ORM, then Listen on provided port, on all network interfaces.
  */
 models.initORM().then(() => {
+  return require('../utils/conf_manager').init();
+}).then(() => {
   server.listen(port);
   server.on('error', onError);
   server.on('listening', onListening);
+
+  // Initialize scheduler
+  const { initScheduler } = require('../services/scheduler');
+  initScheduler(conf.discovery).catch(err => {
+    console.error('Failed to initialize scheduler:', err);
+  });
 }).catch(err => {
   console.error('Failed to initialize ORM:', err);
   process.exit(1);

@@ -43,8 +43,10 @@ module.exports = {
 		// non-admin had no signposted destination at all.
 		{href: '/', icon: 'fa-solid fa-compass', label: 'Catalog', groups: []},
 		{href: '/users', icon: 'fa-solid fa-users', label: 'Users', groups: ['app_sso_admin', 'admin']},
-		{href: '/groups', icon: 'fa-solid fa-users-viewfinder', label: 'Groups', groups: ['app_sso_admin', 'admin']},
+		{href: '/groups', icon: 'fas fa-users-cog', label: 'Groups', groups: ['app_sso_admin']},
+		{href: '/conf', icon: 'fas fa-cogs', label: 'Configuration', groups: ['app_sso_admin']},
 		{href: '/directory', icon: 'fa-solid fa-server', label: 'Directory', groups: ['app_sso_admin', 'app_sso_directory_admin', 'admin']},
+		{href: '/vault', icon: 'fa-solid fa-vault', label: 'Vault', groups: []},
 		{href: '/overview', icon: 'fa-solid fa-gauge-high', label: 'Overview', groups: ['app_sso_admin', 'admin']},
 	],
 };

@@ -1,0 +1,71 @@
+<%- include('top') %>
+<script type="text/javascript">
+	app.auth.forceLogin(['admin', 'app_sso_admin']);
+
+	$(document).ready(function() {
+		loadConf();
+	});
+
+	async function loadConf() {
+		try {
+			const data = await app.api.get('conf');
+			$('#conf-json').val(JSON.stringify(data, null, 4));
+		} catch (error) {
+			app.messages.toast('Failed to load configuration: ' + (error.message || 'Unknown error'), 'danger');
+		}
+	}
+
+	async function saveConf() {
+		const btn = $('#btn-save');
+		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Saving...');
+		try {
+			const text = $('#conf-json').val();
+			const payload = JSON.parse(text);
+			
+			await app.api.post('conf', payload);
+			app.messages.toast('Configuration saved successfully! It will take effect immediately.', 'success');
+		} catch (error) {
+			let msg = error.message;
+			if (error instanceof SyntaxError) {
+				msg = 'Invalid JSON format. Please check your syntax.';
+			}
+			app.messages.toast('Failed to save configuration: ' + msg, 'danger');
+		} finally {
+			btn.prop('disabled', false).html('<i class="fas fa-save"></i> Save Configuration');
+		}
+	}
+</script>
+
+<div class="container py-4">
+	<div class="row mb-4">
+		<div class="col">
+			<h2><i class="fas fa-cogs"></i> System Configuration</h2>
+			<p class="text-muted">
+				Manage runtime configuration such as SMTP settings, discovery plugins, and OAuth parameters.
+				These secrets are stored securely in OpenBao Vault.
+			</p>
+		</div>
+	</div>
+
+	<div class="row">
+		<div class="col-12">
+			<div class="card shadow-sm border-0">
+				<div class="card-header bg-white border-bottom-0 pt-4 pb-0">
+					<h5 class="mb-0">Configuration (JSON)</h5>
+				</div>
+				<div class="card-body">
+					<div class="alert alert-info">
+						<i class="fas fa-info-circle"></i> Be careful when editing this JSON! Malformed JSON will not save.
+					</div>
+					<textarea id="conf-json" class="form-control text-monospace" rows="25" style="font-family: monospace; font-size: 14px; background-color: #f8f9fa;" spellcheck="false"></textarea>
+				</div>
+				<div class="card-footer bg-white border-top-0 pb-4 text-end">
+					<button class="btn btn-secondary me-2" onclick="loadConf()"><i class="fas fa-undo"></i> Reset</button>
+					<button id="btn-save" class="btn btn-primary" onclick="saveConf()"><i class="fas fa-save"></i> Save Configuration</button>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<%- include('bottom') %>

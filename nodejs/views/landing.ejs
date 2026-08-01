@@ -298,7 +298,7 @@
         var mineIds = {};
         state.mine.forEach(function(r){ mineIds[r.id] = true; });
         state.others = (allRes.results || []).filter(function(r){
-            return !mineIds[r.id] && r.kind !== 'site' && r.kind !== 'oauth';
+            return !mineIds[r.id] && r.kind !== 'site' && r.kind !== 'oauth' && (r.metadata && r.metadata.managed);
         });
 
         // Requests are best-effort: a failure here must not blank the catalog.

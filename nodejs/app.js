@@ -97,6 +97,7 @@ app.use('/api/access-requests', middleware.auth, require('./routes/access_reques
 app.use('/api/update-check', middleware.auth, require('./routes/update_check'));
 app.use('/api/tos', middleware.auth, require('./routes/tos'));
 app.use('/api/metrics', middleware.auth, require('./routes/api_metrics'));
+app.use('/api/conf', middleware.auth, require('./routes/api_conf'));
 // Self-service API tokens (PATs) — owner-scoped, no admin group required.
 app.use('/api/api-token', middleware.auth, require('./routes/api_token'));
 
@@ -105,7 +106,20 @@ app.use('/oauth', oauthRouter);
 app.use('/api/oauth', middleware.auth, oauthApiRouter);
 app.use('/api/oauth/client', middleware.auth, require('./routes/oauth_client'));
 app.get('/.well-known/openid-configuration', discovery);
+app.use('/api/webhook', require('./routes/webhook'));
+app.use('/api/plugins', middleware.auth, require('./routes/plugins'));
+const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 
+const vaultApiProxy = createProxyMiddleware({
+  target: 'http://openbao:8200',
+  changeOrigin: true,
+  pathRewrite: { '^/': '/v1/' },
+  on: {
+    proxyReq: fixRequestBody
+  }
+});
+
+app.use('/api/vault', middleware.auth, vaultApiProxy);
 
 // Catch 404 and forward to error handler. If none of the above routes are
 // used, this is what will be called.
@@ -128,5 +142,18 @@ app.use(function(err, req, res, next) {
   }
 
   res.status(err.status || 500);
-  res.json({name: err.name, message: err.message});
+  if (req.accepts('html') && !req.originalUrl.startsWith('/api/')) {
+    const conf = require('@simpleworkjs/conf');
+    const buildInfo = require('./utils/build_info');
+    res.render('error', { 
+      name: conf.name, 
+      title: 'Error',
+      titleIcon: '',
+      logo: conf.logo,
+      error: err,
+      ...buildInfo
+    });
+  } else {
+    res.json({name: err.name, message: err.message});
+  }
 });

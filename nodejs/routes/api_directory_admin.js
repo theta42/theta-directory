@@ -42,7 +42,12 @@ router.use(async (req, res, next) => {
 // --- Resources ---
 router.get('/resources', async (req, res, next) => {
   try {
-    const resources = await Resource.list();
+    let resources = await Resource.list();
+    resources = resources.filter(r => {
+      const isAuto = r.metadata?.discovery_sources?.length > 0 && !r.metadata.discovery_sources.includes('manual');
+      const isManaged = r.metadata?.managed === true;
+      return !isAuto || isManaged;
+    });
     // Even admins never receive secret metadata (e.g. client_secret_hash) over
     // the wire; projectResources strips it unconditionally.
     res.json({ results: projectResources(resources, { fullMetadata: true }) });

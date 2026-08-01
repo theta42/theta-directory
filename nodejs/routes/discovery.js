@@ -83,13 +83,75 @@ router.get('/me', async (req, res, next) => {
 				for (const rg of rgs) ids.add(rg.resourceId);
 			}
 			const all = await Resource.list();
-			accessible = all.filter(r => ids.has(r.id) || (r.metadata && r.metadata.isPublic));
+			accessible = all.filter(r => {
+				const isAuto = r.metadata?.discovery_sources?.length > 0 && !r.metadata.discovery_sources.includes('manual');
+				const isManaged = r.metadata?.managed === true;
+				if (isAuto && !isManaged) return false;
+				return ids.has(r.id) || (r.metadata && r.metadata.isPublic);
+			});
 		}
 		// resolvedAddress is the whole point of /me ("how do I reach it") and a
 		// service inherits it from its host, so it must be computed here rather
 		// than left to each caller to guess at address || ip.
 		accessible = await Resource.withResolvedAddress(accessible);
 		res.json(envelope(projectResources(accessible, { fullMetadata })));
+	} catch (err) { next(err); }
+});
+
+// POST /api/discovery/sync
+// Used by external agents (e.g. ldap-client) to push discovery data.
+router.post('/sync', async (req, res, next) => {
+	try {
+		const { DiscoveryReconciler } = require('../services/discovery_reconciler');
+		// Assuming the caller provides a source name and payload
+		const source = req.body.source || 'agent';
+		await DiscoveryReconciler.reconcile(source, req.body.payload || req.body);
+		res.json(envelope({ success: true }));
+	} catch (err) { next(err); }
+});
+
+// POST /api/discovery/promote/:slug
+// Promotes an unmanaged device to managed by creating its LDAP groups.
+router.post('/promote/:slug', async (req, res, next) => {
+	try {
+		const resource = await Resource.getBySlug(req.params.slug);
+		if (!resource) return res.status(404).json(envelope({ error: 'Not found' }));
+		
+		const { Group } = require('../models/group_ldap');
+		
+		const accessGroup = `${resource.slug}_access`;
+		const adminGroup = `${resource.slug}_admin`;
+		
+		// Create groups if they don't exist
+		try { await Group.get(accessGroup); } catch (e) {
+			if (e.status === 404) await Group.add({ name: accessGroup, description: `Access to ${resource.name}`, owner: req.user.dn });
+			else throw e;
+		}
+		try { await Group.get(adminGroup); } catch (e) {
+			if (e.status === 404) await Group.add({ name: adminGroup, description: `Admin access to ${resource.name}`, owner: req.user.dn });
+			else throw e;
+		}
+		
+		// Link them
+		const crypto = require('crypto');
+		await ResourceGroup.create({
+			id: crypto.randomUUID(),
+			resourceId: resource.id,
+			groupCn: accessGroup,
+			accessLevel: 'user'
+		});
+		await ResourceGroup.create({
+			id: crypto.randomUUID(),
+			resourceId: resource.id,
+			groupCn: adminGroup,
+			accessLevel: 'admin'
+		});
+		
+		const meta = resource.metadata || {};
+		meta.managed = true;
+		await resource.update({ metadata: meta });
+		
+		res.json(envelope({ success: true, groups: [accessGroup, adminGroup] }));
 	} catch (err) { next(err); }
 });
 
