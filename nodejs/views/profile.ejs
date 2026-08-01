@@ -6,13 +6,10 @@
 	var isOwnProfile = !location.pathname.includes('/users/');
 
 	function renderProfile(user){
-		// data.photo = unescape(encodeURIComponent(data.jpegPhoto));
 		user.createTimestamp = moment(user.createTimestamp, "YYYYMMDDHHmmssZ").fromNow();
 		user.modifyTimestamp = moment(user.modifyTimestamp, "YYYYMMDDHHmmssZ").fromNow();
 		user.managerUids = (user.manager || []).map(app.user.dnToUid);
-
 		$.scope.user.update(user);
-		$.scope.passwordReset.update(user);
 	};
 
 	async function renderUserGroups(user){
@@ -92,9 +89,6 @@
 	async function renderMyServices(){
 		try{
 			let res = await app.api.get('discovery/me');
-			// The server already resolves this by walking the graph, so a service
-			// with no address of its own inherits its host's. Only fall back
-			// locally when it genuinely resolved to nothing.
 			res.results.forEach(r => {
 				r.resolvedAddress = r.resolvedAddress
 					|| (r.metadata && r.metadata.address)
@@ -112,34 +106,32 @@
 		try{
 			let uid = currentUser.uid;
 			let res = await app.api.get(`metrics/user/${uid}`);
-			if (res && res.results) {
-				const renderList = (items, id) => {
-					const el = document.getElementById(id);
-					if(!el) return;
-					el.innerHTML = '';
-					if (!items || items.length === 0) {
-						el.innerHTML = '<li class="list-group-item text-muted">No data available</li>';
-						return;
-					}
-					items.forEach(item => {
-						el.innerHTML += `<li class="list-group-item d-flex justify-content-between align-items-center">
-							${item.value}
-							<span class="badge bg-primary rounded-pill">${item.score}</span>
-						</li>`;
-					});
-				};
-				renderList(res.results.services, 'metrics-user-services');
+			if (res && res.results && res.results.services) {
+				const el = document.getElementById('metrics-user-services');
+				if(!el) return;
+				el.innerHTML = '';
+				const items = res.results.services;
+				if (!items || items.length === 0) {
+					el.innerHTML = '<li class="list-group-item text-muted">No data available</li>';
+					return;
+				}
+				items.forEach(item => {
+					el.innerHTML += `<li class="list-group-item d-flex justify-content-between align-items-center">
+						${item.value}
+						<span class="badge bg-primary rounded-pill">${item.score}</span>
+					</li>`;
+				});
 			}
 		}catch(error){
-			console.error('renderMyMetrics error:', error)
+			console.error('renderMyMetrics error:', error);
+			const el = document.getElementById('metrics-user-services');
+			if(el) el.innerHTML = '<li class="list-group-item text-danger">Failed to load metrics</li>';
 		}
 	}
-
 
 	async function determinUser(){
 		if(location.pathname.includes('/users/')){
 			let uid = location.pathname.replace('/users/', '');
-
 			return (await app.api.get('user/'+uid)).results;
 		}else{
 			return await app.auth.asyncUser;
@@ -148,16 +140,9 @@
 
 	function editUser(user){
 		user = user || currentUser;
-
 		var $profileCard = $('#userProfile');
 		var $editCard = $('#editProfile');
-
 		$.scope.editProfile.update(user);
-		// jq-repeat's update() is trailing-edge throttled (~50ms) as of 2.1.0 --
-		// wait for the throttle tick to land before sliding the updated card
-		// into view, or it can briefly show stale/empty data. The manager
-		// picker is a JS widget, not a mustache-bound input, so it also has to
-		// wait for update() to (re-)render its empty mount div before attaching.
 		setTimeout(function(){
 			app.ui.userSelect('#edit-manager', {
 				name: 'manager',
@@ -172,8 +157,6 @@
 	function editUserSeccess(data){
 		currentUser = data.results;
 		renderProfile(currentUser);
-		// Same throttle-tick wait as editUser() above -- renderProfile() calls
-		// $.scope.user.update()/passwordReset.update() internally.
 		setTimeout(function(){
 			$('#editProfile').slideUp();
 			$('#userProfile').slideDown()
@@ -201,6 +184,29 @@
 		});
 	}
 
+	// Password reset modal
+	function openPasswordResetModal(){
+		app.modal.open({
+			title: 'Reset Password for ' + currentUser.uid,
+			bodyHtml:
+				'<div class="actionMessage mb-3" style="display:none"></div>'
+				+ '<form id="passwordResetForm" action="user/' + currentUser.uid + '/password" method="put" onsubmit="formAJAX(this)" evalAJAX="app.modal.close(); app.messages.toast(\'Password updated\', \'success\');">'
+				+   '<div class="mb-3">'
+				+     '<label class="form-label">New Password</label>'
+				+     '<input type="password" class="form-control shadow" name="userPassword" placeholder="8+ chars; mix upper/lower/number/symbol" validate="password">'
+				+   '</div>'
+				+   '<div class="mb-3">'
+				+     '<label class="form-label">Confirm Password</label>'
+				+     '<input type="password" class="form-control shadow" name="password" placeholder="Retype password" validate="eq:userPassword">'
+				+   '</div>'
+				+ '</form>',
+			footer: {
+				buttonsHtml: '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>'
+					+ '<button type="submit" form="passwordResetForm" class="btn btn-warning"><i class="fa-solid fa-key"></i> Reset Password</button>',
+			},
+		});
+	}
+
 	$(document).ready(async function(){
 		currentUser = await determinUser();
 
@@ -210,7 +216,7 @@
 		renderMyServices();
 		if(!isOwnProfile) {
 			renderMyMetrics();
-			$('#user-metrics-card').show();
+			$('#tab-metrics').parent().show();
 		}
 		$('#personal-group-uid-label').text(currentUser.uid);
 
@@ -221,8 +227,6 @@
 			name: 'members', values: [], placeholder: 'Type a username…',
 		});
 
-		// API Tokens are self-service only — never shown when an admin is
-		// viewing someone else's profile via /users/:uid.
 		if(isOwnProfile){
 			$('#own-api-tokens-section').show();
 			tableAJAX();
@@ -230,318 +234,275 @@
 	});
 </script>
 
-<div class="row mb-3" style="display:none">
-	<div class="col-md-4">
-		<div class="shadow-lg card">
-			<div class="card-header shadow">
-				<i class="fa-solid fa-arrow-rotate-left"></i>
-				Password Reset
-				<div class="float-end">
-					<i class="fa-solid fa-arrows-up-down"></i>
+<div class="container mt-4">
+<div class="row" style="display:none">
+	<div class="col-12">
+		<div id="userProfile" class="shadow-lg card card-default mb-4">
+			<div class="card-header shadow d-flex justify-content-between align-items-center">
+				<div>
+					<i class="fa-regular fa-id-card"></i>
+					Profile: <strong>{{user.uid}}</strong>
+				</div>
+				<div class="d-flex gap-2">
+					<button type="button" onclick="openPasswordResetModal()" class="btn btn-outline-warning btn-sm">
+						<i class="fa-solid fa-key"></i> Reset Password
+					</button>
+					<button type="button" onclick="editUser()" class="btn btn-warning btn-sm">
+						<i class="fa-solid fa-user-pen"></i> Edit
+					</button>
 				</div>
 			</div>
-			<div class="card-header shadow actionMessage" style="display:none">
+			<div class="card-header shadow actionMessage" style="display:none"></div>
+
+			<div class="px-3 pt-3 border-bottom">
+				<ul class="nav nav-tabs border-bottom-0" role="tablist">
+					<li class="nav-item" role="presentation">
+						<button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-profile" type="button" role="tab">
+							<i class="fa-solid fa-user"></i> Profile
+						</button>
+					</li>
+					<li class="nav-item" role="presentation">
+						<button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-groups" type="button" role="tab">
+							<i class="fa-solid fa-users"></i> My Groups
+						</button>
+					</li>
+					<li class="nav-item" role="presentation">
+						<button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-services" type="button" role="tab">
+							<i class="fa-solid fa-layer-group"></i> My Services
+						</button>
+					</li>
+					<li class="nav-item" role="presentation" id="tab-metrics-parent" style="display:none">
+						<button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-metrics" type="button" role="tab">
+							<i class="fa-solid fa-chart-line"></i> Security & Usage
+						</button>
+					</li>
+					<li class="nav-item" role="presentation">
+						<button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-members" type="button" role="tab">
+							<i class="fa-solid fa-people-group"></i> Members of {{user.uid}}'s Group
+						</button>
+					</li>
+				</ul>
 			</div>
-			<div jq-repeat="passwordReset" class="card-body">
-				<h3>
-					Reset Password for {{uid}}
-				</h3>
-				<form action="user/{{uid}}/password" method="put" onsubmit="formAJAX(this)" class="mb-3">
-					<div class="mb-3">
-						<label class="form-label">Password</label>
-						<div class="input-group shadow">
-							<span class="input-group-text" id="addon-wrapping"><i class="fa-solid fa-key"></i></span>
-							<input type="password" name="userPassword" class="form-control" placeholder="huunteR!23" aria-label="Username" aria-describedby="addon-wrapping">
+
+			<div class="card-body">
+				<div class="tab-content">
+					<!-- Profile Tab -->
+					<div class="tab-pane fade show active" id="tab-profile" role="tabpanel">
+						<div jq-repeat="user">
+							<div class="row">
+								<div class="col-md-6">
+									<p><i>Name:</i> <b>{{givenName}} {{sn}}</b></p>
+									<p><i>Email:</i> <b>{{mail}}</b>
+										{{#emailVerified}}<span class="badge bg-success ms-1"><i class="fa-solid fa-circle-check"></i> Verified</span>{{/emailVerified}}
+									</p>
+									<p><i>Phone:</i> <b>{{mobile}}</b>
+										{{#phoneVerified}}<span class="badge bg-success ms-1"><i class="fa-solid fa-circle-check"></i> Verified</span>{{/phoneVerified}}
+									</p>
+									<p><i>Location (Site):</i> <b>{{location}}</b></p>
+									<p><i>LDAP DN:</i> <b>{{dn}}</b></p>
+									<p><i>Home Directory:</i> <b>{{homeDirectory}}</b></p>
+								</div>
+								<div class="col-md-6">
+									<p><i>Login Shell:</i> <b>{{loginShell}}</b></p>
+									<p><i>Manager(s):</i>
+										{{#managerUids}}<span class="badge bg-secondary me-1">{{.}}</span>{{/managerUids}}
+									</p>
+									<p><i>Status:</i>
+										{{#isActive}}<span class="badge bg-success">Active</span>{{/isActive}}
+										{{#isInactive}}<span class="badge bg-danger">Inactive</span>{{/isInactive}}
+									</p>
+									<p><i>Date of Birth:</i> <b>{{dateOfBirth}}</b></p>
+									<p><i>TOS:</i>
+										{{#tosAccepted}}<span class="badge bg-success">Accepted</span>{{/tosAccepted}}
+										{{#tosNotAccepted}}<span class="badge bg-warning text-dark">Pending</span>{{/tosNotAccepted}}
+									</p>
+									<p><i>SSH Public Key:</i> <b>{{sshPublicKey}}</b></p>
+									<p><i>Unix User ID:</i> <b>{{uidNumber}}</b></p>
+									<p><i>Unix Group ID:</i> <b>{{gidNumber}}</b></p>
+								</div>
+							</div>
+							{{#description}}
+							<hr>
+							<p><i>Description:</i><br>{{description}}</p>
+							{{/description}}
+							<hr>
+							<p class="text-muted small mb-0">
+								<i>Joined:</i> <b>{{createTimestamp}}</b> | <i>Edited:</i> <b>{{modifyTimestamp}}</b>
+							</p>
+						</div>
+
+						<div class="mt-3 border-top pt-3">
+							<h6 class="text-muted">Admin Actions</h6>
+							<div class="d-flex gap-2 flex-wrap group-required group-required-app_sso_admin">
+								{{#isActive}}
+								<button type="button" class="btn btn-outline-warning" title="Deactivate user" onclick="toggleActive('{{uid}}', false)">
+									<i class="fa-solid fa-lock"></i> Deactivate
+								</button>
+								{{/isActive}}
+								{{#isInactive}}
+								<button type="button" class="btn btn-warning" title="Activate user" onclick="toggleActive('{{uid}}', true)">
+									<i class="fa-solid fa-lock-open"></i> Activate
+								</button>
+								{{/isInactive}}
+								<button type="button" class="btn btn-secondary" title="Impersonate this user" onclick="startImpersonate('{{uid}}')">
+									<i class="fa-solid fa-user-secret"></i> Impersonate
+								</button>
+								<button type="button" class="btn btn-danger" onclick="deleteUser('{{uid}}', this)">
+									<i class="fa-solid fa-user-slash"></i> Delete User
+								</button>
+							</div>
 						</div>
 					</div>
-					<div class="mb-3">
-						<label class="form-label">Again</label>
-						<div class="input-group shadow">
-							<span class="input-group-text" id="addon-wrapping"><i class="fa-solid fa-key"></i></span>
-							<input type="password" name="password" class="form-control" placeholder="huunteR!23" aria-label="Username" aria-describedby="addon-wrapping">
+
+					<!-- My Groups Tab -->
+					<div class="tab-pane fade" id="tab-groups" role="tabpanel">
+						<div class="table-responsive">
+							<table class="table table-striped">
+								<thead>
+									<th>Name</th>
+									<th>Description</th>
+									<th class="group-required group-required-app_sso_admin text-end">Actions</th>
+								</thead>
+								<tbody jq-repeat="mygroups">
+									<tr>
+										<td>{{cn}}</td>
+										<td>{{description}}</td>
+										<td class="text-end group-required group-required-app_sso_admin">
+											<button type="button" class="btn btn-sm btn-outline-danger" title="Remove from group" onclick="removeFromGroup('{{cn}}', this)">
+												<i class="fa-solid fa-xmark"></i>
+											</button>
+										</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+						<div class="group-required group-required-app_sso_admin mt-3">
+							<label class="form-label small">Add to group</label>
+							<div class="d-flex gap-2 align-items-start">
+								<div id="add-group-select" class="flex-grow-1"></div>
+								<button type="button" class="btn btn-outline-dark" onclick="addToGroups(this)">Add</button>
+							</div>
 						</div>
 					</div>
-					<button type="submit" class="btn btn-outline-secondary shadow">Change</button>
-				</form>
 
-			</div>
-		</div>
-	</div>
-
-	<div class="col-md-8">
-		<div id="userProfile" class="shadow-lg card card-default mb-8">
-			<div class="card-header shadow">
-				<i class="fa-regular fa-id-card"></i>
-				Profile
-				<div class="float-end">
-					<i class="fa-solid fa-arrows-up-down"></i>
-				</div>
-			</div>
-			<div class="card-header shadow actionMessage" style="display:none">
-			</div>
-			<div class="profile-body" jq-repeat="user">
-				<div class="card-body profile-body-{{uid}}">
-					<h2><i>User Name:</i> <b>{{uid}}</b></h2>
-					{{^isServiceAccount}}<i>Name:</i> <b>{{givenName}} {{sn}}</b><br />{{/isServiceAccount}}
-					<i>Email:</i> <b>{{mail}}</b>
-					{{#emailVerified}}<span class="badge bg-success ms-1"><i class="fa-solid fa-circle-check"></i> Verified</span>{{/emailVerified}}
-					<br />
-					<i>Phone:</i> <b>{{mobile}}</b>
-					{{#phoneVerified}}<span class="badge bg-success ms-1"><i class="fa-solid fa-circle-check"></i> Verified</span>{{/phoneVerified}}
-					<br />
-					<i>Location (Site):</i> <b>{{location}} </b><br />
-					<i>LDAP DN:</i> <b>{{dn}} </b><br />
-					<i>Home Directory:</i> <b>{{homeDirectory}} </b><br />
-					<i>Login Shell:</i> <b>{{loginShell}} </b><br />
-					<i>Manager(s):</i>
-					{{#managerUids}}<span class="badge bg-secondary me-1">{{.}}</span>{{/managerUids}}
-					<br />
-					<i>Status:</i>
-					{{#isActive}}<span class="badge bg-success">Active</span>{{/isActive}}
-					{{#isInactive}}<span class="badge bg-danger">Inactive</span>{{/isInactive}}
-					<br />
-					<i>Date of Birth:</i> <b>{{dateOfBirth}}</b><br />
-					<i>TOS:</i>
-					{{#tosAccepted}}<span class="badge bg-success">Accepted</span>{{/tosAccepted}}
-					{{#tosNotAccepted}}<span class="badge bg-warning text-dark">Pending</span>{{/tosNotAccepted}}
-					<br />
-					<i>SSH Public Key:</i> <b>{{sshPublicKey}}</b><br />
-					<i>Unix User ID:</i> <b>{{uidNumber}} </b><br />
-					<i>Unix Group ID:</i> <b>{{gidNumber}} </b><br />
-					<i>Description:</i><br>
-					<p>
-						{{description}}
-					</p>
-					<!-- <img id="profile_photo" /> -->
-				</div>
-				<div class="card-footer profile-body-{{uid}}">
-					<div class="float-end">
-						<button type="button" onclick="editUser()" class="btn btn-warning btn shadow ">
-							<i class="fa-solid fa-user-pen"></i>
-						</button>
-						{{#isActive}}
-						<button type="button" class="btn btn-outline-warning shadow group-required group-required-app_sso_admin" title="Deactivate user" onclick="toggleActive('{{uid}}', false)">
-							<i class="fa-solid fa-lock"></i>
-						</button>
-						{{/isActive}}
-						{{#isInactive}}
-						<button type="button" class="btn btn-warning shadow group-required group-required-app_sso_admin" title="Activate user" onclick="toggleActive('{{uid}}', true)">
-							<i class="fa-solid fa-lock-open"></i>
-						</button>
-						{{/isInactive}}
-						<button type="button" class="btn btn-secondary shadow group-required group-required-app_sso_admin" title="Impersonate this user" onclick="startImpersonate('{{uid}}')">
-							<i class="fa-solid fa-user-secret"></i>
-						</button>
-						<button type="button" class="btn btn-danger shadow group-required group-required-app_sso_admin" onclick="deleteUser('{{uid}}', this)">
-							<i class="fa-solid fa-user-slash"></i>
-						</button>
-					</div>
-					<div class="float-left">
-						<i>Joined:</i> <b>{{createTimestamp}} </b> <br/>
-						<i>Edited:</i> <b>{{modifyTimestamp}} </b>
+					<!-- My Services Tab -->
+					<div class="tab-pane fade" id="tab-services" role="tabpanel">
+						<div class="table-responsive">
+							<table class="table table-striped">
+								<thead>
+									<th>Name</th>
+									<th>Address / IP</th>
+									<th>Description</th>
+									<th>Kind</th>
+								</thead>
+								<tbody jq-repeat="myservices">
+									<tr>
+										<td>{{name}} <small class="text-muted">({{slug}})</small></td>
+										<td><a href="{{resolvedAddress}}" target="_blank"><code>{{resolvedAddress}}</code></a></td>
+										<td>{{description}}</td>
+										<td>
+											{{#metadata.isProduction}}<span class="badge bg-danger mb-1">Prod</span><br>{{/metadata.isProduction}}
+											<span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
+										</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
 					</div>
 
+					<!-- Security & Usage Tab -->
+					<div class="tab-pane fade" id="tab-metrics" role="tabpanel">
+						<div class="row">
+							<div class="col-12">
+								<h6 class="text-success"><i class="fa-solid fa-plug"></i> Top Services Used (Last 7 Days)</h6>
+								<ul class="list-group list-group-flush border rounded" id="metrics-user-services">
+									<li class="list-group-item text-muted">Loading...</li>
+								</ul>
+							</div>
+						</div>
+					</div>
+
+					<!-- Members Tab -->
+					<div class="tab-pane fade" id="tab-members" role="tabpanel">
+						<p class="text-muted small">
+							Every account gets a personal Unix group (its primary GID) — add
+							other accounts here as supplementary members.
+						</p>
+						<div class="table-responsive">
+							<table class="table table-striped">
+								<thead>
+									<th>Username</th>
+									<th class="text-end">Actions</th>
+								</thead>
+								<tbody jq-repeat="personalGroupMembers">
+									<tr>
+										<td>{{uid}}</td>
+										<td class="text-end">
+											<button type="button" class="btn btn-sm btn-outline-danger" title="Remove from group" onclick="removePersonalGroupMember('{{uid}}', this)">
+												<i class="fa-solid fa-xmark"></i>
+											</button>
+										</td>
+									</tr>
+								</tbody>
+							</table>
+						</div>
+						<div class="mt-3">
+							<label class="form-label small">Add member</label>
+							<div class="d-flex gap-2 align-items-start">
+								<div id="add-personal-group-member-select" class="flex-grow-1"></div>
+								<button type="button" class="btn btn-outline-dark" onclick="addPersonalGroupMembers(this)">Add</button>
+							</div>
+						</div>
+					</div>
 				</div>
 			</div>
 		</div>
 
-		<div id="editProfile" class="shadow-lg card card-default mb-8" style="display:none">
+		<!-- Edit Profile Card (hidden by default) -->
+		<div id="editProfile" class="shadow-lg card card-default mb-4" style="display:none">
 			<div class="card-header shadow">
 				<i class="fad fa-id-card"></i>
 				Edit Profile
-				<div class="float-end">
-					<i class="fa-solid fa-arrows-up-down"></i>
-				</div>
 			</div>
-			<div class="card-header shadow actionMessage" style="display:none">
-			</div>
+			<div class="card-header shadow actionMessage" style="display:none"></div>
 			<div class="card-body" jq-repeat="editProfile">
-				<div id="tableAJAX">
-					<h3>Editing {{uid}}</h3>
-					<form action="user/{{uid}}" method="put" onsubmit="formAJAX(this)" evalAJAX="editUserSeccess(data)">
-						<div class="mb-3">
-							<label class="form-label">Date of Birth</label>
-							<input type="date" class="form-control shadow" name="dateOfBirth" value="{{dateOfBirth}}" />
-						</div>
-
-						<div class="mb-3">
-							<label class="form-label">SSH Public Key</label>
-							<input type="text" class="form-control" name="sshPublicKey" placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQ..." value="{{sshPublicKey}}" />
-						</div>
-
-						<div class="mb-3">
-							<label class="form-label">Mobile Phone</label>
-							<input type="text" class="form-control" name="mobile" placeholder="9175551234" value="{{mobile}}" />
-						</div>
-						<div class="mb-3">
-							<label class="form-label">Location (Site)</label>
-							<input type="text" class="form-control" name="location" placeholder="Site One" value="{{location}}" />
-						</div>
-						<div class="mb-3">
-							<label class="form-label">Home Directory</label>
-							<input type="text" class="form-control" name="homeDirectory" placeholder="/home/jsmith" value="{{homeDirectory}}" />
-						</div>
-						<div class="mb-3">
-							<label class="form-label">Login Shell</label>
-							<input type="text" class="form-control" name="loginShell" placeholder="/bin/bash" value="{{loginShell}}" />
-						</div>
-						<div class="mb-3">
-							<label class="form-label">Manager(s)</label>
-							<div id="edit-manager"></div>
-						</div>
-						<div class="mb-3">
-							<label class="form-label">User Description (Optional)</label>
-							<textarea class="form-control" name="description" placeholder="Admin group for gitea app">{{description}}</textarea>
-						</div>
-						<button type="submit" class="btn btn-outline-dark btn-warning">Change</button>
-
-					</form>
-				</div>
-			</div>
-		</div>
-
-		<div class="shadow-lg card card-default mb-8">
-			<div class="card-header shadow">
-				<i class="fa-solid fa-users-viewfinder"></i>
-				My groups
-				<div class="float-end">
-					<a href="/docs/accounts" class="text-reset me-2" title="Help"><i class="fa-solid fa-circle-question"></i></a>
-					<i class="fa-solid fa-arrows-up-down"></i>
-				</div>
-			</div>
-			<div class="card-header shadow actionMessage" style="display:none">
-			</div>
-			<div class="card-body">
-				<div class="table-responsive">
-					<table class="table">
-						<thead>
-							<th>
-								Name
-							</th>
-							<th>
-								Description
-							</th>
-							<th class="group-required group-required-app_sso_admin"></th>
-						</thead>
-						<tbody jq-repeat="mygroups">
-							<tr>
-								<td>{{cn}}</td>
-								<td>{{description}}</td>
-								<td class="text-end group-required group-required-app_sso_admin">
-									<button type="button" class="btn btn-sm btn-outline-danger" title="Remove from group" onclick="removeFromGroup('{{cn}}', this)">
-										<i class="fa-solid fa-xmark"></i>
-									</button>
-								</td>
-							</tr>
-						</tbody>
-					</table>
-				</div>
-				<div class="group-required group-required-app_sso_admin">
-					<label class="form-label small">Add to group</label>
-					<div class="d-flex gap-2 align-items-start">
-						<div id="add-group-select" class="flex-grow-1"></div>
-						<button type="button" class="btn btn-outline-dark" onclick="addToGroups(this)">Add</button>
+				<h3>Editing {{uid}}</h3>
+				<form action="user/{{uid}}" method="put" onsubmit="formAJAX(this)" evalAJAX="editUserSeccess(data)">
+					<div class="mb-3">
+						<label class="form-label">Date of Birth</label>
+						<input type="date" class="form-control shadow" name="dateOfBirth" value="{{dateOfBirth}}" />
 					</div>
-				</div>
-			</div>
-		</div>
-
-		<div class="shadow-lg card card-default mb-8">
-			<div class="card-header shadow">
-				<i class="fa-solid fa-layer-group"></i>
-				My Services
-				<div class="float-end">
-					<i class="fa-solid fa-arrows-up-down"></i>
-				</div>
-			</div>
-			<div class="card-body">
-				<div class="table-responsive">
-					<table class="table">
-						<thead>
-							<th>Name</th>
-							<th>Address / IP</th>
-							<th>Description</th>
-							<th>Kind</th>
-						</thead>
-						<tbody jq-repeat="myservices">
-							<tr>
-								<td>{{name}} <small class="text-muted">({{slug}})</small></td>
-								<td><a href="{{resolvedAddress}}" target="_blank"><code>{{resolvedAddress}}</code></a></td>
-								<td>{{description}}</td>
-								<td>
-									{{#metadata.isProduction}}<span class="badge bg-danger mb-1">Prod</span><br>{{/metadata.isProduction}}
-									<span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
-								</td>
-							</tr>
-						</tbody>
-					</table>
-				</div>
-				</div>
-			</div>
-		</div>
-
-		<div class="shadow-lg card card-default mb-8 group-required group-required-app_sso_admin" id="user-metrics-card" style="display:none">
-			<div class="card-header shadow bg-success text-white">
-				<i class="fa-solid fa-chart-line"></i>
-				Security & Usage Stats (Last 7 Days)
-				<div class="float-end">
-					<i class="fa-solid fa-arrows-up-down"></i>
-				</div>
-			</div>
-			<div class="card-body p-0">
-				<div class="row m-0">
-					<div class="col-12 p-3">
-						<h6 class="text-success"><i class="fa-solid fa-plug"></i> Top Services Used</h6>
-						<ul class="list-group list-group-flush border rounded" id="metrics-user-services">
-							<li class="list-group-item text-muted">Loading...</li>
-						</ul>
+					<div class="mb-3">
+						<label class="form-label">SSH Public Key</label>
+						<input type="text" class="form-control" name="sshPublicKey" placeholder="ssh-rsa AAAAB3NzaC1yc2EAAAADAQ..." value="{{sshPublicKey}}" />
 					</div>
-				</div>
-			</div>
-		</div>
-
-		<div class="shadow-lg card card-default mb-8 group-required group-required-app_sso_admin">
-			<div class="card-header shadow">
-				<i class="fa-solid fa-people-group"></i>
-				Members of <span id="personal-group-uid-label"></span>'s group
-				<div class="float-end">
-					<a href="/docs/accounts" class="text-reset me-2" title="Help"><i class="fa-solid fa-circle-question"></i></a>
-					<i class="fa-solid fa-arrows-up-down"></i>
-				</div>
-			</div>
-			<div class="card-header shadow actionMessage" style="display:none">
-			</div>
-			<div class="card-body">
-				<p class="text-muted small">
-					Every account gets a personal Unix group (its primary GID) — add
-					other accounts here as supplementary members (e.g. to share write
-					access to files owned by this group).
-				</p>
-				<div class="table-responsive">
-					<table class="table">
-						<thead>
-							<th>
-								Username
-							</th>
-							<th class="text-end"></th>
-						</thead>
-						<tbody jq-repeat="personalGroupMembers">
-							<tr>
-								<td>{{uid}}</td>
-								<td class="text-end">
-									<button type="button" class="btn btn-sm btn-outline-danger" title="Remove from group" onclick="removePersonalGroupMember('{{uid}}', this)">
-										<i class="fa-solid fa-xmark"></i>
-									</button>
-								</td>
-							</tr>
-						</tbody>
-					</table>
-				</div>
-				<label class="form-label small">Add member</label>
-				<div class="d-flex gap-2 align-items-start">
-					<div id="add-personal-group-member-select" class="flex-grow-1"></div>
-					<button type="button" class="btn btn-outline-dark" onclick="addPersonalGroupMembers(this)">Add</button>
-				</div>
+					<div class="mb-3">
+						<label class="form-label">Mobile Phone</label>
+						<input type="text" class="form-control" name="mobile" placeholder="9175551234" value="{{mobile}}" />
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Location (Site)</label>
+						<input type="text" class="form-control" name="location" placeholder="Site One" value="{{location}}" />
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Home Directory</label>
+						<input type="text" class="form-control" name="homeDirectory" placeholder="/home/jsmith" value="{{homeDirectory}}" />
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Login Shell</label>
+						<input type="text" class="form-control" name="loginShell" placeholder="/bin/bash" value="{{loginShell}}" />
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Manager(s)</label>
+						<div id="edit-manager"></div>
+					</div>
+					<div class="mb-3">
+						<label class="form-label">User Description (optional)</label>
+						<textarea class="form-control" name="description" placeholder="Admin group for gitea app">{{description}}</textarea>
+					</div>
+					<button type="submit" class="btn btn-outline-dark btn-warning">Save Changes</button>
+					<button type="button" class="btn btn-secondary" onclick="$('#editProfile').slideUp(); $('#userProfile').slideDown();">Cancel</button>
+				</form>
 			</div>
 		</div>
 	</div>
@@ -549,13 +510,9 @@
 </div>
 
 <script type="text/javascript">
-	// Any logged-in user can manage their own API tokens (self-service).
-	// Section is only revealed (see $(document).ready above) when isOwnProfile.
-
+	// API Tokens section (same as before)
 	var tokensById = {};
 
-	// Shared "reveal secret once" display -- same pattern as jump-host's and
-	// proxy's showToken().
 	function showToken(title, token){
 		app.modal.open({title: title, bodyHtml:
 			'<p class="text-danger"><i class="fa-solid fa-triangle-exclamation"></i> Save this token now — it will <strong>not</strong> be shown again.</p>'
@@ -564,10 +521,7 @@
 			+ '<p class="mt-3 mb-0 text-muted small">Use it as a bearer token:<br><code>Authorization: Bearer ' + app.util.escapeHtml(token) + '</code></p>'
 		});
 	}
-	// Not the checkmark-flash technique this file used to use for its copy
-	// buttons -- FontAwesome replaces <i> icons with inline <svg>, so
-	// swapping the <i>'s class silently no-ops. A toast doesn't have that
-	// problem.
+
 	function copyFieldValue(sel){
 		var $el = $(sel);
 		var text = $el.val();
@@ -580,17 +534,12 @@
 	}
 
 	function fmtTime(ms){
-		// created_on/last_used_on come back from Redis as strings (model-redis
-		// only coerces fields with an explicit `type`); moment(value, "x") parses
-		// a numeric string-or-number as a Unix-ms timestamp, unlike new Date(str).
 		if(!ms || Number(ms) === 0) return '—';
 		var t = moment(ms, "x");
 		if(!t.isValid()) return '—';
 		return t.fromNow() + ' <span class="text-muted">(' + t.format('YYYY-MM-DD HH:mm') + ')</span>';
 	}
 	function fmtExpiry(token){
-		// expires_at is type:number (a real number); isExpired is a class getter
-		// that is NOT serialized to the client, so compute expiry here.
 		var exp = Number(token.expires_at);
 		if(!exp) return '<span class="badge text-bg-secondary">never</span>';
 		if(Date.now() > exp) return '<span class="badge text-bg-danger">expired</span>';
@@ -639,14 +588,6 @@
 		});
 	}
 
-	// Create is a native <form>+formAJAX submission (matching this app's own
-	// hostModal-style convention) rather than a JS-built payload. Deliberately
-	// does NOT call app.modal.close() before showToken() -- app.modal is a
-	// singleton, and close() immediately followed by open() in the same tick
-	// collides with Bootstrap's hide-transition guard (show() silently
-	// no-ops while _isTransitioning is still true from the just-started
-	// hide()). open() alone already overwrites the (already-visible) modal's
-	// content in place.
 	function createApiToken(){
 		var $body = app.modal.open({
 			title: 'New API Token',
@@ -714,9 +655,6 @@
 	}
 </script>
 
-<!-- Not class="row": app-base.js's `$('div.row').fadeIn('slow')` page-reveal
-     runs before this page's own ready handler and would unhide any div.row
-     unconditionally, defeating the isOwnProfile check below. -->
 <div id="own-api-tokens-section" style="display:none">
 <div class="row mt-3 justify-content-center">
 	<div class="col-md-8">

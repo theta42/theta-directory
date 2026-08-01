@@ -1,0 +1,173 @@
+<%- include('top') %>
+
+<div class="container mt-4">
+  <div class="row">
+    <div class="col-12">
+      <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+          <a class="nav-link" href="/directory"><i class="fa-solid fa-server"></i> Directory</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link active" href="/discovery"><i class="fa-solid fa-network-wired"></i> Discovery</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/plugins"><i class="fa-solid fa-plug"></i> Plugins</a>
+        </li>
+      </ul>
+      <div class="card shadow border-top-0">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div>
+            <i class="fa-solid fa-network-wired"></i> Network Discovery Dashboard
+          </div>
+          <div class="d-flex flex-wrap gap-2 align-items-center">
+            <input type="text" id="search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search resources..." onkeyup="renderTable()" style="width: 250px;">
+            <select id="filter-managed" class="form-select form-select-sm shadow-sm" onchange="renderTable()" style="width: 150px;">
+              <option value="all">All Resources</option>
+              <option value="unmanaged" selected>Unmanaged Only</option>
+              <option value="managed">Managed Only</option>
+            </select>
+          </div>
+        </div>
+        <div class="card-header actionMessage" style="display:none"></div>
+        <div class="p-3 pb-0 text-muted small border-bottom">
+          <i class="fa-solid fa-circle-info"></i> View discovered network resources and promote them to managed SSO groups.
+          <a href="/docs/discovery" class="text-reset float-end" title="Help"><i class="fa-solid fa-circle-question"></i></a>
+        </div>
+        
+        <div class="table-responsive">
+          <table class="card-body table table-hover mb-0 align-middle">
+            <thead class="table-light">
+              <tr>
+                <th class="ps-3">Name / Source</th>
+                <th>Type</th>
+                <th>IP Address</th>
+                <th>Status</th>
+                <th class="text-end pe-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="discovery-list" jq-repeat="resources">
+              <tr id="resource-row-{{slug}}">
+                <td class="ps-3">
+                  <div class="fw-bold">{{name}}</div>
+                  <div class="text-muted small">
+                    <i class="fa-solid fa-plug pe-1"></i> {{#metadata.source}}{{metadata.source}}{{/metadata.source}}{{^metadata.source}}Manual{{/metadata.source}}
+                  </div>
+                </td>
+                <td>
+                  <span class="badge bg-secondary">{{kind}}</span>
+                  {{#metadata.subType}}
+                    <span class="badge bg-light text-dark border">{{metadata.subType}}</span>
+                  {{/metadata.subType}}
+                </td>
+                <td>
+                  {{#metadata.ip}}<div class="font-monospace small"><i class="fa-solid fa-network-wired pe-1"></i>{{metadata.ip}}</div>{{/metadata.ip}}
+                  {{^metadata.ip}}<span class="text-muted small fst-italic">Unknown IP</span>{{/metadata.ip}}
+                  {{#metadata.interfaces.length}}
+                  <div class="mt-1 small text-muted">
+                    {{#metadata.interfaces}}
+                      <div><i class="fa-solid fa-microchip pe-1"></i> {{mac}} {{#ip}}<span class="text-black-50">({{ip}})</span>{{/ip}}</div>
+                    {{/metadata.interfaces}}
+                  </div>
+                  {{/metadata.interfaces.length}}
+                </td>
+                <td>
+                  {{#metadata.managed}}
+                    <span class="badge bg-success rounded-pill px-2"><i class="fa-solid fa-check"></i> Managed</span>
+                  {{/metadata.managed}}
+                  {{^metadata.managed}}
+                    <span class="badge bg-warning text-dark rounded-pill px-2"><i class="fa-solid fa-ghost"></i> Unmanaged</span>
+                  {{/metadata.managed}}
+                </td>
+                <td class="text-end pe-3">
+                  {{^metadata.managed}}
+                    <button class="btn btn-sm btn-outline-primary" onclick="promoteResource('{{slug}}')" title="Promote to Managed">
+                      <i class="fa-solid fa-arrow-up-right-dots"></i> Promote
+                    </button>
+                  {{/metadata.managed}}
+                  {{#metadata.managed}}
+                    <button class="btn btn-sm btn-outline-secondary" disabled title="Already Managed">
+                       Promoted
+                    </button>
+                  {{/metadata.managed}}
+                </td>
+              </tr>
+            </tbody>
+            <tbody id="empty-state" style="display: none;">
+              <tr>
+                <td colspan="5" class="text-center py-5 text-muted">
+                  <i class="fa-solid fa-magnifying-glass fs-2 mb-3 text-black-50"></i>
+                  <h5>No resources found</h5>
+                  <p>Check your filters or ensure the discovery agents are running.</p>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  app.auth.forceLogin(['app_sso_admin', 'admin']);
+
+  let allResources = [];
+
+  function loadResources() {
+    app.api.get('discovery/resources', function(err, res) {
+      if(err) {
+        $('.actionMessage').html('<div class="alert alert-danger">' + (err.message || 'Error loading resources') + '</div>').show();
+        return;
+      }
+      allResources = res.results || [];
+      renderTable();
+    });
+  }
+
+  function renderTable() {
+    const search = $('#search-filter').val().toLowerCase();
+    const managedFilter = $('#filter-managed').val();
+
+    const filtered = allResources.filter(r => {
+      // Name search
+      if(search && !r.name.toLowerCase().includes(search) && !r.slug.toLowerCase().includes(search)) return false;
+      
+      // Managed filter
+      const isManaged = !!(r.metadata && r.metadata.managed);
+      if(managedFilter === 'managed' && !isManaged) return false;
+      if(managedFilter === 'unmanaged' && isManaged) return false;
+
+      return true;
+    });
+
+    $.scope.resources.empty();
+    for(const r of filtered) {
+      $.scope.resources.push(r);
+    }
+    
+    if(filtered.length === 0) {
+      $('#discovery-list').hide();
+      $('#empty-state').show();
+    } else {
+      $('#discovery-list').show();
+      $('#empty-state').hide();
+    }
+  }
+
+  function promoteResource(slug) {
+    app.api.post('discovery/promote/' + slug, {}, function(err, res) {
+      if(err) {
+        app.messages.toast("Error promoting resource: " + (err.message || err), 'danger');
+        return;
+      }
+      $('.actionMessage').html('<div class="alert alert-success alert-dismissible"><button type="button" class="btn-close" data-bs-dismiss="alert"></button>Successfully promoted! Created groups: ' + res.groups.join(', ') + '</div>').show();
+      renderTable();
+    });
+  }
+
+  $(document).ready(function() {
+    loadResources();
+  });
+</script>
+
+<%- include('bottom') %>

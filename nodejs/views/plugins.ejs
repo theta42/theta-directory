@@ -1,0 +1,102 @@
+<%- include('top') %>
+
+<div class="container mt-4">
+  <div class="row">
+    <div class="col-12">
+      <ul class="nav nav-tabs mb-3">
+        <li class="nav-item">
+          <a class="nav-link" href="/directory"><i class="fa-solid fa-server"></i> Directory</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" href="/discovery"><i class="fa-solid fa-network-wired"></i> Discovery</a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link active" href="/plugins"><i class="fa-solid fa-plug"></i> Plugins</a>
+        </li>
+      </ul>
+      <div class="card shadow border-top-0">
+        <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+          <div>
+            <i class="fa-solid fa-plug"></i> Plugins & Scheduler
+          </div>
+        </div>
+        <div class="p-3 pb-0 text-muted small border-bottom">
+          <i class="fa-solid fa-circle-info"></i> View configured background plugins and scheduler status. Note: Plugins are configured statically in <code>sso-secrets.js</code>.
+        </div>
+        
+        <div class="table-responsive">
+          <table class="card-body table table-hover mb-0 align-middle">
+            <thead class="table-light">
+              <tr>
+                <th class="ps-3">Plugin Name</th>
+                <th>Cron Schedule</th>
+                <th>Status</th>
+                <th>Details</th>
+              </tr>
+            </thead>
+            <tbody id="plugins-list" jq-repeat="plugins">
+              <tr>
+                <td class="ps-3 fw-bold">{{name}}</td>
+                <td><code class="text-dark">{{cron}}</code></td>
+                <td>
+                  {{#enabled}}<span class="badge bg-success">Enabled</span>{{/enabled}}
+                  {{^enabled}}<span class="badge bg-secondary">Disabled</span>{{/enabled}}
+                </td>
+                <td class="small text-muted font-monospace">
+                  {{details}}
+                </td>
+              </tr>
+            </tbody>
+            <tbody id="empty-state" style="display: none;">
+              <tr>
+                <td colspan="4" class="text-center py-4 text-muted">
+                  No plugins configured in sso-secrets.js
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  app.auth.forceLogin(['app_sso_admin', 'app_sso_directory_admin', 'admin']);
+
+  $(document).ready(function() {
+    app.api.get('plugins', function(err, res) {
+      if(err) {
+        app.messages.toast("Error loading plugins: " + (err.message || err));
+        return;
+      }
+      const plugins = res.results || {};
+      const pluginNames = Object.keys(plugins);
+      
+      $.scope.plugins.empty();
+      if(pluginNames.length === 0) {
+        $('#plugins-list').hide();
+        $('#empty-state').show();
+      } else {
+        pluginNames.forEach(name => {
+          const config = plugins[name];
+          const details = Object.entries(config)
+            .filter(([k, v]) => k !== 'enabled' && k !== 'cron')
+            .map(([k, v]) => `${k}: ${v}`)
+            .join(', ');
+          
+          $.scope.plugins.push({
+            name: name,
+            cron: config.cron || 'N/A',
+            enabled: config.enabled,
+            details: details
+          });
+        });
+        $('#plugins-list').show();
+        $('#empty-state').hide();
+      }
+    });
+  });
+</script>
+
+<%- include('bottom') %>

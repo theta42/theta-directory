@@ -295,6 +295,9 @@ User.listDetail = async function(){
 			obj.onboardingRequired = obj.onboardingNeeds.length > 0 ? 'yes' : '';
 			obj.isServiceAccount   = serviceAccountDNs.has(String(obj.dn).toLowerCase()) ? 'yes' : '';
 			obj.managerUids        = obj.manager.map(dn => dnToUid.get(String(dn).toLowerCase()) || dn);
+			// hasSshKey is a boolean flag for the UI -- sshPublicKey may be an array,
+			// and Mustache's {{#sshPublicKey}}...{{/sshPublicKey}} iterates over each item.
+			obj.hasSshKey          = obj.sshPublicKey ? 'yes' : '';
 
 			return obj;
 		}));

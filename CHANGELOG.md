@@ -379,6 +379,15 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 - Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
 - Merged OAuth Apps + LDAP Info into a single Integrations page.
 
+## [Unreleased]
+
+## [1.14.0] - 2026-08-01
+
+### Added
+- Added Configuration page in the UI to manage SSO configurations stored securely in OpenBao Vault.
+- Added Discovery plugin and Scheduler integration within the Directory.
+- Re-routed Vault proxy under `/api/vault` and implemented Vault authentication headers.
+
 [Unreleased]: https://github.com/theta42/sso-manager-node/compare/v1.1.16...HEAD
 [1.1.15]: https://github.com/theta42/sso-manager-node/compare/v1.1.14...v1.1.15
 [1.1.14]: https://github.com/theta42/sso-manager-node/compare/v1.1.13...v1.1.14

@@ -3,7 +3,26 @@
 <div class="container mt-4">
   <div class="row">
     <div class="col-12">
-			<div class="card shadow">
+      <ul class="nav nav-tabs mb-3 card-header-tabs" id="directoryTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="directory-tab" data-bs-toggle="tab" data-bs-target="#directory-tab-pane" type="button" role="tab" aria-controls="directory-tab-pane" aria-selected="true">
+            <i class="fa-solid fa-server"></i> Directory
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="discovery-tab" data-bs-toggle="tab" data-bs-target="#discovery-tab-pane" type="button" role="tab" aria-controls="discovery-tab-pane" aria-selected="false">
+            <i class="fa-solid fa-network-wired"></i> Discovery
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="plugins-tab" data-bs-toggle="tab" data-bs-target="#plugins-tab-pane" type="button" role="tab" aria-controls="plugins-tab-pane" aria-selected="false">
+            <i class="fa-solid fa-plug"></i> Plugins & Scheduler
+          </button>
+        </li>
+      </ul>
+      <div class="tab-content" id="directoryTabsContent">
+        <div class="tab-pane fade show active" id="directory-tab-pane" role="tabpanel" aria-labelledby="directory-tab">
+			<div class="card shadow border-top-0">
 				<div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
 				    <div>
     					<i class="fa-solid fa-server"></i> Directory Management
@@ -49,12 +68,9 @@
                   <span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
                   {{#metadata.isProduction}}<span class="badge bg-danger">Prod</span>{{/metadata.isProduction}}
                   {{^metadata.isProduction}}<span class="badge bg-info">Dev</span>{{/metadata.isProduction}}
-                  <span class="badge bg-light text-dark border">{{hostName}}</span>
-                  <br>
-                  <a href="#" class="text-reset text-decoration-none" onclick="openEditModal('{{id}}'); return false;" title="View details">
+                  <a href="#" class="text-reset text-decoration-none ms-2" onclick="openEditModal('{{id}}'); return false;" title="View details">
                     <strong>{{name}}</strong>
                   </a>
-                  <small class="text-muted">{{slug}}</small>
                 </td>
                 <td>
                   {{#metadata.ip}}<div><small>IP:</small> {{metadata.ip}}</div>{{/metadata.ip}}
@@ -76,6 +92,147 @@
             </tbody>
           </table>
         </div>
+      </div>
+      </div>
+      
+      <!-- Discovery Tab Pane -->
+      <div class="tab-pane fade" id="discovery-tab-pane" role="tabpanel" aria-labelledby="discovery-tab">
+        <div class="card shadow border-top-0">
+          <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+              <i class="fa-solid fa-network-wired"></i> Network Discovery Dashboard
+            </div>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              <input type="text" id="discovery-search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search resources..." onkeyup="renderDiscoveryTable()" style="width: 250px;">
+            </div>
+          </div>
+          <div class="card-header actionMessage" style="display:none"></div>
+          <div class="p-3 pb-0 text-muted small border-bottom">
+            <i class="fa-solid fa-circle-info"></i> Auto-discovered network resources. Promote unmanaged devices to track them in the Directory.
+            <a href="/docs/discovery" class="text-reset float-end" title="Help"><i class="fa-solid fa-circle-question"></i></a>
+          </div>
+          <div class="table-responsive">
+            <table class="card-body table table-hover mb-0 align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th class="ps-3">Name / Source</th>
+                  <th>Type</th>
+                  <th>IP Address</th>
+                  <th>Status</th>
+                  <th class="text-end pe-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="discovery-list" jq-repeat="discoveryResources">
+                <tr id="discovery-row-{{slug}}">
+                  <td class="ps-3">
+                    <div class="fw-bold">{{name}}</div>
+                    <div class="text-muted small">
+                      <i class="fa-solid fa-plug pe-1"></i> {{#metadata.source}}{{metadata.source}}{{/metadata.source}}{{^metadata.source}}Manual{{/metadata.source}}
+                    </div>
+                  </td>
+                  <td>
+                    <span class="badge bg-secondary me-1">{{kind}}</span>
+                    {{#metadata.discovery_sources}}
+                      <span class="badge bg-info text-dark me-1" style="font-size: 0.7em;">{{.}}</span>
+                    {{/metadata.discovery_sources}}
+                    {{#metadata.subType}}
+                      <span class="badge bg-light text-dark border">{{metadata.subType}}</span>
+                    {{/metadata.subType}}
+                  </td>
+                  <td>
+                    {{#metadata.ip}}<div class="font-monospace small"><i class="fa-solid fa-network-wired pe-1"></i>{{metadata.ip}}</div>{{/metadata.ip}}
+                    {{^metadata.ip}}<span class="text-muted small fst-italic">Unknown IP</span>{{/metadata.ip}}
+                    {{#metadata.interfaces.length}}
+                    <div class="mt-1 small text-muted">
+                      {{#metadata.interfaces}}
+                        <div><i class="fa-solid fa-microchip pe-1"></i> {{mac}} {{#ip}}<span class="text-black-50">({{ip}})</span>{{/ip}}</div>
+                      {{/metadata.interfaces}}
+                    </div>
+                    {{/metadata.interfaces.length}}
+                  </td>
+                  <td>
+                    {{#metadata.managed}}
+                      <span class="badge bg-success rounded-pill px-2"><i class="fa-solid fa-check"></i> Managed</span>
+                    {{/metadata.managed}}
+                    {{^metadata.managed}}
+                      <span class="badge bg-warning text-dark rounded-pill px-2"><i class="fa-solid fa-ghost"></i> Unmanaged</span>
+                    {{/metadata.managed}}
+                  </td>
+                  <td class="text-end pe-3">
+                    {{^metadata.managed}}
+                      <button class="btn btn-sm btn-outline-primary" onclick="promoteResource('{{slug}}')" title="Promote to Managed">
+                        <i class="fa-solid fa-arrow-up-right-dots"></i> Promote
+                      </button>
+                    {{/metadata.managed}}
+                    {{#metadata.managed}}
+                      <button class="btn btn-sm btn-outline-secondary" disabled title="Already Managed">
+                         Promoted
+                      </button>
+                    {{/metadata.managed}}
+                  </td>
+                </tr>
+              </tbody>
+              <tbody id="discovery-empty-state" style="display: none;">
+                <tr>
+                  <td colspan="5" class="text-center py-5 text-muted">
+                    <i class="fa-solid fa-magnifying-glass fs-2 mb-3 text-black-50"></i>
+                    <h5>No resources found</h5>
+                    <p>Check your filters or ensure the discovery agents are running.</p>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+      
+      <!-- Plugins Tab Pane -->
+      <div class="tab-pane fade" id="plugins-tab-pane" role="tabpanel" aria-labelledby="plugins-tab">
+        <div class="card shadow border-top-0">
+          <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+              <i class="fa-solid fa-plug"></i> Plugins & Scheduler
+            </div>
+          </div>
+          <div class="p-3 pb-0 text-muted small border-bottom">
+            <i class="fa-solid fa-circle-info"></i> Manage background tasks and schedules. <a href="/docs/plugins">Learn how to make and use custom plugins</a>.
+          </div>
+          <div class="table-responsive">
+            <table class="card-body table table-hover mb-0 align-middle">
+              <thead class="table-light">
+                <tr>
+                  <th class="ps-3">Plugin Name</th>
+                  <th>Cron Schedule</th>
+                  <th>Status</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="plugins-list" jq-repeat="plugins">
+                <tr>
+                  <td class="ps-3 fw-bold">{{name}}</td>
+                  <td><input type="text" class="form-control form-control-sm font-monospace" id="cron-{{name}}" value="{{cron}}" style="max-width: 150px;"></td>
+                  <td>
+                    {{#enabled}}<span class="badge bg-success">Enabled</span>{{/enabled}}
+                    {{^enabled}}<span class="badge bg-secondary">Disabled</span>{{/enabled}}
+                  </td>
+                  <td>
+                    <button class="btn btn-sm btn-outline-primary" onclick="updatePlugin('{{name}}')" title="Save Schedule">Save</button>
+                    {{#enabled}}<button class="btn btn-sm btn-outline-danger" onclick="togglePlugin('{{name}}', false)">Disable</button>{{/enabled}}
+                    {{^enabled}}<button class="btn btn-sm btn-outline-success" onclick="togglePlugin('{{name}}', true)">Enable</button>{{/enabled}}
+                  </td>
+                </tr>
+              </tbody>
+              <tbody id="plugins-empty-state" style="display: none;">
+                <tr>
+                  <td colspan="4" class="text-center py-4 text-muted">
+                    No plugins configured.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
       </div>
     </div>
   </div>
@@ -127,7 +284,7 @@
       </div>
       <div class="col-6">
         <label class="form-label">Host / URI Address</label>
-        <input type="text" id="res-address" class="form-control shadow-sm font-monospace" placeholder="https://...">
+        <input type="text" id="res-address" class="form-control shadow-sm font-monospace" placeholder="https://... or comma-separated IPs">
       </div>
     </div>
 
@@ -1107,6 +1264,109 @@
       app.messages.action('Failed to delete', $target, 'danger');
     }
   }
+
+  // --- DISCOVERY SCRIPTS ---
+  let allDiscoveryResources = [];
+
+  function loadDiscoveryResources() {
+    app.api.get('discovery/resources', function(err, res) {
+      if(err) {
+        $('.actionMessage').html('<div class="alert alert-danger">' + (err.message || 'Error loading resources') + '</div>').show();
+        return;
+      }
+      allDiscoveryResources = res.results || [];
+      renderDiscoveryTable();
+    });
+  }
+
+  function renderDiscoveryTable() {
+    const search = $('#discovery-search-filter').val().toLowerCase();
+    const filtered = allDiscoveryResources.filter(r => {
+      if(search && !r.name.toLowerCase().includes(search) && !r.slug.toLowerCase().includes(search)) return false;
+      const isManaged = !!(r.metadata && r.metadata.managed);
+      if(isManaged) return false;
+      return true;
+    });
+
+    $.scope.discoveryResources.empty();
+    for(const r of filtered) {
+      $.scope.discoveryResources.push(r);
+    }
+    
+    if(filtered.length === 0) {
+      $('#discovery-list').hide();
+      $('#discovery-empty-state').show();
+    } else {
+      $('#discovery-list').show();
+      $('#discovery-empty-state').hide();
+    }
+  }
+
+  function promoteResource(slug) {
+    app.api.post('discovery/promote/' + slug, {}, function(err, res) {
+      if(err) {
+        app.messages.toast("Error promoting resource: " + (err.message || err), 'danger');
+        return;
+      }
+      const resource = allDiscoveryResources.find(r => r.slug === slug);
+      if(resource) {
+        resource.metadata = resource.metadata || {};
+        resource.metadata.managed = true;
+      }
+      $('.actionMessage').html('<div class="alert alert-success alert-dismissible"><button type="button" class="btn-close" data-bs-dismiss="alert"></button>Successfully promoted! Created groups: ' + res.groups.join(', ') + '</div>').show();
+      renderDiscoveryTable();
+      loadResources(); // Also update directory tab
+    });
+  }
+
+  // --- PLUGINS SCRIPTS ---
+  function loadPlugins() {
+    app.api.get('plugins', function(err, res) {
+      if(err) {
+        app.messages.toast("Error loading plugins: " + (err.message || err), 'danger');
+        return;
+      }
+      const plugins = res.results || {};
+      const pluginNames = Object.keys(plugins);
+      
+      $.scope.plugins.empty();
+      if(pluginNames.length === 0) {
+        $('#plugins-list').hide();
+        $('#plugins-empty-state').show();
+      } else {
+        pluginNames.forEach(name => {
+          const config = plugins[name];
+          $.scope.plugins.push({
+            name: name,
+            cron: config.cron || '',
+            enabled: config.enabled
+          });
+        });
+        $('#plugins-list').show();
+        $('#plugins-empty-state').hide();
+      }
+    });
+  }
+
+  function updatePlugin(name) {
+    const cron = $('#cron-' + name).val();
+    app.api.put('plugins/' + name, {cron: cron}, function(err, res) {
+      if(err) { app.messages.toast("Failed to save: " + err.message, 'danger'); return; }
+      app.messages.toast("Saved schedule successfully.", 'success');
+    });
+  }
+  
+  function togglePlugin(name, enable) {
+    app.api.put('plugins/' + name, {enabled: enable}, function(err, res) {
+      if(err) { app.messages.toast("Failed to toggle: " + err.message, 'danger'); return; }
+      loadPlugins();
+    });
+  }
+
+  $(document).ready(function(){
+    loadDiscoveryResources();
+    loadPlugins();
+  });
 </script>
 
 <%- include('bottom') %>
