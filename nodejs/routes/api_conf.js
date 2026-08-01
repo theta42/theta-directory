@@ -23,7 +23,16 @@ router.get('/', async (req, res) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    await confManager.setVaultConf(req.body);
+    const existing = await confManager.getVaultConf() || {};
+    // Deep merge req.body into existing
+    for (const key of Object.keys(req.body)) {
+      if (typeof req.body[key] === 'object' && req.body[key] !== null && !Array.isArray(req.body[key])) {
+        existing[key] = { ...(existing[key] || {}), ...req.body[key] };
+      } else {
+        existing[key] = req.body[key];
+      }
+    }
+    await confManager.setVaultConf(existing);
     res.json({ success: true });
   } catch(err) {
     next(err);

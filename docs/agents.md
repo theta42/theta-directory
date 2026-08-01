@@ -1,23 +1,23 @@
 ---
 layout: default
-title: Discovery Plugins
+title: Discovery Agents
 nav_order: 5
 ---
 
-# Discovery Plugins
+# Discovery Agents
 
-The SSO Manager supports a robust plugin architecture for auto-discovering devices, hosts, and services across your home lab or data center. Plugins run on a scheduled cron and feed their data into a central **Reconciliation Engine** that smartly merges information based on MAC addresses and IPs.
+The SSO Manager supports a robust agent architecture for auto-discovering devices, hosts, and services across your home lab or data center. Agents run on a scheduled cron and feed their data into a central **Reconciliation Engine** that smartly merges information based on MAC addresses and IPs.
 
-## Writing a Custom Plugin
+## Writing a Custom Agent
 
-Plugins are simple JavaScript files placed in `nodejs/plugins/discovery/`.
+Agents are simple JavaScript files placed in `nodejs/agents/discovery/`.
 
-A plugin must export a single `discover` async function that returns a standardized graph of `resources` and `edges`.
+A agent must export a single `discover` async function that returns a standardized graph of `resources` and `edges`.
 
-### Plugin Skeleton
+### Agent Skeleton
 
 ```javascript
-// nodejs/plugins/discovery/my_custom_plugin.js
+// nodejs/agents/discovery/my_custom_agent.js
 module.exports = {
   discover: async (config) => {
     const { url, apiKey } = config; // Provided by your configuration
@@ -56,14 +56,14 @@ module.exports = {
 
 ## Configuration
 
-Plugins are automatically loaded and executed by the internal BullMQ job scheduler. You configure them in your `config/sso-secrets.js`:
+Agents are automatically loaded and executed by the internal BullMQ job scheduler. You configure them in your `config/sso-secrets.js`:
 
 ```javascript
 module.exports = {
   // ... existing config ...
   discovery: {
-    plugins: {
-      my_custom_plugin: {
+    agents: {
+      my_custom_agent: {
         enabled: true,
         cron: '*/30 * * * *', // Run every 30 minutes
         url: 'https://api.example.com',
@@ -81,8 +81,8 @@ module.exports = {
 
 ## The Reconciliation Engine
 
-When your plugin returns its graph, the Reconciliation Engine takes over:
+When your agent returns its graph, the Reconciliation Engine takes over:
 1. **Matching:** It tries to find an existing device in the database matching any MAC address provided in the `interfaces` array. If no MAC matches, it falls back to IP address, and then to `slug`.
-2. **Merging:** If it finds a match, it gracefully merges the metadata (so your plugin can add CPU info to a host that NMAP previously found).
-3. **Source Tracking:** It records your plugin's filename in the `discovery_sources` array on the resource, and updates the `last_seen` timestamp.
+2. **Merging:** If it finds a match, it gracefully merges the metadata (so your agent can add CPU info to a host that NMAP previously found).
+3. **Source Tracking:** It records your agent's filename in the `discovery_sources` array on the resource, and updates the `last_seen` timestamp.
 4. **LDAP Spam Prevention:** Brand new devices are marked as `managed: false`. They will not pollute your LDAP directory until an admin explicitly promotes them.

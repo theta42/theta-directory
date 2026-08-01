@@ -64,6 +64,16 @@ router.get('/notifications', (req, res) => res.redirect(301, '/overview'));
 router.get('/dashboard', (req, res) => res.redirect(301, '/overview'));
 router.get('/executive', (req, res) => res.redirect(301, '/overview'));
 
+router.get('/conf', async function(req, res, next) {
+  const permission = require('../utils/permission');
+  try {
+    await permission.byGroup(req.user, ['app_sso_admin']);
+    res.render('conf', {...values});
+  } catch(err) {
+    next(err);
+  }
+});
+
 router.get('/directory', function(req, res) {
   res.render('directory', {...values});
 });
