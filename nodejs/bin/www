@@ -31,7 +31,12 @@ const models = require('../models');
  * Initialize ORM, then Listen on provided port, on all network interfaces.
  */
 models.initORM().then(() => {
-  return require('../utils/conf_manager').init();
+  // Overlay secret/sso-manager/conf from OpenBao over the file-loaded conf.
+  // Fail-soft: if OpenBao is unreachable, conf keeps the ./config/sso-secrets.js
+  // values and boot continues. (Same position the old conf_manager held, so
+  // call-time conf readers — which is how sso consumes its secrets — are
+  // unaffected; nothing in sso captures a secret at require time.)
+  return require('@simpleworkjs/bao-conf').init({ path: 'sso-manager', conf });
 }).then(() => {
   server.listen(port);
   server.on('error', onError);

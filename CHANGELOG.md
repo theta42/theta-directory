@@ -4,6 +4,58 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.16.0] - 2026-08-01
+
+OpenBao becomes the central secrets store for the theta42 stack, and the SSO
+Manager becomes its broker. This is the SSO's half of the move: it loads its
+own secrets from OpenBao, mints scoped tokens for users and external apps,
+and exposes a fixed, role-scoped personal-secrets UI.
+
+### Changed
+- **Secrets now load from OpenBao at boot** via
+  [@simpleworkjs/bao-conf](https://simpleworkjs.github.io/bao-conf/), which
+  deep-merges `secret/sso-manager/conf` over the file-loaded config
+  (replacing the old `utils/conf_manager.js`, which did a shallow-per-key
+  merge). `bin/www` runs `bao-conf.init()` after `models.initORM()` and
+  before `listen`. Fail-soft: if OpenBao is unreachable, boot continues from
+  `CONF_SECRETS`. The SSO authenticates with a scoped `VAULT_TOKEN` (policy
+  `sso-broker`), never the root token. The admin **Configuration** UI
+  (`/api/conf`) now writes through `bao-conf.set('sso-manager', …)`.
+- **`/api/vault` proxy reworked** — the old endpoint was an ungated
+  pass-through that never injected an `X-Vault-Token` (so the UI was both
+  ungated *and* broken). It is now `middleware.auth` → `scopeGuard` → a
+  token-injecting proxy. `scopeGuard` resolves a per-user (`user-<uid>`) or
+  per-admin (`sso-admin`) token via the new `utils/vault_broker.js`
+  (Redis-cached, minted through the `sso-broker` token role) and enforces a
+  path prefix as a second layer on top of the OpenBao policy. The client
+  `auth-token` is stripped; only the server-minted token reaches OpenBao.
+- **Vault UI reworked and renamed** (`views/vaultwarden.ejs` →
+  `views/vault.ejs`; the `/vault` route is now `middleware.auth`-gated).
+  Non-admin users see only their `secret/users/<uid>/` namespace; admins get
+  free-form path entry across `secret/` plus an **Apps** tab to mint scoped
+  tokens for external apps (`secret/apps/<name>/*`, shown once with copy +
+  `curl` convention).
+- Bumped package version to track the release tag.
+
+### Removed
+- `nodejs/utils/conf_manager.js` (replaced by `@simpleworkjs/bao-conf`).
+- `nodejs/views/vaultwarden.ejs` (renamed `vault.ejs`).
+
+### Security
+- **Committed-secrets remediation.** `config/sso-secrets.js` (LDAP bind
+  password, SMTP, `oauth.jwtSecret`) and `nodejs/test_plugins.js` (a
+  hardcoded Proxmox root API token and a UniFi password) were tracked on
+  master. They are now untracked + gitignored (`config/*-secrets.js`), and
+  `test_plugins.js` is deleted; `config/proxy-secrets.js.example` added as a
+  placeholder template. **The secrets remain in git history — rotation at
+  the providers is the real remediation and is the operator's to perform.**
+  OpenBao is now the authoritative store; the local files are seed artifacts
+  only.
+
+> Note: releases v1.12.0–v1.15.2 were tagged from merge PRs without
+> corresponding `CHANGELOG.md` entries or GitHub releases; this entry
+> resumes the changelog at v1.16.0.
+
 ## [1.11.0] - 2026-07-31
 
 Closes the end-user half of the directory. The admin side could describe the lab; the user side could not tell anyone what they had or how to use it, and several of the paths meant to do so were silently returning nothing.
