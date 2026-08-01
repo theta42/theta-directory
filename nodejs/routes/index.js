@@ -11,6 +11,8 @@ const {Tos} = require('../models/tos');
 const conf = require('@simpleworkjs/conf');
 const buildInfo = require('../utils/build_info');
 const { mountStaticModules } = require('@simpleworkjs/app-stack');
+const middleware = require('../middleware/auth');
+const permission = require('../utils/permission');
 
 const values ={
   title: conf.environment !== 'production' ? `dev` : '',
@@ -65,7 +67,6 @@ router.get('/dashboard', (req, res) => res.redirect(301, '/overview'));
 router.get('/executive', (req, res) => res.redirect(301, '/overview'));
 
 router.get('/conf', async function(req, res, next) {
-  const permission = require('../utils/permission');
   try {
     await permission.byGroup(req.user, ['app_sso_admin']);
     res.render('conf', {...values});
@@ -86,8 +87,23 @@ router.get('/plugins',  function(req, res, next) {
   res.redirect('/directory');
 });
 
-router.get('/vault',  function(req, res, next) {
-  res.render('vaultwarden', {...values});
+router.get('/vault', middleware.auth, async function(req, res, next) {
+  // Personal per-user secrets (secret/users/<uid>/*) for everyone; admins get
+  // free-form access across all of secret/ plus an Apps tab to mint scoped
+  // tokens for external apps. The /api/vault proxy enforces the same scoping
+  // server-side (scopeGuard + the token's own OpenBao policy).
+  let isAdmin = false;
+  try {
+    await permission.byGroup(req.user, ['app_sso_admin']);
+    isAdmin = true;
+  } catch (e) { /* non-admin: personal namespace only */ }
+  res.render('vault', {
+    ...values,
+    vaultUid: req.user.uid,
+    vaultIsAdmin: isAdmin,
+    vaultBase: isAdmin ? '' : `users/${req.user.uid}/`,
+    vaultAddr: process.env.VAULT_ADDR || 'http://openbao:8200',
+  });
 });
 
 // Linkable deep-link to a single resource's modal, e.g. from the resource

@@ -86,6 +86,11 @@ ops/cookbooks/vendor
 secrets.json
 secrets.js
 
+# Per-deployment secret files (real LDAP/SMTP/jwtSecret + generated OAuth
+# creds). theta-env bind-mounts ./config and generates/fills these at setup;
+# they must never be committed. The empty *.example templates ARE tracked.
+config/*-secrets.js
+
 # Jekyll build artifact (GitHub Pages builds remotely; ignore locally)
 docs/_site
 

@@ -1,6 +1,6 @@
 {
   "name": "t42-sso-manager",
-  "version": "1.13.0",
+  "version": "1.16.0",
   "description": "A very simple LDAP management and SSO system",
   "author": [
     {
@@ -24,6 +24,7 @@
     "@fortawesome/fontawesome-free": "^7.3.0",
     "@popperjs/core": "^2.11.8",
     "@simpleworkjs/app-stack": "^1.0.0",
+    "@simpleworkjs/bao-conf": "^1.0.0",
     "@simpleworkjs/conf": "^1.2.0",
     "@simpleworkjs/directory-schema": "^1.1.0",
     "@simpleworkjs/frontend": "^0.2.7",

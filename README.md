@@ -132,6 +132,29 @@ v1.1.13 -> v1.1.14`), or `Already up to date` if there's nothing new. Full
 details, including env var overrides (`LDAP_BASE_DN`, `SKIP_LDAP`, ...), in
 [DEPLOYMENT.md](DEPLOYMENT.md) under *Method 2: Bare metal*.
 
+## Secrets
+
+Secrets are loaded from **OpenBao** at boot via
+[@simpleworkjs/bao-conf](https://simpleworkjs.github.io/bao-conf/), which
+deep-merges `secret/sso-manager/conf` over the file-loaded config (fail-soft:
+if OpenBao is unreachable, boot continues from `CONF_SECRETS`). The SSO
+authenticates to OpenBao with the scoped `VAULT_TOKEN` (env, policy
+`sso-broker`) — never the root token.
+
+The SSO also acts as the **vault broker** for the whole stack: it mints
+per-user (`user-<uid>`) and per-admin (`sso-admin`) tokens through the
+`sso-broker` token role and exposes the personal-secrets UI at **Vault → My
+Secrets** (`secret/users/<uid>/*`, server-side token injection + path-scope
+guard) and an admin **Apps** tab to mint scoped tokens for external apps
+(`secret/apps/<name>/*`). The old `utils/conf_manager.js` was replaced by
+`@simpleworkjs/bao-conf`; the admin **Configuration** UI (`/api/conf`) now
+writes `secret/sso-manager/conf` through `bao-conf.set`.
+
+The `config/*-secrets.js` files are operator-edit seed artifacts (gitignored),
+not the authoritative store. For the full architecture, policies, token model,
+and rotation procedure, see theta-env's
+**[Secrets docs](https://theta42.github.io/theta-env/secrets/)**.
+
 ## Architecture
 
 ```

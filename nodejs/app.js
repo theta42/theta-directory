@@ -108,18 +108,17 @@ app.use('/api/oauth/client', middleware.auth, require('./routes/oauth_client'));
 app.get('/.well-known/openid-configuration', discovery);
 app.use('/api/webhook', require('./routes/webhook'));
 app.use('/api/plugins', middleware.auth, require('./routes/plugins'));
-const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 
-const vaultApiProxy = createProxyMiddleware({
-  target: 'http://openbao:8200',
-  changeOrigin: true,
-  pathRewrite: { '^/': '/v1/' },
-  on: {
-    proxyReq: fixRequestBody
-  }
-});
-
-app.use('/api/vault', middleware.auth, vaultApiProxy);
+// OpenBao vault API. The broker mints a server-side scoped token per user
+// (per-user user-<uid> or, for admins, sso-admin), enforces the path prefix
+// (scopeGuard), and injects ONLY that token into the proxied request — the
+// client's sso auth headers are stripped and never reach OpenBao. Non-admins
+// are confined to secret/users/<uid>/*; admins roam all of secret/. The
+// admin-only app-token mint route is mounted BEFORE the proxy so it isn't
+// shadowed by the catch-all /api/vault proxy.
+const vaultBroker = require('./utils/vault_broker');
+app.use('/api/vault/apps', middleware.auth, vaultBroker.mintAppRouter);
+app.use('/api/vault', middleware.auth, vaultBroker.scopeGuard, vaultBroker.vaultProxy());
 
 // Catch 404 and forward to error handler. If none of the above routes are
 // used, this is what will be called.
