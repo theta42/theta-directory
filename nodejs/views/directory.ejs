@@ -16,7 +16,7 @@
         </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="plugins-tab" data-bs-toggle="tab" data-bs-target="#plugins-tab-pane" type="button" role="tab" aria-controls="plugins-tab-pane" aria-selected="false">
-            <i class="fa-solid fa-plug"></i> Plugins & Scheduler
+            <i class="fa-solid fa-robot"></i> Agents & Scheduler
           </button>
         </li>
       </ul>
@@ -186,22 +186,22 @@
         </div>
       </div>
       
-      <!-- Plugins Tab Pane -->
+      <!-- Agents Tab Pane -->
       <div class="tab-pane fade" id="plugins-tab-pane" role="tabpanel" aria-labelledby="plugins-tab">
         <div class="card shadow border-top-0">
           <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
             <div>
-              <i class="fa-solid fa-plug"></i> Plugins & Scheduler
+              <i class="fa-solid fa-robot"></i> Agents & Scheduler
             </div>
           </div>
           <div class="p-3 pb-0 text-muted small border-bottom">
-            <i class="fa-solid fa-circle-info"></i> Manage background tasks and schedules. <a href="/docs/plugins">Learn how to make and use custom plugins</a>.
+            <i class="fa-solid fa-circle-info"></i> Manage background tasks and schedules. <a href="/docs/agents">Learn how to make and use custom agents</a>.
           </div>
           <div class="table-responsive">
             <table class="card-body table table-hover mb-0 align-middle">
               <thead class="table-light">
                 <tr>
-                  <th class="ps-3">Plugin Name</th>
+                  <th class="ps-3">Agent Name</th>
                   <th>Cron Schedule</th>
                   <th>Status</th>
                   <th>Actions</th>
@@ -225,7 +225,7 @@
               <tbody id="plugins-empty-state" style="display: none;">
                 <tr>
                   <td colspan="4" class="text-center py-4 text-muted">
-                    No plugins configured.
+                    No agents configured.
                   </td>
                 </tr>
               </tbody>
@@ -1319,11 +1319,11 @@
     });
   }
 
-  // --- PLUGINS SCRIPTS ---
+  // --- AGENT SCRIPTS ---
   function loadPlugins() {
     app.api.get('plugins', function(err, res) {
       if(err) {
-        app.messages.toast("Error loading plugins: " + (err.message || err), 'danger');
+        app.messages.toast("Error loading agents: " + (err.message || err), 'danger');
         return;
       }
       const plugins = res.results || {};
@@ -1339,7 +1339,7 @@
           $.scope.plugins.push({
             name: name,
             cron: config.cron || '',
-            enabled: config.enabled
+            enabled: !!config.enabled
           });
         });
         $('#plugins-list').show();
@@ -1351,14 +1351,20 @@
   function updatePlugin(name) {
     const cron = $('#cron-' + name).val();
     app.api.put('plugins/' + name, {cron: cron}, function(err, res) {
-      if(err) { app.messages.toast("Failed to save: " + err.message, 'danger'); return; }
-      app.messages.toast("Saved schedule successfully.", 'success');
+      if(err) {
+        app.messages.toast("Error saving agent schedule: " + (err.message || err), 'danger');
+        return;
+      }
+      app.messages.toast("Agent schedule saved successfully.", 'success');
     });
   }
   
   function togglePlugin(name, enable) {
     app.api.put('plugins/' + name, {enabled: enable}, function(err, res) {
-      if(err) { app.messages.toast("Failed to toggle: " + err.message, 'danger'); return; }
+      if(err) {
+        app.messages.toast("Error toggling agent: " + (err.message || err), 'danger');
+        return;
+      }
       loadPlugins();
     });
   }
