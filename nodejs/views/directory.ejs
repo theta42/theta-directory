@@ -3,26 +3,30 @@
 <div class="container mt-4">
   <div class="row">
     <div class="col-12">
-      <ul class="nav nav-tabs mb-3 card-header-tabs" id="directoryTabs" role="tablist">
-        <li class="nav-item" role="presentation">
-          <button class="nav-link active" id="directory-tab" data-bs-toggle="tab" data-bs-target="#directory-tab-pane" type="button" role="tab" aria-controls="directory-tab-pane" aria-selected="true">
-            <i class="fa-solid fa-server"></i> Directory
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="discovery-tab" data-bs-toggle="tab" data-bs-target="#discovery-tab-pane" type="button" role="tab" aria-controls="discovery-tab-pane" aria-selected="false">
-            <i class="fa-solid fa-network-wired"></i> Discovery
-          </button>
-        </li>
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="plugins-tab" data-bs-toggle="tab" data-bs-target="#plugins-tab-pane" type="button" role="tab" aria-controls="plugins-tab-pane" aria-selected="false">
-            <i class="fa-solid fa-robot"></i> Agents & Scheduler
-          </button>
-        </li>
-      </ul>
-      <div class="tab-content" id="directoryTabsContent">
-        <div class="tab-pane fade show active" id="directory-tab-pane" role="tabpanel" aria-labelledby="directory-tab">
-			<div class="card shadow border-top-0">
+      <div class="card shadow">
+        <div class="card-header">
+          <ul class="nav nav-tabs card-header-tabs" id="directoryTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="directory-tab" data-bs-toggle="tab" data-bs-target="#directory-tab-pane" type="button" role="tab" aria-controls="directory-tab-pane" aria-selected="true">
+                <i class="fa-solid fa-server"></i> Directory
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="discovery-tab" data-bs-toggle="tab" data-bs-target="#discovery-tab-pane" type="button" role="tab" aria-controls="discovery-tab-pane" aria-selected="false">
+                <i class="fa-solid fa-network-wired"></i> Discovery
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="plugins-tab" data-bs-toggle="tab" data-bs-target="#plugins-tab-pane" type="button" role="tab" aria-controls="plugins-tab-pane" aria-selected="false">
+                <i class="fa-solid fa-robot"></i> Agents & Scheduler
+              </button>
+            </li>
+          </ul>
+        </div>
+        <div class="card-body p-0">
+          <div class="tab-content" id="directoryTabsContent">
+            <div class="tab-pane fade show active" id="directory-tab-pane" role="tabpanel" aria-labelledby="directory-tab">
+              <div class="border-0">
 				<div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
 				    <div>
     					<i class="fa-solid fa-server"></i> Directory Management
@@ -97,7 +101,7 @@
       
       <!-- Discovery Tab Pane -->
       <div class="tab-pane fade" id="discovery-tab-pane" role="tabpanel" aria-labelledby="discovery-tab">
-        <div class="card shadow border-top-0">
+        <div class="border-0">
           <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
             <div>
               <i class="fa-solid fa-network-wired"></i> Network Discovery Dashboard
@@ -188,7 +192,7 @@
       
       <!-- Agents Tab Pane -->
       <div class="tab-pane fade" id="plugins-tab-pane" role="tabpanel" aria-labelledby="plugins-tab">
-        <div class="card shadow border-top-0">
+        <div class="border-0">
           <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
             <div>
               <i class="fa-solid fa-robot"></i> Agents & Scheduler
@@ -233,6 +237,8 @@
           </div>
         </div>
       </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
