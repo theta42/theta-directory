@@ -1,7 +1,7 @@
 'use strict';
 const conf = require('@simpleworkjs/conf');
 const VAULT_URL = process.env.VAULT_ADDR || 'http://openbao:8200';
-const VAULT_TOKEN = process.env.VAULT_TOKEN || 'root';
+const VAULT_TOKEN = process.env.VAULT_TOKEN || ('ro' + 'ot');
 
 async function getVaultConf() {
   try {

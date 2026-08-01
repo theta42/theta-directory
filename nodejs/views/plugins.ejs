@@ -67,7 +67,7 @@
   $(document).ready(function() {
     app.api.get('plugins', function(err, res) {
       if(err) {
-        alert("Error loading plugins: " + (err.message || err));
+        app.messages.toast("Error loading plugins: " + (err.message || err));
         return;
       }
       const plugins = res.results || {};

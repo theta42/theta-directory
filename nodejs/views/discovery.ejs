@@ -155,24 +155,12 @@
   }
 
   function promoteResource(slug) {
-    if(!confirm("Are you sure you want to promote this resource? This will generate SSO LDAP groups for it.")) return;
-    
     app.api.post('discovery/promote/' + slug, {}, function(err, res) {
       if(err) {
-        alert("Error promoting resource: " + (err.message || err));
+        app.messages.toast("Error promoting resource: " + (err.message || err), 'danger');
         return;
       }
-      
-      // Update local state to managed
-      const resource = allResources.find(r => r.slug === slug);
-      if(resource) {
-        resource.metadata = resource.metadata || {};
-        resource.metadata.managed = true;
-      }
-      
-      // Add success message
       $('.actionMessage').html('<div class="alert alert-success alert-dismissible"><button type="button" class="btn-close" data-bs-dismiss="alert"></button>Successfully promoted! Created groups: ' + res.groups.join(', ') + '</div>').show();
-      
       renderTable();
     });
   }
