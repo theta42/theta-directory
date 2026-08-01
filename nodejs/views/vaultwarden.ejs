@@ -78,7 +78,6 @@
 <script>
   app.auth.forceLogin();
   
-  const VAULT_TOKEN = 'root'; // Dev mode root token
   let currentSecretPath = null;
   const secretModal = new bootstrap.Modal(document.getElementById('secretModal'));
 
@@ -86,7 +85,6 @@
     const opts = {
       method,
       headers: {
-        'X-Vault-Token': VAULT_TOKEN,
         'Content-Type': 'application/json',
         'auth-token': app.auth.getToken()
       }
