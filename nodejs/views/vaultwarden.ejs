@@ -213,7 +213,6 @@
 
   async function deleteCurrentSecret() {
     if (!currentSecretPath) return;
-    if (!confirm(`Are you sure you want to delete the secret '${currentSecretPath}'?`)) return;
     
     try {
       await apiCall('DELETE', `secret/metadata/${currentSecretPath}`);
@@ -222,7 +221,7 @@
       document.getElementById('secret-details-card').style.display = 'none';
       await loadSecrets();
     } catch (err) {
-      alert('Error deleting secret: ' + err.message);
+      app.messages.toast('Error deleting secret: ' + err.message, 'danger');
     }
   }
 
