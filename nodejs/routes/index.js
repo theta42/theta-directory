@@ -11,8 +11,6 @@ const {Tos} = require('../models/tos');
 const conf = require('@simpleworkjs/conf');
 const buildInfo = require('../utils/build_info');
 const { mountStaticModules } = require('@simpleworkjs/app-stack');
-const middleware = require('../middleware/auth');
-const permission = require('../utils/permission');
 
 const values ={
   title: conf.environment !== 'production' ? `dev` : '',
@@ -66,13 +64,15 @@ router.get('/notifications', (req, res) => res.redirect(301, '/overview'));
 router.get('/dashboard', (req, res) => res.redirect(301, '/overview'));
 router.get('/executive', (req, res) => res.redirect(301, '/overview'));
 
-router.get('/conf', async function(req, res, next) {
-  try {
-    await permission.byGroup(req.user, ['app_sso_admin']);
-    res.render('conf', {...values});
-  } catch(err) {
-    next(err);
-  }
+router.get('/conf', function(req, res) {
+  // Admin-only Configuration page. The view renders the shell for anyone
+  // (like /users, /directory, etc.); the client gates access with
+  // app.auth.forceLogin(['admin','app_sso_admin']) and the /api/conf endpoint
+  // enforces app_sso_admin server-side. The previous server-side
+  // permission.byGroup(req.user,…) 401'd on a browser navigation because this
+  // app's auth-token is a header set by client JS (localStorage), not a
+  // cookie — so req.user is undefined on a plain page load.
+  res.render('conf', {...values});
 });
 
 router.get('/directory', function(req, res) {
@@ -87,21 +87,18 @@ router.get('/plugins',  function(req, res, next) {
   res.redirect('/directory');
 });
 
-router.get('/vault', middleware.auth, async function(req, res, next) {
+router.get('/vault', function(req, res) {
   // Personal per-user secrets (secret/users/<uid>/*) for everyone; admins get
   // free-form access across all of secret/ plus an Apps tab to mint scoped
-  // tokens for external apps. The /api/vault proxy enforces the same scoping
-  // server-side (scopeGuard + the token's own OpenBao policy).
-  let isAdmin = false;
-  try {
-    await permission.byGroup(req.user, ['app_sso_admin']);
-    isAdmin = true;
-  } catch (e) { /* non-admin: personal namespace only */ }
+  // tokens for external apps. The view renders the shell for any logged-in
+  // user; the client gates login via app.auth.forceLogin() and derives the
+  // admin/namespace scope from /api/user/me. The /api/vault proxy enforces the
+  // same scoping server-side (scopeGuard + the token's own OpenBao policy), so
+  // the client-derived scope is only cosmetic. vaultAddr is the only
+  // server-rendered value (it's a non-user-specific env var); uid + isAdmin
+  // are resolved client-side to avoid the header-vs-navigation auth mismatch.
   res.render('vault', {
     ...values,
-    vaultUid: req.user.uid,
-    vaultIsAdmin: isAdmin,
-    vaultBase: isAdmin ? '' : `users/${req.user.uid}/`,
     vaultAddr: process.env.VAULT_ADDR || 'http://openbao:8200',
   });
 });
@@ -135,10 +132,6 @@ router.get('/profile', async function(req, res, next) {
 
 router.get('/users', async function(req, res, next) {
   res.render('users', {...values});
-});
-
-router.get('/conf', async function(req, res, next) {
-  res.render('conf', {...values});
 });
 
 router.get('/login', async function(req, res, next) {

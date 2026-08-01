@@ -2,15 +2,10 @@
 
 <div class="container-fluid py-4">
   <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2><i class="fas fa-lock"></i>
-      <% if (vaultIsAdmin) { %> Vault Secrets <small class="text-muted">(admin — all of secret/)</small>
-      <% } else { %> My Secrets <small class="text-muted">(personal namespace)</small><% } %>
-    </h2>
+    <h2 id="vault-title"><i class="fas fa-lock"></i> My Secrets <small class="text-muted">(personal namespace)</small></h2>
     <ul class="nav nav-pills" id="vault-tabs">
       <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#tab-secrets" type="button">Secrets</button></li>
-      <% if (vaultIsAdmin) { %>
-      <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-apps" type="button">Apps</button></li>
-      <% } %>
+      <li class="nav-item" id="vault-apps-tab" style="display:none"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-apps" type="button">Apps</button></li>
     </ul>
   </div>
 
@@ -52,8 +47,7 @@
       </div>
     </div>
 
-    <!-- ── Apps tab (admin only) ───────────────────────────────────────── -->
-    <% if (vaultIsAdmin) { %>
+    <!-- ── Apps tab (admin only; revealed client-side for admins) ─────── -->
     <div class="tab-pane fade" id="tab-apps">
       <div class="row">
         <div class="col-md-5">
@@ -89,7 +83,6 @@ curl "$VAULT_ADDR/v1/secret/data/apps/<span id="app-name-display"></span>/conf" 
         </div>
       </div>
     </div>
-    <% } %>
   </div>
 </div>
 
@@ -103,10 +96,8 @@ curl "$VAULT_ADDR/v1/secret/data/apps/<span id="app-name-display"></span>/conf" 
       </div>
       <div class="modal-body">
         <div class="mb-3">
-          <label class="form-label">
-            <% if (vaultIsAdmin) { %>Secret path (under secret/)<% } else { %>Secret name (in your personal namespace)<% } %>
-          </label>
-          <input type="text" class="form-control" id="secret-path-input" placeholder="<% if (vaultIsAdmin) { %>e.g. apps/my-service/conf<% } else { %>e.g. database-creds<% } %>">
+          <label class="form-label" id="secret-path-label">Secret name (in your personal namespace)</label>
+          <input type="text" class="form-control" id="secret-path-input" placeholder="e.g. database-creds">
         </div>
         <div class="mb-3">
           <label class="form-label">Secret Data (JSON)</label>
@@ -126,14 +117,15 @@ curl "$VAULT_ADDR/v1/secret/data/apps/<span id="app-name-display"></span>/conf" 
 </div>
 
 <script>
-  app.auth.forceLogin();
-
-  // Server-derived scoping. VAULT_BASE is '' for admins (free-form under
-  // secret/) or 'users/<uid>/' for everyone else (confined to their personal
-  // namespace). The /api/vault proxy enforces the same server-side; these only
-  // drive the UI.
-  const VAULT_BASE = <%- JSON.stringify(vaultBase) %>;
-  const IS_ADMIN = <%- JSON.stringify(vaultIsAdmin) %>;
+  // Login gate + client-derived scoping. VAULT_BASE is '' for admins
+  // (free-form under secret/) or 'users/<uid>/' for everyone else (confined
+  // to their personal namespace). The /api/vault proxy enforces the same
+  // server-side (scopeGuard + the token's OpenBao policy), so this only
+  // drives the UI. Resolved in init() after forceLogin loads the user — the
+  // previous version read these server-side from req.user, which is undefined
+  // on a browser navigation (auth-token is a client-set header, not a cookie).
+  let VAULT_BASE = '';
+  let IS_ADMIN = false;
 
   let currentSecretPath = null;
   const secretModal = new bootstrap.Modal(document.getElementById('secretModal'));
@@ -309,7 +301,20 @@ curl "$VAULT_ADDR/v1/secret/data/apps/<span id="app-name-display"></span>/conf" 
     navigator.clipboard.writeText(text).then(() => app.messages.toast('Copied', 'success'));
   }
 
-  loadSecrets();
+  (async function init() {
+    const user = await app.auth.forceLogin();
+    if (!user) return; // not logged in — forceLogin redirected to /login
+    IS_ADMIN = app.auth.isAdmin();
+    VAULT_BASE = IS_ADMIN ? '' : 'users/' + user.uid + '/';
+    if (IS_ADMIN) {
+      document.getElementById('vault-apps-tab').style.display = '';
+      document.getElementById('vault-title').innerHTML =
+        '<i class="fas fa-lock"></i> Vault Secrets <small class="text-muted">(admin — all of secret/)</small>';
+      document.getElementById('secret-path-label').textContent = 'Secret path (under secret/)';
+      document.getElementById('secret-path-input').placeholder = 'e.g. apps/my-service/conf';
+    }
+    loadSecrets();
+  })();
 </script>
 
 <%- include('bottom') %>

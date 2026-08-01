@@ -4,6 +4,24 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.16.1] - 2026-08-01
+
+Fix: the Configuration (`/conf`) and Vault (`/vault`) pages returned **401** for
+a logged-in admin. Both view routes did server-side auth using `req.user`, but
+this app's auth-token is a header set by client-side JS (localStorage), not a
+cookie — so `req.user` is undefined on a plain browser navigation.
+`permission.byGroup(undefined, …)` throws status 401, and the `middleware.auth`
+gate on `/vault` threw `Auth.errors.login()` (401) for the same reason.
+
+Both routes now render the shell unconditionally (like `/users`, `/directory`,
+`/overview`) and gate client-side: `conf.ejs` already called
+`app.auth.forceLogin(['admin','app_sso_admin'])`; `vault.ejs` now derives
+`isAdmin` + the personal namespace from `/api/user/me` after `forceLogin()`
+instead of server-rendering them. The `/api/conf` and `/api/vault` endpoints
+still enforce `app_sso_admin` + the OpenBao scope server-side, so protection is
+unchanged — only the view-route gating moved client-side where the session
+actually lives. Also removed a dead duplicate `/conf` route definition.
+
 ## [1.16.0] - 2026-08-01
 
 OpenBao becomes the central secrets store for the theta42 stack, and the SSO
