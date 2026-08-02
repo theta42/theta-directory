@@ -3,54 +3,72 @@
 <div class="container mt-4">
   <div class="row">
     <div class="col-12">
-      <ul class="nav nav-tabs mb-3">
-        <li class="nav-item">
-          <a class="nav-link" href="/directory"><i class="fa-solid fa-server"></i> Directory</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link" href="/discovery"><i class="fa-solid fa-network-wired"></i> Discovery</a>
-        </li>
-        <li class="nav-item">
-          <a class="nav-link active" href="/plugins"><i class="fa-solid fa-plug"></i> Plugins</a>
-        </li>
-      </ul>
-      <div class="card shadow border-top-0">
+      <div class="card shadow">
         <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
           <div>
-            <i class="fa-solid fa-plug"></i> Plugins & Scheduler
+            <i class="fa-solid fa-plug"></i> Plugins
+          </div>
+          <div class="d-flex gap-2 align-items-center">
+            <button class="btn btn-sm btn-primary shadow-sm" onclick="openNewPluginModal()">
+              <i class="fas fa-plus"></i> New Plugin
+            </button>
           </div>
         </div>
         <div class="p-3 pb-0 text-muted small border-bottom">
-          <i class="fa-solid fa-circle-info"></i> View configured background plugins and scheduler status. Note: Plugins are configured statically in <code>sso-secrets.js</code>.
+          <i class="fa-solid fa-circle-info"></i> Configured plugin instances. Each is a loadable, scheduled copy of a
+          plugin type (e.g. Proxmox, UniFi, Nmap) — you can run several of the same type with different settings.
+          Secrets are stored in OpenBao and shown masked. <a href="/docs/plugins">Learn more</a>.
         </div>
-        
         <div class="table-responsive">
           <table class="card-body table table-hover mb-0 align-middle">
             <thead class="table-light">
               <tr>
-                <th class="ps-3">Plugin Name</th>
-                <th>Cron Schedule</th>
-                <th>Status</th>
-                <th>Details</th>
+                <th class="ps-3">Name</th>
+                <th>Type</th>
+                <th>Schedule</th>
+                <th>State</th>
+                <th>Last Run</th>
+                <th>Actions</th>
               </tr>
             </thead>
             <tbody id="plugins-list" jq-repeat="plugins">
-              <tr>
-                <td class="ps-3 fw-bold">{{name}}</td>
+              <tr id="plugin-row-{{id}}">
+                <td class="ps-3">
+                  <strong>{{name}}</strong>
+                  <div class="small text-muted font-monospace">{{slug}}</div>
+                </td>
+                <td><span class="badge bg-secondary">{{pluginType}}</span></td>
                 <td><code class="text-dark">{{cron}}</code></td>
                 <td>
-                  {{#enabled}}<span class="badge bg-success">Enabled</span>{{/enabled}}
-                  {{^enabled}}<span class="badge bg-secondary">Disabled</span>{{/enabled}}
+                  {{#enabled}}<span class="badge bg-success">Loaded</span>{{/enabled}}
+                  {{^enabled}}<span class="badge bg-secondary">Unloaded</span>{{/enabled}}
                 </td>
-                <td class="small text-muted font-monospace">
-                  {{details}}
+                <td class="small">
+                  {{#lastRunAt}}<span title="{{lastRunAt}}">{{lastRunFmt}}</span>{{/lastRunAt}}
+                  {{^lastRunAt}}<span class="text-muted">never</span>{{/lastRunAt}}
+                  {{#lastStatus}}
+                    {{#isOk}}<span class="badge bg-success-subtle text-success-emphasis ms-1">ok</span>{{/isOk}}
+                    {{#isError}}<span class="badge bg-danger-subtle text-danger-emphasis ms-1" title="{{lastError}}">error</span>{{/isError}}
+                    {{#isRunning}}<span class="badge bg-info-subtle text-info-emphasis ms-1">running</span>{{/isRunning}}
+                  {{/lastStatus}}
+                </td>
+                <td>
+                  <button class="btn btn-sm btn-primary" title="Edit" onclick="openEditModal('{{id}}')"><i class="fa-solid fa-pen"></i></button>
+                  <button class="btn btn-sm btn-warning" title="Edit Secrets" onclick="openSecretsModal('{{id}}')"><i class="fa-solid fa-key"></i></button>
+                  <button class="btn btn-sm btn-info" title="Test" onclick="testPlugin('{{id}}')"><i class="fa-solid fa-vial"></i></button>
+                  <button class="btn btn-sm btn-success" title="Run now" onclick="runNow('{{id}}')"><i class="fa-solid fa-play"></i></button>
+                  {{#enabled}}<button class="btn btn-sm btn-outline-danger" title="Unload" onclick="togglePlugin('{{id}}', false)">Unload</button>{{/enabled}}
+                  {{^enabled}}<button class="btn btn-sm btn-outline-success" title="Load" onclick="togglePlugin('{{id}}', true)">Load</button>{{/enabled}}
+                  <button class="btn btn-sm btn-outline-danger" title="Delete" onclick="deletePlugin('{{id}}')"><i class="fa-solid fa-trash"></i></button>
                 </td>
               </tr>
             </tbody>
-            <tbody id="empty-state" style="display: none;">
+            <tbody id="plugins-empty-state" style="display: none;">
               <tr>
-                <td colspan="4" class="text-center py-4 text-muted">
-                  No plugins configured in sso-secrets.js
+                <td colspan="6" class="text-center py-5 text-muted">
+                  <i class="fa-solid fa-plug fs-2 mb-3 text-black-50"></i>
+                  <h5>No plugin instances</h5>
+                  <p>Click <strong>New Plugin</strong> to configure one.</p>
                 </td>
               </tr>
             </tbody>
@@ -64,39 +82,265 @@
 <script>
   app.auth.forceLogin(['app_sso_admin', 'app_sso_directory_admin', 'admin']);
 
+  // type -> manifest (configSchema etc.), loaded once for the New-plugin form.
+  var pluginTypes = {};
+  // id -> instance (plain), kept current after each load so modals can resolve a row.
+  var pluginsById = {};
+
   $(document).ready(function() {
+    app.api.get('plugins/types', function(err, res) {
+      if (err) { app.messages.toast('Error loading plugin types: ' + (err.message || err), 'danger'); return; }
+      (res.results || []).forEach(function(t) { pluginTypes[t.type] = t; });
+    });
+    loadPlugins();
+  });
+
+  function fmtRun(ms) {
+    if (!ms) return '';
+    var d = new Date(Number(ms));
+    return moment(d).fromNow();
+  }
+
+  function loadPlugins() {
     app.api.get('plugins', function(err, res) {
-      if(err) {
-        app.messages.toast("Error loading plugins: " + (err.message || err));
-        return;
-      }
-      const plugins = res.results || {};
-      const pluginNames = Object.keys(plugins);
-      
+      if (err) { app.messages.toast('Error loading plugins: ' + (err.message || err), 'danger'); return; }
+      var list = res.results || [];
+      pluginsById = {};
       $.scope.plugins.empty();
-      if(pluginNames.length === 0) {
+      if (!list.length) {
         $('#plugins-list').hide();
-        $('#empty-state').show();
+        $('#plugins-empty-state').show();
       } else {
-        pluginNames.forEach(name => {
-          const config = plugins[name];
-          const details = Object.entries(config)
-            .filter(([k, v]) => k !== 'enabled' && k !== 'cron')
-            .map(([k, v]) => `${k}: ${v}`)
-            .join(', ');
-          
-          $.scope.plugins.push({
-            name: name,
-            cron: config.cron || 'N/A',
-            enabled: config.enabled,
-            details: details
-          });
+        list.forEach(function(p) {
+          pluginsById[p.id] = p;
+          p.lastRunFmt = fmtRun(p.lastRunAt);
+          p.isOk = p.lastStatus === 'ok';
+          p.isError = p.lastStatus === 'error';
+          p.isRunning = p.lastStatus === 'running';
+          $.scope.plugins.push(p);
         });
         $('#plugins-list').show();
-        $('#empty-state').hide();
+        $('#plugins-empty-state').hide();
       }
     });
-  });
+  }
+
+  // Build an HTML form fragment for a type's configSchema. `prefix` namespaces
+  // the field ids so the New and Edit modals don't collide. `values` (optional)
+  // pre-fills fields (masked secrets stay masked; non-secret values are shown).
+  function configFormHtml(type, prefix, values) {
+    var schema = pluginTypes[type] && pluginTypes[type].configSchema;
+    if (!schema || !schema.length) return '<p class="text-muted">No configuration fields for this plugin.</p>';
+    var v = values || {};
+    var html = '';
+    schema.forEach(function(f) {
+      var val = v[f.key];
+      if (val === undefined || val === null) val = '';
+      var inputType = f.type === 'password' ? 'password' : (f.type === 'url' ? 'url' : 'text');
+      var req = f.required ? ' required' : '';
+      var ph = f.placeholder ? (' placeholder="' + f.placeholder + '"') : '';
+      var label = f.label + (f.secret ? ' <span class="text-warning" title="stored in OpenBao"><i class="fa-solid fa-key"></i></span>' : '') + (f.required ? ' <span class="text-danger">*</span>' : '');
+      html += '<div class="mb-3">' +
+        '<label class="form-label">' + label + '</label>' +
+        '<input type="' + inputType + '" class="form-control" id="' + prefix + f.key + '" value="' + String(val).replace(/"/g, '&quot;') + '"' + req + ph + '>';
+      if (f.secret) html += '<div class="form-text">Leave blank to keep the current secret.</div>';
+      html += '</div>';
+    });
+    return html;
+  }
+
+  // Collect a flat {field: value} object from the rendered config form.
+  function collectConfig(type, prefix) {
+    var schema = pluginTypes[type] && pluginTypes[type].configSchema;
+    var out = {};
+    if (!schema) return out;
+    schema.forEach(function(f) {
+      var el = document.getElementById(prefix + f.key);
+      if (el) out[f.key] = el.value;
+    });
+    return out;
+  }
+
+  function typeOptionsHtml(selected) {
+    var opts = '<option value="">Select a plugin type…</option>';
+    Object.keys(pluginTypes).sort().forEach(function(t) {
+      opts += '<option value="' + t + '"' + (t === selected ? ' selected' : '') + '>' + pluginTypes[t].name + ' (' + t + ')</option>';
+    });
+    return opts;
+  }
+
+  // --- New Plugin modal ---
+  function openNewPluginModal() {
+    app.modal.open({
+      title: 'New Plugin',
+      bodyHtml:
+        '<div class="actionMessage mb-3" style="display:none"></div>' +
+        '<div class="mb-3"><label class="form-label">Plugin Type <span class="text-danger">*</span></label>' +
+          '<select class="form-select" id="np-type" onchange="renderNewPluginFields()">' + typeOptionsHtml('') + '</select></div>' +
+        '<div class="mb-3"><label class="form-label">Name <span class="text-danger">*</span></label>' +
+          '<input type="text" class="form-control" id="np-name" placeholder="Proxmox — Home Lab"></div>' +
+        '<div class="mb-3"><label class="form-label">Slug <span class="text-danger">*</span></label>' +
+          '<input type="text" class="form-control font-monospace" id="np-slug" placeholder="proxmox-homelab"></div>' +
+        '<div class="mb-3"><label class="form-label">Cron Schedule</label>' +
+          '<input type="text" class="form-control font-monospace" id="np-cron" value="0 * * * *"></div>' +
+        '<hr><h6>Configuration</h6><div id="np-config-fields"><p class="text-muted">Select a plugin type first.</p></div>',
+      footer: { buttonsHtml: app.modal.footerButtons({ onSave: 'saveNewPlugin()', saveLabel: 'Create Plugin' }) }
+    });
+  }
+
+  function renderNewPluginFields() {
+    var type = document.getElementById('np-type').value;
+    document.getElementById('np-config-fields').innerHTML = configFormHtml(type, 'np-');
+  }
+
+  async function saveNewPlugin() {
+    var type = document.getElementById('np-type').value;
+    if (!type) return app.messages.action('Select a plugin type.', app.modal.body(), 'danger');
+    var name = document.getElementById('np-name').value.trim();
+    var slug = document.getElementById('np-slug').value.trim();
+    var cron = document.getElementById('np-cron').value.trim() || '0 * * * *';
+    if (!name) return app.messages.action('Name is required.', app.modal.body(), 'danger');
+    if (!/^[a-z0-9][a-z0-9_-]{0,63}$/.test(slug)) return app.messages.action('Slug must be lowercase letters/digits/_/- (max 64).', app.modal.body(), 'danger');
+    var config = collectConfig(type, 'np-');
+    try {
+      await app.api.post('plugins', { pluginType: type, name: name, slug: slug, cron: cron, config: config });
+      app.modal.close();
+      app.messages.toast('Plugin created and scheduled.', 'success');
+      loadPlugins();
+    } catch (err) {
+      app.messages.action(err.message || 'Failed to create plugin', app.modal.body(), 'danger');
+    }
+  }
+
+  // --- Edit (non-secret) modal ---
+  function openEditModal(id) {
+    var p = pluginsById[id];
+    if (!p) return;
+    app.modal.open({
+      title: 'Edit — ' + p.name,
+      bodyHtml:
+        '<div class="actionMessage mb-3" style="display:none"></div>' +
+        '<div class="mb-3"><label class="form-label">Name <span class="text-danger">*</span></label>' +
+          '<input type="text" class="form-control" id="ed-name" value="' + String(p.name).replace(/"/g, '&quot;') + '"></div>' +
+        '<div class="mb-3"><label class="form-label">Slug (read-only)</label>' +
+          '<input type="text" class="form-control font-monospace" id="ed-slug" value="' + p.slug + '" readonly></div>' +
+        '<div class="mb-3"><label class="form-label">Cron Schedule</label>' +
+          '<input type="text" class="form-control font-monospace" id="ed-cron" value="' + (p.cron || '0 * * * *') + '"></div>' +
+        '<hr><h6>Configuration</h6><div id="ed-config-fields">' + configFormHtml(p.pluginType, 'ed-', Object.assign({}, p.config, p.secrets)) + '</div>',
+      footer: {
+        metaHtml: app.modal.formatAudit ? app.modal.formatAudit(p, { formatDate: function(ms){ return moment(ms).format('YYYY-MM-DD HH:mm'); } }) : '',
+        buttonsHtml: app.modal.footerButtons({ onSave: 'saveEdit("' + id + '")', saveLabel: 'Save' })
+      }
+    });
+  }
+
+  async function saveEdit(id) {
+    var p = pluginsById[id];
+    if (!p) return;
+    var name = document.getElementById('ed-name').value.trim();
+    var cron = document.getElementById('ed-cron').value.trim() || '0 * * * *';
+    if (!name) return app.messages.action('Name is required.', app.modal.body(), 'danger');
+    var config = collectConfig(p.pluginType, 'ed-');
+    try {
+      await app.api.put('plugins/' + id, { name: name, cron: cron, config: config });
+      app.modal.close();
+      app.messages.toast('Plugin saved.', 'success');
+      loadPlugins();
+    } catch (err) {
+      app.messages.action(err.message || 'Failed to save', app.modal.body(), 'danger');
+    }
+  }
+
+  // --- Edit Secrets modal ---
+  function openSecretsModal(id) {
+    var p = pluginsById[id];
+    if (!p) return;
+    var masked = p.secrets || {};
+    // Render only the secret fields, prefilled with the masked values.
+    var schema = (pluginTypes[p.pluginType] && pluginTypes[p.pluginType].configSchema) || [];
+    var secretFields = schema.filter(function(f) { return f.secret; });
+    var html = '<div class="actionMessage mb-3" style="display:none"></div>' +
+      '<p class="text-muted small">Stored in OpenBao. Leave a field blank to keep its current value.</p>';
+    if (!secretFields.length) {
+      html += '<p class="text-muted">This plugin has no secret fields.</p>';
+    } else {
+      secretFields.forEach(function(f) {
+        var val = masked[f.key] || '';
+        html += '<div class="mb-3"><label class="form-label">' + f.label + '</label>' +
+          '<input type="password" class="form-control" id="sec-' + f.key + '" value="' + String(val).replace(/"/g, '&quot;') + '" placeholder="' + (val ? '******** (unchanged)' : 'new value') + '"></div>';
+      });
+    }
+    app.modal.open({
+      title: 'Edit Secrets — ' + p.name,
+      bodyHtml: html,
+      footer: { buttonsHtml: app.modal.footerButtons({ onSave: 'saveSecrets("' + id + '")', saveLabel: 'Save Secrets' }) }
+    });
+  }
+
+  async function saveSecrets(id) {
+    var p = pluginsById[id];
+    if (!p) return;
+    var schema = pluginTypes[p.pluginType] && pluginTypes[p.pluginType].configSchema;
+    var secrets = {};
+    if (schema) {
+      schema.forEach(function(f) {
+        if (!f.secret) return;
+        var el = document.getElementById('sec-' + f.key);
+        if (el) secrets[f.key] = el.value;
+      });
+    }
+    try {
+      await app.api.put('plugins/' + id + '/secrets', secrets);
+      app.modal.close();
+      app.messages.toast('Secrets saved.', 'success');
+      loadPlugins();
+    } catch (err) {
+      app.messages.action(err.message || 'Failed to save secrets', app.modal.body(), 'danger');
+    }
+  }
+
+  async function testPlugin(id) {
+    try {
+      var res = await app.api.post('plugins/' + id + '/test', {});
+      app.messages.toast('Test passed.', 'success');
+    } catch (err) {
+      app.messages.toast('Test failed: ' + (err.message || 'validation failed'), 'danger');
+    }
+  }
+
+  async function runNow(id) {
+    try {
+      await app.api.post('plugins/' + id + '/run', {});
+      app.messages.toast('Run enqueued. Refresh shortly for status.', 'info');
+      setTimeout(loadPlugins, 3000);
+    } catch (err) {
+      app.messages.toast('Failed to run: ' + (err.message || err), 'danger');
+    }
+  }
+
+  async function togglePlugin(id, enable) {
+    try {
+      await app.api.post('plugins/' + id + (enable ? '/load' : '/unload'), {});
+      app.messages.toast(enable ? 'Plugin loaded.' : 'Plugin unloaded.', 'success');
+      loadPlugins();
+    } catch (err) {
+      app.messages.toast('Failed: ' + (err.message || err), 'danger');
+    }
+  }
+
+  async function deletePlugin(id) {
+    var p = pluginsById[id];
+    if (!p) return;
+    var ok = await app.messages.confirm('Delete plugin "' + p.name + '"? Its schedule and OpenBao secrets will be removed.', app.modal.body ? app.modal.body() : null, 'danger');
+    if (!ok) return;
+    try {
+      await app.api.delete('plugins/' + id);
+      app.messages.toast('Plugin deleted.', 'success');
+      loadPlugins();
+    } catch (err) {
+      app.messages.toast('Failed to delete: ' + (err.message || err), 'danger');
+    }
+  }
 </script>
 
 <%- include('bottom') %>

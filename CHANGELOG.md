@@ -4,6 +4,73 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.17.0] - 2026-08-01
+
+A real **plugin system**: the half-built discovery plugins (statically
+configured in `sso-secrets.js`, only toggleable for cron/enabled) become
+**configurable, loadable/unloadable plugin instances** you manage from a
+dedicated **Plugins** page and the `/api/plugins` API, with multiple runtime
+copies of each type and per-instance secrets stored in OpenBao.
+
+### Added
+- **Plugin instances** — a new `PluginInstance` ORM model
+  (`nodejs/models/plugin_instance.js`, Sequelize) is the registry of
+  configured, scheduled plugin copies. Each has a `pluginType`, a unique
+  `slug` (the discovery source name), a cron schedule, an `enabled` flag
+  (load/unload), non-secret `config` (JSON), and last-run bookkeeping. Multiple
+  instances of the same type are supported.
+- **Plugin registry** (`nodejs/services/plugin_registry.js`) — generalizes the
+  one-shot discovery-plugin scan in `scheduler.js`. Plugin types are modules
+  under `nodejs/plugins/<category>/<type>.js` exporting a manifest
+  (`type`, `category`, `name`, `description`, `configSchema`, `validate`,
+  `run`/`discover`). Exposes `getTypes`, `getModule`, `splitConfig` (secret vs
+  non-secret), `mask`, and required-field helpers for the UI/API.
+- **Per-instance secrets in OpenBao** (`nodejs/utils/plugin_secrets.js`) —
+  `configSchema` fields flagged `secret:true` (e.g. a Proxmox `tokenSecret`,
+  UniFi `password`) are stored at `secret/plugins/<instance-id>/conf`, never in
+  the DB. The UI only ever sees masked (`********`) values. Plugins run
+  in-process (BullMQ workers), so they need no OpenBao token of their own — the
+  SSO reads/writes via the `sso-broker` token. **Requires theta-suite ≥ v1.30.1**
+  for the `sso-broker` policy grant on `secret/plugins/*`; the API fails-soft
+  with a clear error if absent.
+- **`/api/plugins` API** (`nodejs/routes/api_plugins.js`, replaces the old
+  `routes/plugins.js`) — `GET /types`, list/get/create/update/update-secrets/
+  test/load/unload/run/delete/runs. Admin-only
+  (`app_sso_admin` / `app_sso_directory_admin` / `app_super_admin`).
+- **Plugins page** (`/plugins`, `views/plugins.ejs`) + nav entry — instance
+  table with New/Edit/Edit-Secrets/Test/Run-now/Load/Unload/Delete, config forms
+  rendered from each type's `configSchema`.
+- **`validate`** ("Test" button) on the built-in Proxmox/UniFi/Nmap plugins.
+
+### Changed
+- `services/scheduler.js` now schedules from the `PluginInstance` table instead
+  of static `conf.discovery.plugins` + a Redis override hash. Each instance owns
+  a stable BullMQ JobScheduler id (`plugin:<instanceId>`) so load/unload
+  upsert/remove one schedule without disturbing the rest. Discovery plugins
+  reconcile results under the instance's `slug`.
+- The three discovery plugins (`plugins/discovery/{proxmox,unifi,nmap}.js`)
+  gained manifests (`configSchema`, `validate`, `run` alias). `nmap`'s
+  `targetRange` is non-secret; Proxmox `tokenSecret` and UniFi `password` are
+  secret.
+- The `/plugins` page route renders the page instead of redirecting to
+  `/directory`; the **Agents & Scheduler** tab was removed from `/directory`
+  (plugins are now managed on the Plugins page). The `/docs/agents` link is
+  aliased to `/docs/plugins`.
+- `docs/plugins.md`, `docs/vault.md`, `docs/_config.yml` (nav), and `API.md`
+  (Plugin Endpoints section) document the new system.
+
+### Legacy migration
+On first boot of v1.17.0, if the `PluginInstance` table is empty **and**
+`conf.discovery.plugins` has entries, one instance per configured type is seeded
+automatically (secret fields copied into OpenBao). After that the static
+config is ignored — manage plugins from the UI/API. Idempotent (guarded by the
+empty-table check).
+
+### Prerequisite
+**theta-suite ≥ v1.30.1** — re-run `./setup.sh` after upgrading so the
+`sso-broker` OpenBao policy is granted `secret/plugins/*`. Without it, storing
+plugin secrets fails with a clear error.
+
 ## [1.16.1] - 2026-08-01
 
 Fix: the Configuration (`/conf`) and Vault (`/vault`) pages returned **401** for

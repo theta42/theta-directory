@@ -6,6 +6,41 @@ const agent = new https.Agent({
 });
 
 module.exports = {
+  // Plugin manifest — see nodejs/services/plugin_registry.js. `password` is
+  // secret and stored in OpenBao (secret/plugins/<instance-id>/conf).
+  type: 'unifi',
+  category: 'discovery',
+  name: 'UniFi Network',
+  description: 'Discover UniFi network devices and clients from a UniFi Controller / UDM endpoint.',
+  configSchema: [
+    { key: 'url',      label: 'Controller URL', type: 'url',      required: true, placeholder: 'https://unifi.example:8443' },
+    { key: 'user',     label: 'Username',       type: 'text',     required: true },
+    { key: 'password', label: 'Password',       type: 'password', required: true, secret: true }
+  ],
+
+  // "Test": attempt the UDM login (falls back to the legacy controller login);
+  // succeeds only if one of the two login endpoints returns 200.
+  validate: async (config) => {
+    const { url, user, password } = config;
+    if (!url || !user || !password) return { ok: false, error: 'Missing url, user, or password' };
+    try {
+      let loginRes = await fetch(`${url}/api/auth/login`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: user, password }), agent
+      });
+      if (!loginRes.ok) {
+        loginRes = await fetch(`${url}/api/login`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username: user, password }), agent
+        });
+      }
+      if (!loginRes.ok) return { ok: false, error: `UniFi auth failed (${loginRes.status})` };
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  },
+
   discover: async (config) => {
     const { url, user, password } = config;
     if (!url || !user || !password) {
@@ -91,5 +126,9 @@ module.exports = {
     }
 
     return { resources, edges };
-  }
+  },
+
+  // Generalized plugin contract alias for `discover`. See proxmox.js for why
+  // this references module.exports rather than `this`.
+  run: async (config) => module.exports.discover(config)
 };

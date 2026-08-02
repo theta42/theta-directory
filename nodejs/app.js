@@ -107,7 +107,10 @@ app.use('/api/oauth', middleware.auth, oauthApiRouter);
 app.use('/api/oauth/client', middleware.auth, require('./routes/oauth_client'));
 app.get('/.well-known/openid-configuration', discovery);
 app.use('/api/webhook', require('./routes/webhook'));
-app.use('/api/plugins', middleware.auth, require('./routes/plugins'));
+// Plugin instances — loadable/unloadable, configurable plugin copies with
+// per-instance secrets in OpenBao (secret/plugins/*). Admin-only (gated inside
+// the router to app_sso_admin / app_sso_directory_admin).
+app.use('/api/plugins', middleware.auth, require('./routes/api_plugins'));
 
 // OpenBao vault API. The broker mints a server-side scoped token per user
 // (per-user user-<uid> or, for admins, sso-admin), enforces the path prefix

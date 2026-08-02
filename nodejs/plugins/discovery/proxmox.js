@@ -7,6 +7,33 @@ const agent = new https.Agent({
 });
 
 module.exports = {
+  // Plugin manifest — see nodejs/services/plugin_registry.js. `configSchema`
+  // drives the admin UI form and validation; fields flagged `secret:true` are
+  // stored in OpenBao (secret/plugins/<instance-id>/conf), never in the DB.
+  type: 'proxmox',
+  category: 'discovery',
+  name: 'Proxmox VE',
+  description: 'Discover VMs, containers, and hypervisor nodes from a Proxmox VE API endpoint.',
+  configSchema: [
+    { key: 'url',         label: 'API URL',      type: 'url',      required: true, placeholder: 'https://pve.example:8006' },
+    { key: 'tokenId',     label: 'Token ID',     type: 'text',     required: true, placeholder: 'user@pam!token' },
+    { key: 'tokenSecret', label: 'Token Secret', type: 'password', required: true, secret: true }
+  ],
+
+  // "Test" button in the UI: hit the unauthenticated version endpoint with the
+  // API token to confirm the URL + token are valid before scheduling runs.
+  validate: async (config) => {
+    const { url, tokenId, tokenSecret } = config;
+    if (!url || !tokenId || !tokenSecret) return { ok: false, error: 'Missing url, tokenId, or tokenSecret' };
+    try {
+      const res = await fetch(`${url}/api2/json/version`, { headers: { 'Authorization': `PVEAPIToken=${tokenId}=${tokenSecret}` }, agent });
+      if (!res.ok) return { ok: false, error: `Proxmox API rejected the token (${res.status})` };
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err.message };
+    }
+  },
+
   discover: async (config) => {
     const { url, tokenId, tokenSecret } = config;
     if (!url || !tokenId || !tokenSecret) {
@@ -151,5 +178,11 @@ module.exports = {
     }
 
     return { resources, edges };
-  }
+  },
+
+  // The generalized plugin contract calls `run`; the discovery plugins keep
+  // `discover` as their implementation name for back-compat, and `run` is just
+  // an alias. Referenced via module.exports (not `this`) so it survives being
+  // detached and called as a bare function reference.
+  run: async (config) => module.exports.discover(config)
 };

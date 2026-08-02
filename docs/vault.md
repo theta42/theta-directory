@@ -36,4 +36,10 @@ Currently, secrets are maintained at `/v1/secret/data/sso-manager/conf` using th
 
 ## Plugin Integration
 
-When building custom Agents or integrations, they can utilize the local Vault to retrieve API tokens instead of hardcoding them. Always use the `/api/vault` proxy to ensure permissions are consistently enforced.
+Plugin instances store their per-instance secrets in OpenBao at
+`secret/plugins/<instance-id>/conf` (configured, loaded/unloaded, and run from
+the **Plugins** page — see [Plugins](plugins.html)). The plugin process runs
+in-process, so the SSO Manager reads/writes those secrets server-side through
+the `sso-broker` token; the admin UI only ever sees masked values, and external
+apps can retrieve API tokens via the `/api/vault` proxy to keep permissions
+consistently enforced instead of hardcoding them.

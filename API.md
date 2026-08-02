@@ -1199,6 +1199,110 @@ Configurable per-client via `token_lifetime`. Global defaults (in seconds):
 
 ---
 
+## Plugin Endpoints
+
+Base path: `/api/plugins`
+
+All endpoints require authentication and `app_sso_admin`, `app_sso_directory_admin`, or `app_super_admin` membership. Secret field values are always returned masked (`********`); they are stored in OpenBao at `secret/plugins/<instance-id>/conf`, never in the database row. See [Plugins](docs/plugins.html).
+
+### List Plugin Types
+
+**`GET /api/plugins/types`**
+
+Returns the installed plugin types and their `configSchema` (used to build the create-instance form).
+
+**Response:**
+```json
+{
+  "results": [
+    {
+      "type": "proxmox",
+      "category": "discovery",
+      "name": "Proxmox VE",
+      "description": "Discover VMs, containers, and hypervisor nodes from a Proxmox VE API endpoint.",
+      "configSchema": [
+        { "key": "url", "label": "API URL", "type": "url", "required": true },
+        { "key": "tokenId", "label": "Token ID", "type": "text", "required": true },
+        { "key": "tokenSecret", "label": "Token Secret", "type": "password", "required": true, "secret": true }
+      ]
+    }
+  ]
+}
+```
+
+---
+
+### List Plugin Instances
+
+**`GET /api/plugins/`**
+
+**Response:** `{ "results": [ { "id", "pluginType", "category", "name", "slug", "enabled", "cron", "config", "secrets": {…masked…}, "lastRunAt", "lastStatus", "lastError" } ] }`
+
+---
+
+### Get One Instance
+
+**`GET /api/plugins/:id`** — same shape as a list entry.
+
+---
+
+### Create Instance
+
+**`POST /api/plugins/`**
+
+`config` is a flat object of **all** field values (secret and non-secret); the server splits it — non-secret fields go to the DB row, secret fields to OpenBao. Creating an enabled instance schedules it and kicks one immediate run. `slug` is the discovery source name (lowercase letters/digits/_/-, max 64, unique).
+
+**Request:**
+```json
+{
+  "pluginType": "proxmox",
+  "name": "Proxmox — Home Lab",
+  "slug": "proxmox-homelab",
+  "cron": "0 * * * *",
+  "config": { "url": "https://pve:8006", "tokenId": "u@pam!t", "tokenSecret": "secret-value" }
+}
+```
+
+Errors: `400` if the plugin type is unknown, the slug is malformed/duplicated, or a required field is missing; `400` with an OpenBao hint if writing the secret fails (re-run `./setup.sh` with theta-suite ≥ v1.30.1).
+
+---
+
+### Update Instance
+
+**`PUT /api/plugins/:id`** — update `name`, `cron`, `enabled`, and non-secret `config`. Secret fields are changed via `PUT /:id/secrets`. Re-schedules if `cron` or `enabled` changed.
+
+---
+
+### Update Secrets
+
+**`PUT /api/plugins/:id/secrets`** — body is a flat object of secret field values. Blank/`********` values are ignored (kept as-is).
+
+---
+
+### Test Instance
+
+**`POST /api/plugins/:id/test`** — runs the plugin's `validate`. Returns `{ "ok": true }` or `400 { "ok": false, "error": "..." }`.
+
+---
+
+### Load / Unload / Run Now
+
+- **`POST /api/plugins/:id/load`** — enable + schedule + run now.
+- **`POST /api/plugins/:id/unload`** — unschedule + disable.
+- **`POST /api/plugins/:id/run`** — enqueue one immediate run (regardless of enabled).
+
+---
+
+### Last Run Status
+
+**`GET /api/plugins/:id/runs`** → `{ "results": { "lastRunAt", "lastStatus", "lastError" } }` (`lastStatus` is `ok` | `error` | `running`).
+
+---
+
+### Delete Instance
+
+**`DELETE /api/plugins/:id`** — unschedules, removes the OpenBao secret namespace, and deletes the row.
+
 ## Error Responses
 
 All endpoints return errors in this format:
