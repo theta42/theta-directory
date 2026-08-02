@@ -4,6 +4,36 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.17.1] - 2026-08-01
+
+Hardens the **runtime SMTP/OAuth secret handling** on the `/conf` admin page to
+match the plugin-secrets discipline: the SMTP password and OAuth JWT secret are
+no longer returned in cleartext by `GET /api/conf` or round-tripped through the
+form. They remain saved in OpenBao at `secret/sso-manager/conf` at runtime
+(unchanged) — only how they're surfaced to the admin changes.
+
+### Changed
+- **`GET /api/conf`** now masks `smtp.pass` and `oauth.jwtSecret` to `********`
+  (was: returned in cleartext). Non-secret fields (host, port, user, from,
+  secure, issuer, token lifetimes) are returned as before.
+- **`POST /api/conf`** now treats a blank or `********` secret-field submission
+  as "keep the current stored value" — so an admin editing the From address or
+  token lifetimes no longer has to re-enter (or leak) the SMTP password / JWT
+  secret. Only a genuinely new, non-blank value overwrites. The preserved values
+  are re-applied to live `conf` immediately, as before.
+- **`/conf` page** (`views/conf.ejs`): the Password and JWT Secret fields carry
+  a "leave unchanged to keep the current value stored in OpenBao" hint; the page
+  copy notes secret fields are masked. No JSON-textarea editing is involved —
+  SMTP is and remains configured through structured form fields.
+
+### Notes
+- SMTP (and OAuth) config was **already** saved to OpenBao at runtime before
+  this release (via `POST /api/conf` → `baoConf.set('sso-manager/conf')`, and
+  overlaid back at boot by `bao-conf.init`). This release closes the
+  cleartext-exposure gap; it does not move the storage path.
+- No theta-suite policy change required — `secret/sso-manager/conf` was already
+  granted to the `sso-broker` policy.
+
 ## [1.17.0] - 2026-08-01
 
 A real **plugin system**: the half-built discovery plugins (statically

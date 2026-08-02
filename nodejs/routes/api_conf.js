@@ -12,12 +12,31 @@ router.use(async (req, res, next) => {
   }
 });
 
+// Secret fields stored inside secret/sso-manager/conf. These are NEVER returned
+// in cleartext by GET /api/conf (masked to MASK below) and, on save, a blank or
+// mask-valued submission preserves the stored value so an admin editing an
+// unrelated field (e.g. the From address) doesn't have to re-enter — or leak —
+// the SMTP password / OAuth JWT secret. Mirrors the plugin-secrets discipline.
+const MASK = '********';
+const SECRET_PATHS = [
+	['smtp', 'pass'],
+	['oauth', 'jwtSecret'],
+];
+
+function maskSecrets(obj) {
+	const out = JSON.parse(JSON.stringify(obj));
+	for (const [grp, key] of SECRET_PATHS) {
+		if (out[grp] && out[grp][key]) out[grp][key] = MASK;
+	}
+	return out;
+}
+
 router.get('/', async (req, res) => {
-  const editable = {
+  const editable = maskSecrets({
     smtp: conf.smtp || {},
     discovery: conf.discovery || {},
     oauth: conf.oauth || {}
-  };
+  });
   res.json(editable);
 });
 
@@ -38,18 +57,31 @@ function applyToLiveConf(src) {
 router.post('/', async (req, res, next) => {
   try {
     const existing = await baoConf.get('sso-manager/conf') || {};
-    // Deep merge req.body into existing
-    for (const key of Object.keys(req.body)) {
-      if (typeof req.body[key] === 'object' && req.body[key] !== null && !Array.isArray(req.body[key])) {
-        existing[key] = { ...(existing[key] || {}), ...req.body[key] };
+    const incoming = req.body || {};
+
+    // Preserve secret fields the admin left blank (or left showing the mask):
+    // drop them from the incoming merge so the stored value survives. Only a
+    // genuinely new, non-blank, non-mask value overwrites.
+    for (const [grp, key] of SECRET_PATHS) {
+      if (incoming[grp] && incoming[grp][key] !== undefined) {
+        const submitted = incoming[grp][key];
+        if (submitted === '' || submitted === MASK) delete incoming[grp][key];
+      }
+    }
+
+    // Deep merge incoming into existing
+    for (const key of Object.keys(incoming)) {
+      if (typeof incoming[key] === 'object' && incoming[key] !== null && !Array.isArray(incoming[key])) {
+        existing[key] = { ...(existing[key] || {}), ...incoming[key] };
       } else {
-        existing[key] = req.body[key];
+        existing[key] = incoming[key];
       }
     }
     await baoConf.set('sso-manager/conf', existing);
     // Reflect the saved values in the live conf immediately (the next boot's
     // bao-conf.init() would pick them up too, but this keeps running readers
-    // current without a restart, as the old conf_manager did).
+    // current without a restart, as the old conf_manager did). `existing`
+    // carries the preserved secret values, so live conf keeps them too.
     applyToLiveConf(existing);
     res.json({ success: true });
   } catch(err) {

@@ -20,7 +20,7 @@ When the environment is initialized via `setup.sh`, OpenBao is automatically uns
 
 The SSO Manager Vault can be accessed in two ways:
 
-1. **Via the SSO Manager UI**: Go to the **Admin Configuration** page (`/conf`) to edit the application's configuration secrets directly.
+1. **Via the SSO Manager UI**: Go to the **Admin Configuration** page (`/conf`) to edit the application's configuration secrets directly. SMTP and OAuth settings are edited through structured form fields (not a raw JSON blob) and saved to OpenBao at `secret/sso-manager/conf` at runtime, taking effect immediately. Secret fields — the SMTP password and the OAuth JWT secret — are returned masked (`********`); leave the field unchanged (or blank) to keep the stored value, or enter a new value to replace it.
 2. **Via the REST API**: Send requests to `/api/vault/v1/...` with your SSO Manager session or API Token.
 
 ### API Example
