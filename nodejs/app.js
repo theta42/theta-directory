@@ -43,6 +43,9 @@ app.onListen.push(function(){
       // socket.broadcast.emit('P2PSub', msg);
     });
   });
+  
+  // Initialize Theta Agent WebSockets
+  require('./routes/api_agent')(app);
 }); 
 
 // Gzip text responses (HTML/JS/CSS/JSON). The admin UI loads ~13 separate,
