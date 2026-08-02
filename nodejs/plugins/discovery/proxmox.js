@@ -45,7 +45,7 @@ module.exports = {
     };
     
     // Ensure URL has no trailing slash
-    url = url.replace(/\\/+$/, '');
+    url = url.endsWith('/') ? url.slice(0, -1) : url;
 
     const resources = [];
     const edges = [];
