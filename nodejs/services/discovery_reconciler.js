@@ -12,14 +12,14 @@ class DiscoveryReconciler {
       
       let existing = null;
       
-      // Attempt matching by MAC if available
+      // Attempt matching by MAC if available (case-insensitive)
       if (res.metadata.interfaces && res.metadata.interfaces.length > 0) {
-        const macs = res.metadata.interfaces.map(i => i.mac).filter(m => !!m);
+        const macs = res.metadata.interfaces.map(i => i.mac ? i.mac.toLowerCase() : null).filter(m => !!m);
         if (macs.length > 0) {
           const allRes = await Resource.list();
           existing = allRes.find(r => 
             r.metadata && r.metadata.interfaces && 
-            r.metadata.interfaces.some(i => macs.includes(i.mac))
+            r.metadata.interfaces.some(i => i.mac && macs.includes(i.mac.toLowerCase()))
           );
         }
       }
@@ -65,7 +65,10 @@ class DiscoveryReconciler {
           const newIntfs = res.metadata.interfaces;
           // Simple union based on mac or ip
           for (const ni of newIntfs) {
-            const idx = existingIntfs.findIndex(ei => (ni.mac && ei.mac === ni.mac) || (ni.ip && ei.ip === ni.ip));
+            const idx = existingIntfs.findIndex(ei => 
+              (ni.mac && ei.mac && ei.mac.toLowerCase() === ni.mac.toLowerCase()) || 
+              (ni.ip && ei.ip && ei.ip === ni.ip)
+            );
             if (idx >= 0) existingIntfs[idx] = { ...existingIntfs[idx], ...ni };
             else existingIntfs.push(ni);
           }
@@ -79,8 +82,14 @@ class DiscoveryReconciler {
         
         mergedMeta.last_seen = Date.now();
         
+        const isIp = (str) => /^(?:[0-9]{1,3}\\.){3}[0-9]{1,3}$/.test(str || '');
+        let bestName = existing.name;
+        if (res.name && (!bestName || isIp(bestName) || res.name.length > bestName.length && !isIp(res.name))) {
+          bestName = res.name;
+        }
+
         await existing.update({
-          name: res.name || existing.name,
+          name: bestName,
           description: res.description || existing.description,
           metadata: mergedMeta,
           updated_on: Math.floor(Date.now() / 1000)

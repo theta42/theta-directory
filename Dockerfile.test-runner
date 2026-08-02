@@ -36,10 +36,8 @@ RUN mkdir -p /app/config
 COPY tos.md /tos.md
 COPY README.md /README.md
 COPY CHANGELOG.md /CHANGELOG.md
-COPY DEPLOYMENT.md /DEPLOYMENT.md
 COPY API.md /API.md
 COPY directory_spec.md /directory_spec.md
-COPY docs /docs
 
 # Seed script and utility
 COPY test_seed.js ./test_seed.js

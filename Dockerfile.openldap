@@ -182,10 +182,8 @@ COPY tos.md /tos.md
 # without internet access. Same flattened-path convention as tos.md above.
 COPY README.md /README.md
 COPY CHANGELOG.md /CHANGELOG.md
-COPY DEPLOYMENT.md /DEPLOYMENT.md
 COPY API.md /API.md
 COPY directory_spec.md /directory_spec.md
-COPY docs /docs
 
 # Baked commit hash from the gitinfo stage (see build_info.js).
 COPY --from=gitinfo /commit.txt ./.build_commit

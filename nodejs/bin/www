@@ -25,6 +25,19 @@ var server = http.createServer(app);
 var io = require('socket.io')(server);
 app.io = io;
 
+const WebSocket = require('ws');
+const wss = new WebSocket.Server({ noServer: true });
+server.on('upgrade', (request, socket, head) => {
+  // We only handle upgrade for /api/agent/ws.
+  // Socket.IO handles its own upgrades natively because it attaches directly to `server`.
+  if (request.url.startsWith('/api/agent/ws')) {
+    wss.handleUpgrade(request, socket, head, (ws) => {
+      wss.emit('connection', ws, request);
+    });
+  }
+});
+app.wss = wss;
+
 const models = require('../models');
 
 /**

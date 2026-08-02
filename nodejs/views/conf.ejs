@@ -4,6 +4,7 @@
 
 	$(document).ready(function() {
 		loadConf();
+		loadProxyConf();
 		loadTos();
 	});
 
@@ -88,6 +89,47 @@
 		}
 	}
 
+	async function loadProxyConf() {
+		try {
+			const data = await app.api.get('conf/proxy');
+			if (data.oidc) {
+				$('#proxy-issuer').val(data.oidc.issuer || '');
+				$('#proxy-client-id').val(data.oidc.clientId || '');
+				$('#proxy-client-secret').val(data.oidc.clientSecret || '');
+			}
+			if (data.ldap) {
+				$('#proxy-ldap-bindpass').val(data.ldap.bindPassword || '');
+			}
+		} catch (error) {
+			console.error('Failed to load Proxy conf:', error);
+		}
+	}
+
+	async function saveProxyConf() {
+		const btn = $('#btn-save-proxy');
+		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Saving...');
+		
+		const payload = {
+			oidc: {
+				issuer: $('#proxy-issuer').val(),
+				clientId: $('#proxy-client-id').val(),
+				clientSecret: $('#proxy-client-secret').val()
+			},
+			ldap: {
+				bindPassword: $('#proxy-ldap-bindpass').val()
+			}
+		};
+
+		try {
+			await app.api.post('conf/proxy', payload);
+			app.messages.toast('Proxy configuration saved securely to OpenBao!', 'success');
+		} catch (error) {
+			app.messages.toast('Failed to save Proxy configuration: ' + error.message, 'danger');
+		} finally {
+			btn.prop('disabled', false).html('<i class="fas fa-save"></i> Save Proxy Secrets');
+		}
+	}
+
 	// ── Terms of Service editor ──────────────────────────────────────────
 	// Moved here from the admin Overview dashboard — it's a configuration
 	// control, so it belongs on the System Configuration page. The API is
@@ -152,9 +194,28 @@
 		</div>
 	</div>
 
-	<div class="row">
-		<div class="col-md-6 mb-4">
-			<div class="card shadow-sm border-0 h-100">
+	<ul class="nav nav-tabs mb-4" id="confTabs" role="tablist">
+		<li class="nav-item" role="presentation">
+			<button class="nav-link active" id="smtp-tab" data-bs-toggle="tab" data-bs-target="#smtp" type="button" role="tab">SMTP Settings</button>
+		</li>
+		<li class="nav-item" role="presentation">
+			<button class="nav-link" id="oauth-tab" data-bs-toggle="tab" data-bs-target="#oauth" type="button" role="tab">OAuth & JWT</button>
+		</li>
+		<li class="nav-item" role="presentation">
+			<button class="nav-link" id="sms-tab" data-bs-toggle="tab" data-bs-target="#sms" type="button" role="tab">SMS (VoIP.ms)</button>
+		</li>
+		<li class="nav-item" role="presentation">
+			<button class="nav-link" id="tos-tab" data-bs-toggle="tab" data-bs-target="#tos" type="button" role="tab">Terms of Service</button>
+		</li>
+		<li class="nav-item" role="presentation">
+			<button class="nav-link" id="proxy-tab" data-bs-toggle="tab" data-bs-target="#proxy" type="button" role="tab">Proxy Secrets</button>
+		</li>
+	</ul>
+
+	<div class="tab-content" id="confTabsContent">
+		<!-- SMTP Tab -->
+		<div class="tab-pane fade show active" id="smtp" role="tabpanel">
+			<div class="card shadow-sm border-0 mb-4">
 				<div class="card-header bg-white border-bottom-0 pt-4 pb-0">
 					<h5 class="mb-0"><i class="fas fa-envelope text-primary me-2"></i> SMTP Settings</h5>
 				</div>
@@ -191,8 +252,9 @@
 			</div>
 		</div>
 
-		<div class="col-md-6 mb-4">
-			<div class="card shadow-sm border-0 h-100">
+		<!-- OAuth Tab -->
+		<div class="tab-pane fade" id="oauth" role="tabpanel">
+			<div class="card shadow-sm border-0 mb-4">
 				<div class="card-header bg-white border-bottom-0 pt-4 pb-0">
 					<h5 class="mb-0"><i class="fas fa-key text-success me-2"></i> OAuth & JWT Settings</h5>
 				</div>
@@ -220,11 +282,10 @@
 				</div>
 			</div>
 		</div>
-	</div>
 
-	<div class="row">
-		<div class="col-md-6 mb-4">
-			<div class="card shadow-sm border-0 h-100">
+		<!-- SMS Tab -->
+		<div class="tab-pane fade" id="sms" role="tabpanel">
+			<div class="card shadow-sm border-0 mb-4">
 				<div class="card-header bg-white border-bottom-0 pt-4 pb-0">
 					<h5 class="mb-0"><i class="fas fa-comment text-info me-2"></i> SMS (VoIP.ms)</h5>
 				</div>
@@ -250,8 +311,50 @@
 			</div>
 		</div>
 
-		<div class="col-md-6 mb-4">
-			<div class="card shadow-sm border-0 h-100">
+		<!-- Proxy Secrets Tab -->
+		<div class="tab-pane fade" id="proxy" role="tabpanel">
+			<div class="card shadow-sm border-0 mb-4">
+				<div class="card-header bg-white border-bottom-0 pt-4 pb-0">
+					<h5 class="mb-0"><i class="fas fa-shield-alt text-warning me-2"></i> Proxy Secrets (OpenBao)</h5>
+				</div>
+				<div class="card-body">
+					<p class="form-text">These secrets are stored directly in OpenBao (`secret/proxy/conf`) and read by the Proxy at boot.</p>
+					
+					<h6 class="mt-3 mb-2">OAuth / OIDC Integration</h6>
+					<div class="mb-3">
+						<label class="form-label">Issuer URL</label>
+						<input type="text" class="form-control" id="proxy-issuer" placeholder="https://sso.example.com">
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Client ID</label>
+						<input type="text" class="form-control" id="proxy-client-id">
+					</div>
+					<div class="mb-3">
+						<label class="form-label">Client Secret</label>
+						<div class="input-group">
+							<input type="password" class="form-control" id="proxy-client-secret" placeholder="********">
+							<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('proxy-client-secret')"><i class="fas fa-eye"></i></button>
+						</div>
+					</div>
+
+					<h6 class="mt-4 mb-2">LDAP Integration</h6>
+					<div class="mb-3">
+						<label class="form-label">Bind Password</label>
+						<div class="input-group">
+							<input type="password" class="form-control" id="proxy-ldap-bindpass" placeholder="********">
+							<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('proxy-ldap-bindpass')"><i class="fas fa-eye"></i></button>
+						</div>
+						<div class="form-text">Password for the Proxy's LDAP service account.</div>
+					</div>
+
+					<button id="btn-save-proxy" class="btn btn-warning mt-2" onclick="saveProxyConf()"><i class="fas fa-save"></i> Save Proxy Secrets</button>
+				</div>
+			</div>
+		</div>
+
+		<!-- ToS Tab -->
+		<div class="tab-pane fade" id="tos" role="tabpanel">
+			<div class="card shadow-sm border-0 mb-4">
 				<div class="card-header bg-white border-bottom-0 pt-4 pb-0 d-flex justify-content-between align-items-center">
 					<h5 class="mb-0"><i class="fas fa-file-contract me-2"></i> Terms of Service</h5>
 					<small class="text-muted" id="tos-meta"></small>

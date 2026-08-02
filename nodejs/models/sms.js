@@ -10,6 +10,21 @@ function toE164Digits(number) {
 }
 
 async function send(to, message) {
+	const { PluginInstance } = require('./plugin_instance');
+	const registry = require('../services/plugin_registry');
+	const pluginSecrets = require('../utils/plugin_secrets');
+
+	const instances = await PluginInstance.find({ category: 'messaging', enabled: true });
+	if (instances.length > 0) {
+		const inst = instances[0];
+		const manifest = registry.getManifest(inst.pluginType);
+		if (manifest && manifest.sendMessage) {
+			const secrets = await pluginSecrets.read(inst.id).catch(() => ({}));
+			const config = { ...inst.config, ...secrets };
+			return manifest.sendMessage(config, { to, message });
+		}
+	}
+
 	const params = new URLSearchParams({
 		api_username: conf.username,
 		api_password: conf.password,

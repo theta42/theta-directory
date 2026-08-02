@@ -1,6 +1,6 @@
 {
   "name": "t42-sso-manager",
-  "version": "1.17.2",
+  "version": "1.19.0",
   "description": "A very simple LDAP management and SSO system",
   "author": [
     {
@@ -54,6 +54,7 @@
     "nodemailer": "^9.0.0",
     "p2psub": "^0.2.0",
     "socket.io": "^4.8.3",
+    "ws": "^8.21.1",
     "xss": "^1.0.15"
   },
   "license": "MIT",

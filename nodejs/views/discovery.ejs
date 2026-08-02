@@ -136,6 +136,9 @@
       const isManaged = !!(r.metadata && r.metadata.managed);
       if(managedFilter === 'managed' && !isManaged) return false;
       if(managedFilter === 'unmanaged' && isManaged) return false;
+      
+      const isAuto = r.metadata && r.metadata.discovery_sources && r.metadata.discovery_sources.length > 0 && !r.metadata.discovery_sources.includes('manual');
+      if(!isAuto) return false;
 
       return true;
     });

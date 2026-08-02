@@ -32,6 +32,7 @@ module.exports = {
 
     return new Promise((resolve, reject) => {
       const scan = new nmap.OsAndPortScan(targetRange);
+      scan.command.push('-Pn');
       scan.on('complete', function(data) {
         const resources = [];
         const edges = [];

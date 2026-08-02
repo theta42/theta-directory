@@ -1,3 +1,9 @@
+## v1.19.0
+- Added WebSocket endpoint for theta-agent C2
+
+# v1.18.0
+- feat: Add messaging plugins, Docker discovery, fix reconciliation
+
 # Changelog
 
 All notable changes to this project are documented here. Format loosely

@@ -90,5 +90,42 @@ router.post('/', async (req, res, next) => {
     next(err);
   }
 });
+router.get('/proxy', async (req, res, next) => {
+  try {
+    const proxyConf = await baoConf.get('proxy/conf') || {};
+    const editable = JSON.parse(JSON.stringify(proxyConf));
+    if (editable.oidc && editable.oidc.clientSecret) editable.oidc.clientSecret = MASK;
+    if (editable.ldap && editable.ldap.bindPassword) editable.ldap.bindPassword = MASK;
+    res.json(editable);
+  } catch(err) {
+    next(err);
+  }
+});
+
+router.post('/proxy', async (req, res, next) => {
+  try {
+    const existing = await baoConf.get('proxy/conf') || {};
+    const incoming = req.body || {};
+
+    if (incoming.oidc && incoming.oidc.clientSecret !== undefined) {
+      if (incoming.oidc.clientSecret === '' || incoming.oidc.clientSecret === MASK) delete incoming.oidc.clientSecret;
+    }
+    if (incoming.ldap && incoming.ldap.bindPassword !== undefined) {
+      if (incoming.ldap.bindPassword === '' || incoming.ldap.bindPassword === MASK) delete incoming.ldap.bindPassword;
+    }
+
+    for (const key of Object.keys(incoming)) {
+      if (typeof incoming[key] === 'object' && incoming[key] !== null && !Array.isArray(incoming[key])) {
+        existing[key] = { ...(existing[key] || {}), ...incoming[key] };
+      } else {
+        existing[key] = incoming[key];
+      }
+    }
+    await baoConf.set('proxy/conf', existing);
+    res.json({ success: true });
+  } catch(err) {
+    next(err);
+  }
+});
 
 module.exports = router;
