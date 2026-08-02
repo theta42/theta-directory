@@ -49,7 +49,7 @@ module.exports = {
             const edges = [];
 
             for (const c of containers) {
-              const name = c.Names && c.Names.length > 0 ? c.Names[0].replace(/^\\//, '') : c.Id.substring(0, 12);
+              const name = c.Names && c.Names.length > 0 ? c.Names[0].replace(/^\//, '') : c.Id.substring(0, 12);
               const slug = `docker-cnt-${c.Id.substring(0, 12)}`;
               
               const ports = (c.Ports || []).map(p => p.PublicPort ? `${p.PublicPort}:${p.PrivatePort}` : `${p.PrivatePort}`).join(', ');
