@@ -122,6 +122,7 @@ RUN apk add --no-cache \
     dumb-init \
     bash \
     redis \
+    nmap \
     && rm -rf /var/cache/apk/*
 
 COPY --from=ldapbuild /opt/openldap /opt/openldap

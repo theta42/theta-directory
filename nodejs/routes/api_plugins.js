@@ -20,6 +20,29 @@ const { scheduleInstance, unscheduleInstance, runInstanceNow } = require('../ser
 
 const SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
+// Derive a stable, unique slug from an instance name when the caller didn't
+// supply one. Lowercases, collapses non-alnum runs to a single hyphen, trims,
+// and prefixes `plugin-` if the result would otherwise start with a character
+// SLUG_RE rejects. `isTaken(slug)` is consulted for uniqueness (a DB lookup);
+// on collision we append `-2`, `-3`, … up to MAX_TRIES, then give up.
+function slugify(name) {
+  let s = String(name || '').toLowerCase().trim();
+  s = s.replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!s) s = 'plugin';
+  if (!/^[a-z0-9]/.test(s)) s = 'plugin-' + s;
+  return s.slice(0, 64);
+}
+
+async function makeSlug(name, isTaken) {
+  const base = slugify(name);
+  if (!await isTaken(base)) return base;
+  for (let i = 2; i <= 16; i++) {
+    const cand = `${base}-${i}`.slice(0, 64);
+    if (!await isTaken(cand)) return cand;
+  }
+  return null; // exhausted
+}
+
 // Same gate as the directory admin API: app_sso_admin or app_sso_directory_admin
 // (app_super_admin is always allowed by permission.byGroup).
 router.use(async (req, res, next) => {
@@ -82,7 +105,15 @@ router.post('/', async (req, res, next) => {
     if (!pluginType) return res.status(400).json({ error: 'pluginType is required' });
     if (!registry.getManifest(pluginType)) return res.status(400).json({ error: `Unknown plugin type: ${pluginType}` });
     if (!name) return res.status(400).json({ error: 'name is required' });
-    if (!slug || !SLUG_RE.test(slug)) return res.status(400).json({ error: 'slug must be lowercase letters/digits/_/- (max 64)' });
+    // Slug is optional: derive it from the name when absent. When supplied,
+    // validate it (admins editing via API may still pass one explicitly).
+    let finalSlug = slug;
+    if (finalSlug) {
+      if (!SLUG_RE.test(finalSlug)) return res.status(400).json({ error: 'slug must be lowercase letters/digits/_/- (max 64)' });
+    } else {
+      finalSlug = await makeSlug(name, async (s) => !!(await PluginInstance.getBySlug(s)));
+      if (!finalSlug) return res.status(400).json({ error: 'Could not generate a unique slug from the name; supply one explicitly.' });
+    }
     if (cron !== undefined && (typeof cron !== 'string' || !cron.trim())) return res.status(400).json({ error: 'cron must be a non-empty string' });
 
     // `config` from the client is a flat object of all field values (secret +
@@ -100,7 +131,7 @@ router.post('/', async (req, res, next) => {
       pluginType,
       category: manifest.category,
       name,
-      slug,
+      slug: finalSlug,
       enabled,
       cron: cron || '0 * * * *',
       config,

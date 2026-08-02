@@ -4,6 +4,7 @@
 
 	$(document).ready(function() {
 		loadConf();
+		loadTos();
 	});
 
 	async function loadConf() {
@@ -27,6 +28,13 @@
 					$('#oauth-token-access').val(data.oauth.token_lifetime.access_token || 3600);
 					$('#oauth-token-refresh').val(data.oauth.token_lifetime.refresh_token || 2592000);
 				}
+			}
+
+			// Populate SMS (VoIP.ms)
+			if (data.voipms) {
+				$('#voipms-username').val(data.voipms.username || '');
+				$('#voipms-did').val(data.voipms.did || '');
+				$('#voipms-password').val(data.voipms.password || '');
 			}
 		} catch (error) {
 			app.messages.toast('Failed to load configuration: ' + (error.message || 'Unknown error'), 'danger');
@@ -53,6 +61,11 @@
 					access_token: parseInt($('#oauth-token-access').val(), 10) || 3600,
 					refresh_token: parseInt($('#oauth-token-refresh').val(), 10) || 2592000
 				}
+			},
+			voipms: {
+				username: $('#voipms-username').val(),
+				did: $('#voipms-did').val(),
+				password: $('#voipms-password').val()
 			}
 		};
 
@@ -74,6 +87,50 @@
 			el.type = 'password';
 		}
 	}
+
+	// ── Terms of Service editor ──────────────────────────────────────────
+	// Moved here from the admin Overview dashboard — it's a configuration
+	// control, so it belongs on the System Configuration page. The API is
+	// routes/tos.js (GET to read, PUT to save; PUT is app_sso_admin-gated, which
+	// matches this page's gate). app.tos.get/update are the shared frontend
+	// helpers (@simpleworkjs/frontend).
+	async function loadTos() {
+		try {
+			const tos = await app.tos.get();
+			document.getElementById('tos-content').value = tos.content;
+			document.getElementById('tos-meta').textContent =
+				'Last updated ' + moment(tos.updated_on, 'x').fromNow() + ' by ' + tos.updated_by;
+		} catch(e) {
+			console.error('Failed to load ToS:', e);
+		}
+	}
+
+	function saveTos() {
+		const content = document.getElementById('tos-content').value.trim();
+		const resetAcceptance = document.getElementById('tos-reset-acceptance').checked;
+		const msgEl = document.getElementById('tos-result');
+
+		if (!content) {
+			msgEl.className = 'alert alert-danger mt-2';
+			msgEl.textContent = 'Terms of Service text cannot be empty.';
+			msgEl.style.display = '';
+			return;
+		}
+
+		app.tos.update({content, resetAcceptance}, function(error, data) {
+			if (error) {
+				msgEl.className = 'alert alert-danger mt-2';
+				msgEl.textContent = 'Failed: ' + ((data && data.message) || error);
+				msgEl.style.display = '';
+				return;
+			}
+			msgEl.className = 'alert alert-success mt-2';
+			msgEl.textContent = 'Saved.' + (data.resetCount ? ' ' + data.resetCount + ' user(s) will be asked to re-accept.' : '');
+			msgEl.style.display = '';
+			document.getElementById('tos-reset-acceptance').checked = false;
+			loadTos();
+		});
+	}
 </script>
 
 <div class="container py-4">
@@ -82,10 +139,10 @@
 			<div>
 				<h2><i class="fas fa-cogs"></i> System Configuration</h2>
 				<p class="text-muted mb-0">
-					Manage runtime configuration such as SMTP settings and OAuth parameters.
-					These are stored securely in OpenBao and take effect immediately. Secret fields
-					(the SMTP password and OAuth JWT secret) are masked — leave them unchanged to
-					keep the stored value.
+					Manage runtime configuration such as SMTP, SMS, OAuth, and Terms of Service
+					settings. These are stored securely in OpenBao and take effect immediately.
+					Secret fields (the SMTP password, OAuth JWT secret, and VoIP.ms API password)
+					are masked — leave them unchanged to keep the stored value.
 				</p>
 			</div>
 			<div>
@@ -160,6 +217,56 @@
 						<label class="form-label">Refresh Token Lifetime (seconds)</label>
 						<input type="number" class="form-control" id="oauth-token-refresh">
 					</div>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<div class="row">
+		<div class="col-md-6 mb-4">
+			<div class="card shadow-sm border-0 h-100">
+				<div class="card-header bg-white border-bottom-0 pt-4 pb-0">
+					<h5 class="mb-0"><i class="fas fa-comment text-info me-2"></i> SMS (VoIP.ms)</h5>
+				</div>
+				<div class="card-body">
+					<p class="form-text">Used to deliver SMS 2FA login codes. The API password is stored in OpenBao and masked below.</p>
+					<div class="mb-3">
+						<label class="form-label">API Username</label>
+						<input type="text" class="form-control" id="voipms-username">
+					</div>
+					<div class="mb-3">
+						<label class="form-label">DID (sender number)</label>
+						<input type="text" class="form-control" id="voipms-did" placeholder="15551234567">
+					</div>
+					<div class="mb-3">
+						<label class="form-label">API Password</label>
+						<div class="input-group">
+							<input type="password" class="form-control" id="voipms-password" placeholder="********">
+							<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('voipms-password')"><i class="fas fa-eye"></i></button>
+						</div>
+						<div class="form-text">Leave unchanged to keep the current password stored in OpenBao. Clear and type a new value to replace it.</div>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<div class="col-md-6 mb-4">
+			<div class="card shadow-sm border-0 h-100">
+				<div class="card-header bg-white border-bottom-0 pt-4 pb-0 d-flex justify-content-between align-items-center">
+					<h5 class="mb-0"><i class="fas fa-file-contract me-2"></i> Terms of Service</h5>
+					<small class="text-muted" id="tos-meta"></small>
+				</div>
+				<div class="card-body">
+					<div class="mb-3">
+						<label class="form-label">Content <small class="text-muted">(Markdown)</small></label>
+						<textarea class="form-control" id="tos-content" rows="8"></textarea>
+					</div>
+					<div class="form-check mb-3">
+						<input class="form-check-input" type="checkbox" id="tos-reset-acceptance">
+						<label class="form-check-label" for="tos-reset-acceptance">Require all users to re-accept these terms</label>
+					</div>
+					<button class="btn btn-primary" onclick="saveTos()"><i class="fas fa-floppy-disk"></i> Save Terms</button>
+					<div id="tos-result" style="display:none" class="mt-2"></div>
 				</div>
 			</div>
 		</div>

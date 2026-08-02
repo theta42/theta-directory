@@ -21,6 +21,7 @@ const MASK = '********';
 const SECRET_PATHS = [
 	['smtp', 'pass'],
 	['oauth', 'jwtSecret'],
+	['voipms', 'password'],
 ];
 
 function maskSecrets(obj) {
@@ -35,7 +36,8 @@ router.get('/', async (req, res) => {
   const editable = maskSecrets({
     smtp: conf.smtp || {},
     discovery: conf.discovery || {},
-    oauth: conf.oauth || {}
+    oauth: conf.oauth || {},
+    voipms: conf.voipms || {}
   });
   res.json(editable);
 });

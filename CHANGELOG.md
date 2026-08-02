@@ -4,6 +4,72 @@ All notable changes to this project are documented here. Format loosely
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions
 correspond to git tags (`vX.Y.Z`) and `nodejs/package.json`'s `version`.
 
+## [1.17.2] - 2026-08-01
+
+Post-deploy fixes from testing the v1.31.0 stack, plus the SMS (VoIP.ms) and
+Terms-of-Service configuration the `/conf` page was missing. Seven issues:
+
+### Fixed
+- **Plugin slug is now auto-generated** from the instance name — the New Plugin
+  modal no longer asks for a Slug (it derived a stable, unique handle from the
+  name, appending `-2`, `-3`, … on collision). The generated slug still shows in
+  the table and the Edit (read-only) modal. `POST /api/plugins` `slug` is now
+  optional; an explicit slug is still accepted and validated. (`routes/api_plugins.js`,
+  `views/plugins.ejs`)
+- **Plugin schedule is a dropdown**, not a raw cron box: Hourly / Daily /
+  Weekly, plus **Custom** which reveals the raw 5-field cron input. Stored value
+  is still a cron string, so the server is unchanged. (`views/plugins.ejs`)
+- **`/vault` secrets list no longer 403s.** Root cause: the per-user, per-app,
+  and admin OpenBao policies granted `list` only on `secret/metadata/.../*`
+  (nested paths), never on the directory path itself — so listing a directory's
+  *contents* (which checks `list` on the directory, e.g. `secret/metadata/users/<uid>`
+  or the mount root `secret/metadata`) was denied. `vault_broker.js`'s
+  `userPolicyHcl`/`appPolicyHcl` now also grant `list` on the bare directory
+  path, and `ensurePolicy` now always re-writes the policy (idempotent) so
+  already-created `user-<uid>` policies pick up the new grant on the next
+  vault-page visit. The matching `sso-admin` mount-root grant ships in
+  theta-suite v1.31.1 (`setup.sh`), where `ensure_policy` is likewise made
+  always-write so re-running `./setup.sh` applies policy edits.
+- **`/profile` no longer shows literal `{{…}}` tags.** Three template fragments
+  sat outside the `jq-repeat="user"` scope, so they rendered raw: the card
+  header `Profile: {{user.uid}}`, the `Members of {{user.uid}}'s Group` tab
+  label, and the Admin Actions block's `{{#isActive}}`/`{{#isInactive}}`
+  buttons. The header/label are now populated by JS (the `Members` label
+  already had a setter pointing at a missing id); the Admin Actions block is
+  moved inside the scope so `{{uid}}`/`{{#isActive}}`/`{{#isInactive}}` render
+  and the correct Activate/Deactivate button shows. (`views/profile.ejs`)
+- **Editing a plugin now persists.** The Edit modal had been prefilled with the
+  masked secret values and rendered them as fields, but `PUT /:id` only saves
+  non-secret config — so an edited secret was silently dropped. The Edit modal
+  now shows **non-secret fields only** (secrets have their own Edit-Secrets
+  modal), removing the confusion. (`views/plugins.ejs`)
+- **nmap plugin: "NMAP not found at command location: nmap"** — the `nmap`
+  binary was not installed in the app image. `Dockerfile.openldap` now `apk
+  add`s `nmap` in the runtime stage, and `plugins/discovery/nmap.js` translates
+  the opaque node-nmap spawn-missing error into an actionable `lastError`.
+
+### Added
+- **SMS (VoIP.ms) configuration on `/conf`.** The existing VoIP.ms SMS sender
+  (`models/sms.js`, used for 2FA OTP delivery) was configurable only via env /
+  config files. It now has an SMS card on `/conf` (API username, DID, API
+  password), saved to OpenBao at `secret/sso-manager/conf` under `voipms`, with
+  the API password masked (`********`) and leave-blank-to-keep — mirroring the
+  SMTP card exactly. `models/sms.js` reads `conf.voipms.*` at call time, so a
+  saved change takes effect live without a restart. (`routes/api_conf.js`,
+  `views/conf.ejs`)
+- **Terms of Service editor moved to `/conf`** from the admin Overview
+  dashboard, where it never belonged. The same `app.tos.get`/`update` flow,
+  the "require all users to re-accept" checkbox, and the `app_sso_admin` gate
+  (matching `routes/tos.js`'s PUT gate) are preserved. The Overview page keeps
+  stats, notifications, and metrics. (`views/conf.ejs`, `views/overview.ejs`)
+
+### Notes
+- The `/vault` 403 fix is split across two repos: the sso-side per-user/app
+  policy grants and `ensurePolicy`-always-write ship here; the `sso-admin`
+  mount-root grant and `ensure_policy`-always-write ship in theta-suite v1.31.1.
+  Re-running `./setup.sh` after upgrading applies the sso-admin grant; per-user
+  policies self-heal on the next vault-page visit.
+
 ## [1.17.1] - 2026-08-01
 
 Hardens the **runtime SMTP/OAuth secret handling** on the `/conf` admin page to
