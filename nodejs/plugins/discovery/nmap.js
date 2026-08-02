@@ -2,6 +2,30 @@ const nmap = require('node-nmap');
 nmap.nmapLocation = "nmap"; // default
 
 module.exports = {
+  // Plugin manifest — see nodejs/services/plugin_registry.js. `targetRange` is
+  // not secret (it's a network range to scan), so it lives in the DB row, not
+  // OpenBao. nmap itself has no credentials to test, so `validate` only checks
+  // the range parses — running a real scan is what `run` does.
+  type: 'nmap',
+  category: 'discovery',
+  name: 'Nmap Network Scan',
+  description: 'Discover hosts and services on a network range using nmap OS + port scans.',
+  configSchema: [
+    { key: 'targetRange', label: 'Target Range', type: 'text', required: true, placeholder: '192.168.1.0/24' }
+  ],
+
+  validate: async (config) => {
+    const { targetRange } = config;
+    if (!targetRange) return { ok: false, error: 'Missing targetRange' };
+    // nmap accepts CIDR (a.b.c.d/24), ranges (a.b.c.d-50), and host lists. We
+    // only sanity-check shape here — reject anything with shell metacharacters
+    // or whitespace, since node-nmap passes this straight to the nmap binary.
+    if (/\s|[;|&$`<>]/.test(targetRange)) {
+      return { ok: false, error: 'targetRange must not contain whitespace or shell metacharacters' };
+    }
+    return { ok: true };
+  },
+
   discover: async (config) => {
     const { targetRange } = config;
     if (!targetRange) throw new Error("Missing targetRange for Nmap");
@@ -47,5 +71,9 @@ module.exports = {
 
       scan.startScan();
     });
-  }
+  },
+
+  // Generalized plugin contract alias for `discover`. See proxmox.js for why
+  // this references module.exports rather than `this`.
+  run: async (config) => module.exports.discover(config)
 };

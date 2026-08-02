@@ -34,6 +34,9 @@ nav:
   - title: Directory
     page: /directory.html
     icon: fa-server
+  - title: Plugins
+    page: /plugins.html
+    icon: fa-plug
   # API.md lives at the repo root, not under docs/, so Jekyll never renders an
   # api.html for it — link the source directly, same as the Changelog.
   - title: API

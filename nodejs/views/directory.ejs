@@ -16,11 +16,6 @@
                 <i class="fa-solid fa-network-wired"></i> Discovery
               </button>
             </li>
-            <li class="nav-item" role="presentation">
-              <button class="nav-link" id="plugins-tab" data-bs-toggle="tab" data-bs-target="#plugins-tab-pane" type="button" role="tab" aria-controls="plugins-tab-pane" aria-selected="false">
-                <i class="fa-solid fa-robot"></i> Agents & Scheduler
-              </button>
-            </li>
           </ul>
         </div>
         <div class="card-body p-0">
@@ -182,54 +177,6 @@
                     <i class="fa-solid fa-magnifying-glass fs-2 mb-3 text-black-50"></i>
                     <h5>No resources found</h5>
                     <p>Check your filters or ensure the discovery agents are running.</p>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-      
-      <!-- Agents Tab Pane -->
-      <div class="tab-pane fade" id="plugins-tab-pane" role="tabpanel" aria-labelledby="plugins-tab">
-        <div class="border-0">
-          <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-            <div>
-              <i class="fa-solid fa-robot"></i> Agents & Scheduler
-            </div>
-          </div>
-          <div class="p-3 pb-0 text-muted small border-bottom">
-            <i class="fa-solid fa-circle-info"></i> Manage background tasks and schedules. <a href="/docs/agents">Learn how to make and use custom agents</a>.
-          </div>
-          <div class="table-responsive">
-            <table class="card-body table table-hover mb-0 align-middle">
-              <thead class="table-light">
-                <tr>
-                  <th class="ps-3">Agent Name</th>
-                  <th>Cron Schedule</th>
-                  <th>Status</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="plugins-list" jq-repeat="plugins">
-                <tr>
-                  <td class="ps-3 fw-bold">{{name}}</td>
-                  <td><input type="text" class="form-control form-control-sm font-monospace" id="cron-{{name}}" value="{{cron}}" style="max-width: 150px;"></td>
-                  <td>
-                    {{#enabled}}<span class="badge bg-success">Enabled</span>{{/enabled}}
-                    {{^enabled}}<span class="badge bg-secondary">Disabled</span>{{/enabled}}
-                  </td>
-                  <td>
-                    <button class="btn btn-sm btn-outline-primary" onclick="updatePlugin('{{name}}')" title="Save Schedule">Save</button>
-                    {{#enabled}}<button class="btn btn-sm btn-outline-danger" onclick="togglePlugin('{{name}}', false)">Disable</button>{{/enabled}}
-                    {{^enabled}}<button class="btn btn-sm btn-outline-success" onclick="togglePlugin('{{name}}', true)">Enable</button>{{/enabled}}
-                  </td>
-                </tr>
-              </tbody>
-              <tbody id="plugins-empty-state" style="display: none;">
-                <tr>
-                  <td colspan="4" class="text-center py-4 text-muted">
-                    No agents configured.
                   </td>
                 </tr>
               </tbody>
@@ -1325,59 +1272,12 @@
     });
   }
 
-  // --- AGENT SCRIPTS ---
-  function loadPlugins() {
-    app.api.get('plugins', function(err, res) {
-      if(err) {
-        app.messages.toast("Error loading agents: " + (err.message || err), 'danger');
-        return;
-      }
-      const plugins = res.results || {};
-      const pluginNames = Object.keys(plugins);
-      
-      $.scope.plugins.empty();
-      if(pluginNames.length === 0) {
-        $('#plugins-list').hide();
-        $('#plugins-empty-state').show();
-      } else {
-        pluginNames.forEach(name => {
-          const config = plugins[name];
-          $.scope.plugins.push({
-            name: name,
-            cron: config.cron || '',
-            enabled: !!config.enabled
-          });
-        });
-        $('#plugins-list').show();
-        $('#plugins-empty-state').hide();
-      }
-    });
-  }
-
-  function updatePlugin(name) {
-    const cron = $('#cron-' + name).val();
-    app.api.put('plugins/' + name, {cron: cron}, function(err, res) {
-      if(err) {
-        app.messages.toast("Error saving agent schedule: " + (err.message || err), 'danger');
-        return;
-      }
-      app.messages.toast("Agent schedule saved successfully.", 'success');
-    });
-  }
-  
-  function togglePlugin(name, enable) {
-    app.api.put('plugins/' + name, {enabled: enable}, function(err, res) {
-      if(err) {
-        app.messages.toast("Error toggling agent: " + (err.message || err), 'danger');
-        return;
-      }
-      loadPlugins();
-    });
-  }
+  // Plugin scheduling moved to the dedicated /plugins page (the Agents &
+  // Scheduler tab here was its old home). Discovery inventory + the discovery
+  // results table remain on this page.
 
   $(document).ready(function(){
     loadDiscoveryResources();
-    loadPlugins();
   });
 </script>
 
