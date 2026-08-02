@@ -21,11 +21,6 @@
           </div>
           <div class="d-flex flex-wrap gap-2 align-items-center">
             <input type="text" id="search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search resources..." onkeyup="renderTable()" style="width: 250px;">
-            <select id="filter-managed" class="form-select form-select-sm shadow-sm" onchange="renderTable()" style="width: 150px;">
-              <option value="all">All Resources</option>
-              <option value="unmanaged" selected>Unmanaged Only</option>
-              <option value="managed">Managed Only</option>
-            </select>
           </div>
         </div>
         <div class="card-header actionMessage" style="display:none"></div>
@@ -132,10 +127,9 @@
       // Name search
       if(search && !r.name.toLowerCase().includes(search) && !r.slug.toLowerCase().includes(search)) return false;
       
-      // Managed filter
+      // Always hide items that have been committed to the catalog (managed)
       const isManaged = !!(r.metadata && r.metadata.managed);
-      if(managedFilter === 'managed' && !isManaged) return false;
-      if(managedFilter === 'unmanaged' && isManaged) return false;
+      if(isManaged) return false;
       
       const isAuto = r.metadata && r.metadata.discovery_sources && r.metadata.discovery_sources.length > 0 && !r.metadata.discovery_sources.includes('manual');
       if(!isAuto) return false;

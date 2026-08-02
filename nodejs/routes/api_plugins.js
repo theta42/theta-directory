@@ -274,7 +274,7 @@ router.get('/:id/runs', async (req, res, next) => {
   try {
     const inst = await PluginInstance.get(req.params.id);
     if (!inst) return res.status(404).json({ error: 'Not found' });
-    res.json({ results: { lastRunAt: inst.lastRunAt, lastStatus: inst.lastStatus, lastError: inst.lastError } });
+    res.json({ results: { lastRunAt: inst.lastRunAt, lastStatus: inst.lastStatus, lastError: inst.lastError, lastLog: inst.lastLog } });
   } catch (err) { next(err); }
 });
 

@@ -96,11 +96,13 @@ class Resource extends Model {
       return false;
     }
     
+    let maxUpdated = 0;
     resObjs.forEach(r => {
       r.metadata.isProduction = checkProd(r.id);
+      if (r.updated_on && r.updated_on > maxUpdated) maxUpdated = r.updated_on;
     });
 
-    return { resources: resObjs, edges };
+    return { resources: resObjs, edges, updated_on: maxUpdated || Date.now() };
   }
 
   // Stamp `resolvedAddress` on each resource: its own address/ip if it has one,

@@ -201,6 +201,16 @@ router.post('/resources/:id/rotate-secret', async (req, res, next) => {
     }
 });
 
+router.post('/resources/:id/service-token', async (req, res, next) => {
+    try {
+        const { ServiceToken } = require('../models/token');
+        const token = await ServiceToken.issue(req.params.id, req.user.uid);
+        res.json({ results: { token: token.token } });
+    } catch (err) {
+        next(err);
+    }
+});
+
 router.delete('/resources/:id', async (req, res, next) => {
   try {
     const r = await Resource.get(req.params.id);

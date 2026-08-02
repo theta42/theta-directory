@@ -35,7 +35,7 @@ module.exports = {
   },
 
   discover: async (config) => {
-    const { url, tokenId, tokenSecret } = config;
+    let { url, tokenId, tokenSecret } = config;
     if (!url || !tokenId || !tokenSecret) {
       throw new Error("Missing Proxmox config");
     }

@@ -71,17 +71,23 @@ async function runPluginJob(instanceId) {
   }
 
   console.log(`[Scheduler] Running plugin: ${instance.slug} (${instance.pluginType})`);
-  await instance.update({ lastRunAt: Date.now(), lastStatus: STATUS.RUNNING, lastError: null });
+  await instance.update({ lastRunAt: Date.now(), lastStatus: STATUS.RUNNING, lastError: null, lastLog: null });
+  let logs = [];
   try {
     const cfg = await pluginSecrets.mergeForRun(instance);
+    cfg.log = (msg) => {
+      logs.push(`[${new Date().toISOString()}] ${msg}`);
+      console.log(`[Plugin ${instance.slug}] ${msg}`);
+      if (logs.length > 1000) logs.shift();
+    };
     const payload = await runFn(cfg);
     if (instance.category === 'discovery') {
       await DiscoveryReconciler.reconcile(instance.slug, payload);
     }
-    await instance.update({ lastStatus: STATUS.OK, lastError: null });
+    await instance.update({ lastStatus: STATUS.OK, lastError: null, lastLog: logs.join('\n') });
   } catch (err) {
     console.error(`[Scheduler] Plugin ${instance.slug} failed:`, err.message);
-    await instance.update({ lastStatus: STATUS.ERROR, lastError: String(err.message || err) });
+    await instance.update({ lastStatus: STATUS.ERROR, lastError: String(err.message || err), lastLog: logs.join('\n') });
   }
 }
 
