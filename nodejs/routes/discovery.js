@@ -101,7 +101,7 @@ router.get('/me', async (req, res, next) => {
 
 // GET /api/discovery/access/:uid[/:slug]
 // Answers per-user access for a machine caller (e.g. jump-host).
-router.get('/access/:uid/:slug?', async (req, res, next) => {
+router.get(['/access/:uid', '/access/:uid/:slug'], async (req, res, next) => {
 	try {
 		const { fullMetadata } = await callerView(req);
 		if (!req.user || (!req.user.isMachine && !fullMetadata)) {
