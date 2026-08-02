@@ -140,6 +140,7 @@
     schema.forEach(function(f) {
       if (!includeSecrets && f.secret) return;
       var val = v[f.key];
+      if (f.secret) val = '';
       if (val === undefined || val === null) val = '';
       var inputType = f.type === 'password' ? 'password' : (f.type === 'url' ? 'url' : 'text');
       var req = f.required ? ' required' : '';

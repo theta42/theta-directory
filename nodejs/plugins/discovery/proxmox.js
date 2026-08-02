@@ -49,7 +49,10 @@ module.exports = {
 
     // 1. Get Nodes
     const resNodes = await fetch(`${url}/api2/json/nodes`, { headers, agent });
-    if(!resNodes.ok) throw new Error("Proxmox API error on nodes");
+    if(!resNodes.ok) {
+        const errText = await resNodes.text();
+        throw new Error(`Proxmox API error on nodes: ${resNodes.status} ${errText}`);
+    }
     const nodes = (await resNodes.json()).data;
 
     for (const node of nodes) {

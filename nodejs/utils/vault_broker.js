@@ -88,6 +88,7 @@ function userPolicyHcl(uid) {
 	// directory itself, so without it the /vault secrets list 403s.
 	return `path "secret/data/users/${uid}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
 path "secret/metadata/users/${uid}" { capabilities = ["list", "read", "delete"] }
+path "secret/metadata/users/${uid}/" { capabilities = ["list", "read", "delete"] }
 path "secret/metadata/users/${uid}/*" { capabilities = ["list", "read", "delete"] }`;
 }
 
