@@ -1303,6 +1303,39 @@ Errors: `400` if the plugin type is unknown, the slug is malformed/duplicated, o
 
 **`DELETE /api/plugins/:id`** — unschedules, removes the OpenBao secret namespace, and deletes the row.
 
+## Configuration Endpoints
+
+Base path: `/api/conf`
+
+All endpoints require authentication and `app_sso_admin` membership. Runtime configuration (SMTP, discovery, OAuth) is stored in OpenBao at `secret/sso-manager/conf` and overlaid onto the live app config; changes take effect immediately and persist across restarts. Secret fields (`smtp.pass`, `oauth.jwtSecret`) are **always returned masked** (`********`); submit a blank or `********` value to keep the current stored secret, or a new non-blank value to replace it.
+
+### Get Configuration
+
+**`GET /api/conf`** — returns the editable config groups (`smtp`, `discovery`, `oauth`) with secret fields masked to `********`.
+
+**Response:**
+```json
+{
+  "smtp": { "host": "smtp.example.com", "port": 587, "secure": false, "user": "noreply@example.com", "pass": "********", "from": "SSO Manager <noreply@example.com>" },
+  "discovery": { },
+  "oauth": { "issuer": "https://sso.example.com", "jwtSecret": "********", "token_lifetime": { "access_token": 3600, "refresh_token": 2592000 } }
+}
+```
+
+### Save Configuration
+
+**`POST /api/conf`** — deep-merges the submitted groups into `secret/sso-manager/conf` (per-key shallow merge of nested objects) and re-applies them to the live config. A blank or `********` value for `smtp.pass` or `oauth.jwtSecret` preserves the stored secret.
+
+**Request:**
+```json
+{
+  "smtp": { "host": "smtp.example.com", "port": 587, "secure": false, "user": "noreply@example.com", "pass": "********", "from": "SSO Manager <noreply@example.com>" },
+  "oauth": { "issuer": "https://sso.example.com", "token_lifetime": { "access_token": 3600, "refresh_token": 2592000 } }
+}
+```
+
+**Response:** `{ "success": true }`
+
 ## Error Responses
 
 All endpoints return errors in this format:
