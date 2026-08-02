@@ -1,3 +1,7 @@
+## v1.19.1
+- fix: regex syntax error in docker discovery plugin
+- fix: remove missing documentation files from Docker build context
+
 ## v1.19.0
 - Added WebSocket endpoint for theta-agent C2
 
