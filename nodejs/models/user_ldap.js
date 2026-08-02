@@ -773,7 +773,7 @@ User.setActive = async function(active) {
 				]);
 			} else {
 				await client.modify(this.dn, [
-					new Change({ operation: 'replace', modification: new Attribute({ type: 'pwdAccountLockedTime', values: ['000001010000Z'] }) }),
+					new Change({ operation: 'replace', modification: new Attribute({ type: 'pwdAccountLockedTime', values: ['00000101000000Z'] }) }),
 				]);
 			}
 		});
@@ -788,7 +788,7 @@ User.setActive = async function(active) {
 			throw e;
 		}
 	}
-	this.pwdAccountLockedTime = active ? undefined : '000001010000Z';
+	this.pwdAccountLockedTime = active ? undefined : '00000101000000Z';
 	this.isActive   = active ? 'active' : '';
 	this.isInactive = active ? '' : 'inactive';
 	cache.clear();
@@ -906,6 +906,13 @@ User.login = async function(data){
 			throw error;
 		}
 		let user = await this.get(data.uid || data.username);
+
+		if (user.pwdAccountLockedTime) {
+			let error = new Error('Invalid Credentials, login failed.');
+			error.name = 'LDAPLoginFailed';
+			error.status = 401;
+			throw error;
+		}
 
 		const loginClient = makeClient();
 		try {
