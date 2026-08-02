@@ -9,6 +9,7 @@ class DiscoveryReconciler {
 
     for (const res of resources) {
       if (!res.metadata) res.metadata = {};
+      res._originalSlug = res.slug; // Keep track for edge mapping
       
       let existing = null;
       
@@ -94,10 +95,11 @@ class DiscoveryReconciler {
           metadata: mergedMeta,
           updated_on: Math.floor(Date.now() / 1000)
         });
+        res._actualId = existing.id;
       } else {
         // Create new
-        const sources = [sourceName];
-        res.metadata.discovery_sources = sources;
+        const sources = new Set([sourceName]);
+        res.metadata.discovery_sources = [...sources];
         res.metadata.last_seen = Date.now();
         
         const slug = res.slug || `${res.kind}-${crypto.randomBytes(4).toString('hex')}`;
@@ -112,12 +114,48 @@ class DiscoveryReconciler {
         });
         
         newDevices++;
+        res._actualId = created.id; // Map original slug to actual ID
         WebhookEmitter.emit('discovery.new_device', created.toJSON());
       }
     }
     
-    // We can handle edges similarly if needed, but for simplicity we assume edges are managed elsewhere 
-    // or we just trust the plugins to give us explicit parent-child mappings by slug.
+    // Now process edges
+    const allRes = await Resource.list();
+    const existingEdges = await ResourceEdge.list();
+    
+    for (const edge of edges) {
+      // Find parent ID. It might be in the current payload (mapped to _actualId) or in DB by slug
+      let parentId = null;
+      const parentResInPayload = resources.find(r => r._originalSlug === edge.parentSlug);
+      if (parentResInPayload && parentResInPayload._actualId) {
+        parentId = parentResInPayload._actualId;
+      } else {
+        const parentResInDb = allRes.find(r => r.slug === edge.parentSlug);
+        if (parentResInDb) parentId = parentResInDb.id;
+      }
+      
+      // Find child ID
+      let childId = null;
+      const childResInPayload = resources.find(r => r._originalSlug === edge.childSlug);
+      if (childResInPayload && childResInPayload._actualId) {
+        childId = childResInPayload._actualId;
+      } else {
+        const childResInDb = allRes.find(r => r.slug === edge.childSlug);
+        if (childResInDb) childId = childResInDb.id;
+      }
+      
+      if (parentId && childId) {
+        const edgeExists = existingEdges.find(e => e.parentId === parentId && e.childId === childId && e.relation === edge.relation);
+        if (!edgeExists) {
+          await ResourceEdge.create({
+            id: crypto.randomUUID(),
+            parentId,
+            childId,
+            relation: edge.relation
+          });
+        }
+      }
+    }
     
     if (newDevices > 0) {
       console.log(`[DiscoveryReconciler] Source ${sourceName} discovered ${newDevices} new devices.`);
