@@ -31,17 +31,19 @@ module.exports = {
     if (!targetRange) throw new Error("Missing targetRange for Nmap");
 
     return new Promise((resolve, reject) => {
-      const scan = new nmap.OsAndPortScan(targetRange);
+      // OsAndPortScan requires root (for -O). NmapScan does a basic port scan (TCP connect if non-root).
+      const scan = new nmap.NmapScan(targetRange);
       scan.command.push('-Pn');
       scan.on('complete', function(data) {
         const resources = [];
         const edges = [];
 
         for (const host of data) {
-          if (!host.mac || !host.ip) continue;
-          const hostSlug = `nmap-host-${host.mac.replace(/:/g, '')}`;
+          if (!host.ip) continue;
+          const hostId = host.mac ? host.mac.replace(/:/g, '') : host.ip.replace(/\\./g, '_');
+          const hostSlug = `nmap-host-${hostId}`;
           
-          const interfaces = [{ mac: host.mac, ip: host.ip }];
+          const interfaces = [{ mac: host.mac || null, ip: host.ip }];
           
           resources.push({
             kind: 'host',
@@ -52,7 +54,7 @@ module.exports = {
 
           if (host.openPorts && host.openPorts.length > 0) {
             for (const port of host.openPorts) {
-              const svcSlug = `nmap-svc-${host.mac.replace(/:/g, '')}-${port.port}`;
+              const svcSlug = `nmap-svc-${hostId}-${port.port}`;
               resources.push({
                 kind: 'service',
                 name: `${port.service} on ${port.port}`,

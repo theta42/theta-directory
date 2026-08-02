@@ -43,6 +43,9 @@ module.exports = {
     const headers = {
       'Authorization': `PVEAPIToken=${tokenId}=${tokenSecret}`
     };
+    
+    // Ensure URL has no trailing slash
+    url = url.replace(/\\/+$/, '');
 
     const resources = [];
     const edges = [];
