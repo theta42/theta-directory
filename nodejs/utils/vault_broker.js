@@ -202,7 +202,7 @@ function vaultProxy() {
 	return createProxyMiddleware({
 		target: VAULT_ADDR,
 		changeOrigin: true,
-		pathRewrite: { '^/': '/v1/' },
+		pathRewrite: { '^/api/vault': '/v1' },
 		on: {
 			proxyReq(proxyReq, req, res, options) {
 				fixRequestBody(proxyReq, req, res, options);

@@ -1,6 +1,6 @@
 {
   "name": "t42-sso-manager",
-  "version": "1.19.5",
+  "version": "1.19.6",
   "description": "A very simple LDAP management and SSO system",
   "author": [
     {

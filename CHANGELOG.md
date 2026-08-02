@@ -644,3 +644,7 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 [1.1.2]: https://github.com/theta42/sso-manager-node/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/theta42/sso-manager-node/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/theta42/sso-manager-node/releases/tag/v1.1.0
+
+## [1.19.6] - 2026-08-02
+### Fixed
+- Fixed Vault API returning 403 on the Secrets List due to `http-proxy-middleware` v2 rewriting the path incorrectly (it previously appended the `/api/vault/` mount path to the proxied Vault request).
