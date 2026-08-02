@@ -58,6 +58,7 @@ class PluginInstance extends Model {
     lastRunAt: { type: 'integer' },
     lastStatus: { type: 'string' },
     lastError: { type: 'text' },
+    lastLog: { type: 'text' },
     // Audit stamps (set by the route handler, not by an ORM hook).
     created_by: { type: 'string' },
     created_on: { type: 'integer' },

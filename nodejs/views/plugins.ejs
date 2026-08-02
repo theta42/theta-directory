@@ -57,7 +57,7 @@
                   <button class="btn btn-sm btn-warning" title="Edit Secrets" onclick="openSecretsModal('{{id}}')"><i class="fa-solid fa-key"></i></button>
                   <button class="btn btn-sm btn-info" title="Test" onclick="testPlugin('{{id}}')"><i class="fa-solid fa-vial"></i></button>
                   <button class="btn btn-sm btn-success" title="Run now" onclick="runNow('{{id}}')"><i class="fa-solid fa-play"></i></button>
-                  {{#lastError}}<button class="btn btn-sm btn-secondary" title="View Logs" onclick="showLogs('{{id}}')"><i class="fa-solid fa-file-lines"></i></button>{{/lastError}}
+                  {{#lastRunAt}}<button class="btn btn-sm btn-secondary" title="View Logs" onclick="showLogs('{{id}}')"><i class="fa-solid fa-file-lines"></i></button>{{/lastRunAt}}
                   {{#enabled}}<button class="btn btn-sm btn-outline-danger" title="Unload" onclick="togglePlugin('{{id}}', false)">Unload</button>{{/enabled}}
                   {{^enabled}}<button class="btn btn-sm btn-outline-success" title="Load" onclick="togglePlugin('{{id}}', true)">Load</button>{{/enabled}}
                   <button class="btn btn-sm btn-outline-danger" title="Delete" onclick="deletePlugin('{{id}}')"><i class="fa-solid fa-trash"></i></button>
@@ -370,14 +370,20 @@
     }
   }
 
-  function showLogs(id) {
+  async function showLogs(id) {
     var p = pluginsById[id];
-    if (!p || !p.lastError) return;
-    app.modal.open({
-      title: 'Logs — ' + p.name,
-      bodyHtml: '<pre class="bg-dark text-white p-3 rounded" style="white-space: pre-wrap; font-size: 0.85em;">' + String(p.lastError).replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>',
-      footer: { buttonsHtml: '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>' }
-    });
+    if (!p) return;
+    try {
+      const res = await app.api.get('plugins/' + id + '/runs');
+      const logText = (res.results && res.results.lastLog) || (res.results && res.results.lastError) || 'No logs available.';
+      app.modal.open({
+        title: 'Logs — ' + p.name,
+        bodyHtml: '<pre class="bg-dark text-white p-3 rounded" style="white-space: pre-wrap; font-size: 0.85em;">' + String(logText).replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>',
+        footer: { buttonsHtml: '<button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>' }
+      });
+    } catch (err) {
+      app.messages.toast('Failed to load logs: ' + (err.message || err), 'danger');
+    }
   }
 
   async function togglePlugin(id, enable) {

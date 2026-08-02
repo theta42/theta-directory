@@ -34,7 +34,13 @@ module.exports = {
       // OsAndPortScan requires root (for -O). NmapScan does a basic port scan (TCP connect if non-root).
       const scan = new nmap.NmapScan(targetRange);
       scan.command.push('-Pn');
+      scan.command.push('-F'); // fast scan, 100 top ports
+      scan.command.push('--min-rate', '100'); // speed up the scan
+      
+      if (config.log) config.log(`Starting nmap scan: ${scan.command.join(' ')}`);
+
       scan.on('complete', function(data) {
+        if (config.log) config.log(`Scan complete. Found ${data ? data.length : 0} hosts.`);
         const resources = [];
         const edges = [];
 

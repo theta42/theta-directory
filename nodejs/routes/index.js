@@ -90,7 +90,8 @@ router.get('/plugins', function(req, res, next) {
   // 'app_sso_directory_admin','admin']) and the /api/plugins endpoints enforce
   // the same server-side. Same header-vs-navigation auth model as /conf and
   // /vault (auth-token is a client-set header, not a cookie).
-  res.render('plugins', {...values});
+  const registry = require('../services/plugin_registry');
+  res.render('plugins', {...values, pluginTypes: registry.types });
 });
 
 router.get('/vault', function(req, res) {

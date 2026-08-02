@@ -62,6 +62,7 @@ router.get('/graph', async (req, res, next) => {
 		res.json(envelope({
 			resources: projectResources(graph.resources, { fullMetadata }),
 			edges: graph.edges,
+			updated_on: graph.updated_on
 		}));
 	} catch (err) { next(err); }
 });
@@ -93,6 +94,42 @@ router.get('/me', async (req, res, next) => {
 		// resolvedAddress is the whole point of /me ("how do I reach it") and a
 		// service inherits it from its host, so it must be computed here rather
 		// than left to each caller to guess at address || ip.
+		accessible = await Resource.withResolvedAddress(accessible);
+		res.json(envelope(projectResources(accessible, { fullMetadata })));
+	} catch (err) { next(err); }
+});
+
+// GET /api/discovery/access/:uid[/:slug]
+// Answers per-user access for a machine caller (e.g. jump-host).
+router.get('/access/:uid/:slug?', async (req, res, next) => {
+	try {
+		const { fullMetadata } = await callerView(req);
+		if (!req.user || (!req.user.isMachine && !fullMetadata)) {
+			return res.status(403).json(envelope({ error: 'Only machine identities or admins may query access for other users.' }));
+		}
+		const { User } = require('../models/user_ldap');
+		const { groupCns } = require('../utils/user_groups');
+		
+		const targetUser = await User.get(req.params.uid).catch(() => null);
+		if (!targetUser) return res.status(404).json(envelope({ error: 'User not found' }));
+
+		const groups = await groupCns(targetUser);
+		const ids = new Set();
+		if (groups.length) {
+			const rgs = await ResourceGroup.list({ where: { groupCn: { in: groups } } });
+			for (const rg of rgs) ids.add(rg.resourceId);
+		}
+		
+		let all = await Resource.list();
+		if (req.params.slug) all = all.filter(r => r.slug === req.params.slug);
+
+		let accessible = all.filter(r => {
+			const isAuto = r.metadata?.discovery_sources?.length > 0 && !r.metadata.discovery_sources.includes('manual');
+			const isManaged = r.metadata?.managed === true;
+			if (isAuto && !isManaged) return false;
+			return ids.has(r.id) || (r.metadata && r.metadata.isPublic);
+		});
+		
 		accessible = await Resource.withResolvedAddress(accessible);
 		res.json(envelope(projectResources(accessible, { fullMetadata })));
 	} catch (err) { next(err); }
