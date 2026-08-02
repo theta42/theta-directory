@@ -66,7 +66,17 @@ module.exports = {
       });
 
       scan.on('error', function(error) {
-        reject(error);
+        // node-nmap's spawn-missing-binary message ("NMAP not found at command
+        // location: nmap") is opaque to an admin reading lastError. Translate
+        // it into something actionable. (The Dockerfile installs nmap in the
+        // app image; this only fires if someone runs outside the container or
+        // strips the package.)
+        var msg = (error && error.message) || String(error);
+        if (/nmap.*not found|command location/i.test(msg)) {
+          reject(new Error('nmap binary not installed in the container image (rebuild with Dockerfile.openldap, which apk-adds nmap)'));
+        } else {
+          reject(error);
+        }
       });
 
       scan.startScan();

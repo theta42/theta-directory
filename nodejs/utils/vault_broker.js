@@ -54,11 +54,14 @@ async function bao(method, path, body) {
 	return res;
 }
 
-// Ensure an ACL policy exists (idempotent). 200 = exists, 404 = create.
+// Ensure an ACL policy exists AND carries the latest HCL. Always (re)writes —
+// `bao policy write` is an idempotent overwrite — so policy edits (e.g. adding
+// a list grant on a directory path) propagate on the next vault-page visit
+// without an operator re-running setup.sh. Skipping on an existing policy
+// would strand the old, narrower HCL forever.
 async function ensurePolicy(name, hcl) {
 	const existing = await baoConf.request('GET', `sys/policies/acl/${name}`);
-	if (existing.status === 200) return;
-	if (existing.status !== 404) {
+	if (existing.status !== 200 && existing.status !== 404) {
 		const t = await existing.text().catch(() => '');
 		throw new Error(`OpenBao policy read ${name} failed (${existing.status}) ${t}`);
 	}
@@ -80,7 +83,11 @@ async function mintToken(policies) {
 function userPolicyHcl(uid) {
 	// uid is an LDAP uid (alphanumeric + a few separators); it is interpolated
 	// into a policy path, so reject anything but a safe charset.
+	// The bare `secret/metadata/users/<uid>` grant is required to LIST the
+	// contents of the namespace: `.../*` covers nested paths but NOT the
+	// directory itself, so without it the /vault secrets list 403s.
 	return `path "secret/data/users/${uid}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/users/${uid}" { capabilities = ["list", "read", "delete"] }
 path "secret/metadata/users/${uid}/*" { capabilities = ["list", "read", "delete"] }`;
 }
 
@@ -109,7 +116,10 @@ async function getOrCreateAdminToken(uid) {
 
 // ── Per-app token (minted ONCE, returned to the caller, never cached) ───────
 function appPolicyHcl(name) {
+	// The bare `secret/metadata/apps/<name>` grant lets an app LIST its own
+	// namespace root (see userPolicyHcl for why `/*` alone isn't enough).
 	return `path "secret/data/apps/${name}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/apps/${name}" { capabilities = ["list", "read", "delete"] }
 path "secret/metadata/apps/${name}/*" { capabilities = ["list", "read", "delete"] }`;
 }
 
