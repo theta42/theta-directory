@@ -12,32 +12,39 @@ class DiscoveryReconciler {
       res._originalSlug = res.slug; // Keep track for edge mapping
       
       let existing = null;
-      
-      // Attempt matching by MAC if available (case-insensitive)
+      const normalizeMac = (m) => (m || '').toLowerCase().replace(/[^a-f0-9]/g, '');
+      const normalizeHost = (h) => (h || '').toLowerCase().split('.')[0].trim();
+
+      const allRes = await Resource.list();
+
+      // 1. Attempt matching by MAC (highest precision)
       if (res.metadata.interfaces && res.metadata.interfaces.length > 0) {
-        const macs = res.metadata.interfaces.map(i => i.mac ? i.mac.toLowerCase() : null).filter(m => !!m);
+        const macs = res.metadata.interfaces.map(i => normalizeMac(i.mac)).filter(m => m.length === 12);
         if (macs.length > 0) {
-          const allRes = await Resource.list();
           existing = allRes.find(r => 
-            r.metadata && r.metadata.interfaces && 
-            r.metadata.interfaces.some(i => i.mac && macs.includes(i.mac.toLowerCase()))
+            r.metadata && (
+              (r.metadata.macAddress && macs.includes(normalizeMac(r.metadata.macAddress))) ||
+              (r.metadata.interfaces && r.metadata.interfaces.some(i => macs.includes(normalizeMac(i.mac))))
+            )
           );
         }
       }
-      
-      // Fallback matching by IP if no MAC match (weaker)
+
+      // 2. Fallback matching by IP address
       let ipsToMatch = [];
       if (res.metadata.interfaces) {
         ipsToMatch = res.metadata.interfaces.map(i => i.ip).filter(i => !!i);
       }
+      if (res.metadata.ip) ipsToMatch.push(res.metadata.ip);
       if (res.metadata.address) {
         res.metadata.address.split(',').forEach(a => ipsToMatch.push(a.trim()));
       }
-      
+      ipsToMatch = [...new Set(ipsToMatch.filter(Boolean))];
+
       if (!existing && ipsToMatch.length > 0) {
-        const allRes = await Resource.list();
         existing = allRes.find(r => {
           if (!r.metadata) return false;
+          if (r.metadata.ip && ipsToMatch.includes(r.metadata.ip)) return true;
           if (r.metadata.address) {
             const addrs = r.metadata.address.split(',').map(a => a.trim());
             if (addrs.some(a => ipsToMatch.includes(a))) return true;
@@ -46,14 +53,17 @@ class DiscoveryReconciler {
           return false;
         });
       }
-      
-      // Fallback matching by Slug or Name
+
+      // 3. Fallback matching by Slug, Name, or Base Hostname
       if (!existing && (res.slug || res.name)) {
-        const allRes = await Resource.list();
-        existing = allRes.find(r => 
-          (res.slug && r.slug === res.slug) || 
-          (res.name && r.name && r.name.toLowerCase() === res.name.toLowerCase())
-        );
+        const inputName = normalizeHost(res.name || res.slug);
+        existing = allRes.find(r => {
+          if (res.slug && r.slug === res.slug) return true;
+          if (res.name && r.name && r.name.toLowerCase() === res.name.toLowerCase()) return true;
+          if (inputName && r.name && normalizeHost(r.name) === inputName) return true;
+          if (inputName && r.slug && normalizeHost(r.slug) === inputName) return true;
+          return false;
+        });
       }
 
       if (existing) {
