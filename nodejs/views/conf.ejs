@@ -1,4 +1,5 @@
 <%- include('top') %>
+
 <script type="text/javascript">
 	app.auth.forceLogin(['admin', 'app_sso_admin']);
 
@@ -48,7 +49,7 @@
 
 	async function saveConf() {
 		const btn = $('#btn-save');
-		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Saving...');
+		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
 
 		const payload = {
 			smtp: {
@@ -76,7 +77,7 @@
 
 		try {
 			await app.api.post('conf', payload);
-			app.messages.toast('Configuration saved successfully! It will take effect immediately.', 'success');
+			app.messages.toast('Configuration saved successfully!', 'success');
 		} catch (error) {
 			app.messages.toast('Failed to save configuration: ' + error.message, 'danger');
 		} finally {
@@ -93,7 +94,7 @@
 
 		const btn = $('#btn-test-email');
 		const originalHtml = btn.html();
-		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Sending...');
+		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Sending...');
 
 		try {
 			const payload = {
@@ -126,7 +127,7 @@
 
 		const btn = $('#btn-test-sms');
 		const originalHtml = btn.html();
-		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Sending...');
+		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Sending...');
 
 		try {
 			const payload = {
@@ -174,7 +175,7 @@
 
 	async function saveProxyConf() {
 		const btn = $('#btn-save-proxy');
-		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Saving...');
+		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
 		
 		const payload = {
 			oidc: {
@@ -254,7 +255,7 @@
 	function renderMessagingPlugins() {
 		const $list = $('#messaging-plugins-list').empty();
 		if (messagingPlugins.length === 0) {
-			$list.append('<div class="text-muted text-center py-3"><i class="fas fa-plug text-secondary mb-2 fs-3"></i><br>No messaging plugins configured.</div>');
+			$list.append('<div class="text-muted text-center py-4"><i class="fas fa-plug text-black-50 fs-2 mb-2"></i><br>No messaging plugins configured.</div>');
 			return;
 		}
 		messagingPlugins.forEach(p => {
@@ -303,76 +304,52 @@
 	}
 </script>
 
-<div class="container-fluid py-4 px-md-4">
-	<!-- Page Header -->
-	<div class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom">
-		<div>
-			<h3 class="fw-bold mb-1"><i class="fas fa-sliders-h text-primary me-2"></i> System Configuration</h3>
-			<p class="text-muted mb-0 small">
-				Manage stack configuration (SMTP, OAuth, VoIP.ms, Proxy, Terms of Service, and Messaging Plugins). Secrets are stored in OpenBao.
-			</p>
-		</div>
-		<div>
-			<button class="btn btn-outline-secondary me-2" onclick="loadConf()"><i class="fas fa-rotate me-1"></i> Reset</button>
-			<button id="btn-save" class="btn btn-primary" onclick="saveConf()"><i class="fas fa-save me-1"></i> Save Configuration</button>
-		</div>
-	</div>
-
-	<div class="row g-4">
-		<!-- Sidebar Navigation -->
-		<div class="col-lg-3 col-md-4">
-			<div class="card shadow-sm border-0 sticky-top" style="top: var(--sw-content-offset, 70px);">
-				<div class="list-group list-group-flush rounded-3" id="conf-nav-list" role="tablist">
-					<a class="list-group-item list-group-item-action active d-flex align-items-center py-3" id="tab-nav-oauth" data-bs-toggle="list" href="#pane-oauth" role="tab">
-						<i class="fas fa-key text-success me-3 fs-5" style="width: 24px;"></i>
-						<div>
-							<div class="fw-semibold">OAuth & JWT</div>
-							<div class="small text-muted">Issuer & Token Lifetimes</div>
-						</div>
-					</a>
-					<a class="list-group-item list-group-item-action d-flex align-items-center py-3" id="tab-nav-smtp" data-bs-toggle="list" href="#pane-smtp" role="tab">
-						<i class="fas fa-envelope text-primary me-3 fs-5" style="width: 24px;"></i>
-						<div>
-							<div class="fw-semibold">Email (SMTP)</div>
-							<div class="small text-muted">Mail Delivery & Testing</div>
-						</div>
-					</a>
-					<a class="list-group-item list-group-item-action d-flex align-items-center py-3" id="tab-nav-sms" data-bs-toggle="list" href="#pane-sms" role="tab">
-						<i class="fas fa-comment-sms text-info me-3 fs-5" style="width: 24px;"></i>
-						<div>
-							<div class="fw-semibold">SMS & Messaging</div>
-							<div class="small text-muted">VoIP.ms & Webhook Plugins</div>
-						</div>
-					</a>
-					<a class="list-group-item list-group-item-action d-flex align-items-center py-3" id="tab-nav-proxy" data-bs-toggle="list" href="#pane-proxy" role="tab">
-						<i class="fas fa-shield-alt text-warning me-3 fs-5" style="width: 24px;"></i>
-						<div>
-							<div class="fw-semibold">Proxy Secrets</div>
-							<div class="small text-muted">OpenBao Integration</div>
-						</div>
-					</a>
-					<a class="list-group-item list-group-item-action d-flex align-items-center py-3" id="tab-nav-tos" data-bs-toggle="list" href="#pane-tos" role="tab">
-						<i class="fas fa-file-contract text-secondary me-3 fs-5" style="width: 24px;"></i>
-						<div>
-							<div class="fw-semibold">Terms of Service</div>
-							<div class="small text-muted">User Agreement & Policy</div>
-						</div>
-					</a>
+<div class="container mt-4">
+	<div class="row">
+		<div class="col-12">
+			<div class="card shadow">
+				<!-- Header with Sub-Nav Tabs matching directory.ejs -->
+				<div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+					<ul class="nav nav-tabs card-header-tabs" id="confTabs" role="tablist">
+						<li class="nav-item" role="presentation">
+							<button class="nav-link active" id="oauth-tab" data-bs-toggle="tab" data-bs-target="#pane-oauth" type="button" role="tab">
+								<i class="fas fa-key text-success me-1"></i> OAuth & JWT
+							</button>
+						</li>
+						<li class="nav-item" role="presentation">
+							<button class="nav-link" id="smtp-tab" data-bs-toggle="tab" data-bs-target="#pane-smtp" type="button" role="tab">
+								<i class="fas fa-envelope text-primary me-1"></i> Email (SMTP)
+							</button>
+						</li>
+						<li class="nav-item" role="presentation">
+							<button class="nav-link" id="sms-tab" data-bs-toggle="tab" data-bs-target="#pane-sms" type="button" role="tab">
+								<i class="fas fa-comment-sms text-info me-1"></i> SMS & Messaging
+							</button>
+						</li>
+						<li class="nav-item" role="presentation">
+							<button class="nav-link" id="proxy-tab" data-bs-toggle="tab" data-bs-target="#pane-proxy" type="button" role="tab">
+								<i class="fas fa-shield-alt text-warning me-1"></i> Proxy Secrets
+							</button>
+						</li>
+						<li class="nav-item" role="presentation">
+							<button class="nav-link" id="tos-tab" data-bs-toggle="tab" data-bs-target="#pane-tos" type="button" role="tab">
+								<i class="fas fa-file-contract text-secondary me-1"></i> Terms of Service
+							</button>
+						</li>
+					</ul>
+					<div>
+						<button class="btn btn-sm btn-outline-secondary me-1" onclick="loadConf()"><i class="fas fa-rotate me-1"></i> Reset</button>
+						<button id="btn-save" class="btn btn-sm btn-primary" onclick="saveConf()"><i class="fas fa-save me-1"></i> Save Configuration</button>
+					</div>
 				</div>
-			</div>
-		</div>
 
-		<!-- Main Content Panes -->
-		<div class="col-lg-9 col-md-8">
-			<div class="tab-content" id="conf-tab-content">
-				
-				<!-- OAuth Pane -->
-				<div class="tab-pane fade show active" id="pane-oauth" role="tabpanel">
-					<div class="card shadow-sm border-0 mb-4">
-						<div class="card-header bg-white pt-4 pb-3 border-bottom">
-							<h5 class="mb-0 fw-bold"><i class="fas fa-key text-success me-2"></i> OAuth 2.0 & JWT Settings</h5>
-						</div>
-						<div class="card-body p-4">
+				<div class="card-body p-4">
+					<div class="tab-content" id="confTabContent">
+						
+						<!-- OAuth & JWT Tab -->
+						<div class="tab-pane fade show active" id="pane-oauth" role="tabpanel">
+							<h5 class="fw-bold mb-3"><i class="fas fa-key text-success me-2"></i> OAuth 2.0 & JWT Settings</h5>
+							<p class="text-muted small">Configure OIDC issuer URLs, token lifetimes, and JWT signing keys. Stored in OpenBao.</p>
 							<div class="mb-3">
 								<label class="form-label fw-semibold">Issuer URL</label>
 								<input type="text" class="form-control" id="oauth-issuer" placeholder="https://sso.example.com">
@@ -396,16 +373,11 @@
 								</div>
 							</div>
 						</div>
-					</div>
-				</div>
 
-				<!-- SMTP Pane -->
-				<div class="tab-pane fade" id="pane-smtp" role="tabpanel">
-					<div class="card shadow-sm border-0 mb-4">
-						<div class="card-header bg-white pt-4 pb-3 border-bottom">
-							<h5 class="mb-0 fw-bold"><i class="fas fa-envelope text-primary me-2"></i> SMTP Server Settings</h5>
-						</div>
-						<div class="card-body p-4">
+						<!-- SMTP Tab -->
+						<div class="tab-pane fade" id="pane-smtp" role="tabpanel">
+							<h5 class="fw-bold mb-3"><i class="fas fa-envelope text-primary me-2"></i> SMTP Server Settings</h5>
+							<p class="text-muted small">System mail server credentials for password resets, notifications, and verification emails.</p>
 							<div class="row">
 								<div class="col-md-8 mb-3">
 									<label class="form-label fw-semibold">SMTP Host</label>
@@ -449,16 +421,11 @@
 								<div class="form-text">Saves current SMTP config and sends a test message.</div>
 							</div>
 						</div>
-					</div>
-				</div>
 
-				<!-- SMS & Messaging Pane -->
-				<div class="tab-pane fade" id="pane-sms" role="tabpanel">
-					<div class="card shadow-sm border-0 mb-4">
-						<div class="card-header bg-white pt-4 pb-3 border-bottom">
-							<h5 class="mb-0 fw-bold"><i class="fas fa-comment-sms text-info me-2"></i> VoIP.ms SMS Integration</h5>
-						</div>
-						<div class="card-body p-4">
+						<!-- SMS & Messaging Tab -->
+						<div class="tab-pane fade" id="pane-sms" role="tabpanel">
+							<h5 class="fw-bold mb-3"><i class="fas fa-comment-sms text-info me-2"></i> VoIP.ms SMS Integration</h5>
+							<p class="text-muted small">Configure VoIP.ms API credentials for delivering SMS 2FA codes.</p>
 							<div class="row">
 								<div class="col-md-6 mb-3">
 									<label class="form-label fw-semibold">API Username</label>
@@ -495,16 +462,10 @@
 							</div>
 							<div id="messaging-plugins-list"></div>
 						</div>
-					</div>
-				</div>
 
-				<!-- Proxy Secrets Pane -->
-				<div class="tab-pane fade" id="pane-proxy" role="tabpanel">
-					<div class="card shadow-sm border-0 mb-4">
-						<div class="card-header bg-white pt-4 pb-3 border-bottom">
-							<h5 class="mb-0 fw-bold"><i class="fas fa-shield-alt text-warning me-2"></i> OpenBao Proxy Integration</h5>
-						</div>
-						<div class="card-body p-4">
+						<!-- Proxy Secrets Tab -->
+						<div class="tab-pane fade" id="pane-proxy" role="tabpanel">
+							<h5 class="fw-bold mb-3"><i class="fas fa-shield-alt text-warning me-2"></i> OpenBao Proxy Integration</h5>
 							<p class="text-muted small">Secrets stored directly in OpenBao (<code>secret/proxy/conf</code>) and consumed by Proxy at boot.</p>
 							
 							<h6 class="fw-bold text-dark mt-3 mb-2">OAuth / OIDC Client</h6>
@@ -537,17 +498,13 @@
 
 							<button id="btn-save-proxy" class="btn btn-warning mt-2 text-dark fw-semibold" onclick="saveProxyConf()"><i class="fas fa-save me-1"></i> Save Proxy Secrets</button>
 						</div>
-					</div>
-				</div>
 
-				<!-- Terms of Service Pane -->
-				<div class="tab-pane fade" id="pane-tos" role="tabpanel">
-					<div class="card shadow-sm border-0 mb-4">
-						<div class="card-header bg-white pt-4 pb-3 border-bottom d-flex justify-content-between align-items-center">
-							<h5 class="mb-0 fw-bold"><i class="fas fa-file-contract me-2"></i> Terms of Service Editor</h5>
-							<span class="small text-muted" id="tos-meta"></span>
-						</div>
-						<div class="card-body p-4">
+						<!-- Terms of Service Tab -->
+						<div class="tab-pane fade" id="pane-tos" role="tabpanel">
+							<div class="d-flex justify-content-between align-items-center mb-3">
+								<h5 class="fw-bold mb-0"><i class="fas fa-file-contract me-2"></i> Terms of Service Editor</h5>
+								<span class="small text-muted" id="tos-meta"></span>
+							</div>
 							<div class="mb-3">
 								<label class="form-label fw-semibold">Terms Content (Markdown)</label>
 								<textarea class="form-control font-monospace" id="tos-content" rows="10" placeholder="Enter Terms of Service markdown content..."></textarea>
@@ -559,9 +516,9 @@
 							<button class="btn btn-primary" onclick="saveTos()"><i class="fas fa-floppy-disk me-1"></i> Save Terms of Service</button>
 							<div id="tos-result" style="display:none" class="mt-3"></div>
 						</div>
+
 					</div>
 				</div>
-
 			</div>
 		</div>
 	</div>
