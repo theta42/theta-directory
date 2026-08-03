@@ -615,9 +615,10 @@ app.util = (function(app){
 // Reveal every .group-required-<cn> element the current user's groups entitle
 // them to. Elements carrying .group-required start hidden (styles.css), so a
 // user who is in no groups — or who isn't logged in — simply never sees them.
+// The synthetic 'login' group is special: it's true for any authenticated user.
 app.auth.applyGroupVisibility = function(user){
 	var groups = app.auth.groupCNs(user);
-	if(!groups.length) return;
+	var isLoggedIn = !!user;
 
 	var style = document.getElementById('group-required-rules');
 	if(!style){
@@ -634,6 +635,19 @@ app.auth.applyGroupVisibility = function(user){
 			);
 		}catch(error){
 			// A group whose CN isn't a usable CSS identifier just gates nothing.
+		}
+	}
+
+	// The 'login' group is synthetic — it means "any authenticated user".
+	// Reveal .group-required-login for any logged-in user.
+	if(isLoggedIn){
+		try{
+			style.sheet.insertRule(
+				`.group-required-login { display: revert !important; }`,
+				style.sheet.cssRules.length
+			);
+		}catch(error){
+			// Ignore CSS escape errors.
 		}
 	}
 };

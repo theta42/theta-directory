@@ -57,14 +57,6 @@ module.exports = {
 		password: '__in secrets file__',
 		did:      '__in secrets file__',
 	},
-	smtp: {
-		host: 'localhost',
-		port: 587,
-		secure: false,
-		user: 'noreply@example.com',
-		pass: '__in secrets file__',
-		from: 'SSO Manager <noreply@example.com>',
-	},
 	directory: {
 		// Public SSH jump host fronting the lab, if there is one (the jump-host
 		// component). When set, a host card in the catalog shows the real
