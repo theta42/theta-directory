@@ -40,6 +40,9 @@
                             <datalist id="access-uid-list"></datalist>
                             <button class="btn btn-outline-secondary" onclick="openUserAccessModal()">Check</button>
                         </div>
+                        <button class="btn btn-sm btn-outline-primary ms-1 shadow-sm" onclick="openAgentInstallModal()">
+                            <i class="fa-solid fa-shield-halved me-1"></i> Install Agent
+                        </button>
 					    <button class="btn btn-sm btn-primary ms-1 shadow-sm" onclick="openAddModal()">
 					        <i class="fas fa-plus"></i> Add Resource
 					    </button>
@@ -1270,6 +1273,232 @@
       renderDiscoveryTable();
       loadResources(); // Also update directory tab
     });
+  }
+
+  // --- THETA AGENT INSTALL MODAL & WIZARD ---
+  function generateRandomHexToken(byteLen) {
+    const arr = new Uint8Array(byteLen || 16);
+    (window.crypto || window.msCrypto).getRandomValues(arr);
+    return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  function regenerateAgentToken(inputId) {
+    const newToken = generateRandomHexToken(16);
+    $('#' + inputId).val(newToken);
+    if (inputId === 'agent-quick-token') $('#agent-custom-token').val(newToken);
+    else $('#agent-quick-token').val(newToken);
+    updateAgentCommands();
+  }
+
+  function updateAgentCommands() {
+    const quickUrl = ($('#agent-quick-url').val() || window.location.origin).replace(/\/+$/, '');
+    const quickToken = $('#agent-quick-token').val() || '';
+    const quickCmd = `curl -fsSL ${quickUrl}/resources/theta-agent/install.sh | sh -s -- --url "${quickUrl}" --token "${quickToken}"`;
+    $('#agent-quick-command').text(quickCmd);
+
+    const customUrl = ($('#agent-custom-url').val() || window.location.origin).replace(/\/+$/, '');
+    const customToken = $('#agent-custom-token').val() || '';
+    const customLocation = $('#agent-custom-location').val() || 'default';
+
+    const telemetry = $('#cap-telemetry').is(':checked');
+    const configureLdap = $('#cap-configure-ldap').is(':checked');
+    const reboot = $('#cap-reboot').is(':checked');
+    const arbitraryBash = $('#cap-arbitrary-bash').is(':checked');
+
+    const servicesRaw = $('#cap-services').val() || '';
+    const servicesList = servicesRaw.split(',').map(s => s.trim()).filter(Boolean);
+    const servicesYaml = servicesList.length > 0
+      ? '[' + servicesList.map(s => `"${s}"`).join(', ') + ']'
+      : '[]';
+
+    const yamlStr = [
+      `server_url: "${customUrl}"`,
+      `auth_token: "${customToken}"`,
+      `location: "${customLocation}"`,
+      `capabilities:`,
+      `  telemetry: ${telemetry}`,
+      `  configure_ldap: ${configureLdap}`,
+      `  reboot: ${reboot}`,
+      `  service_control: ${servicesYaml}`,
+      `  arbitrary_bash: ${arbitraryBash}`
+    ].join('\n');
+
+    $('#agent-yaml-preview').text(yamlStr);
+
+    try {
+      const b64Config = btoa(yamlStr);
+      const customCmd = `curl -fsSL ${customUrl}/resources/theta-agent/install.sh | sh -s -- "${b64Config}"`;
+      $('#agent-custom-command').text(customCmd);
+    } catch (e) {
+      $('#agent-custom-command').text('Error encoding config to Base64');
+    }
+  }
+
+  function copyAgentCommand(elementId, btnId) {
+    const text = $('#' + elementId).text();
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+      const $btn = $('#' + btnId);
+      const origHtml = $btn.html();
+      $btn.html('<i class="fa-solid fa-check me-1"></i> Copied!').removeClass('btn-success').addClass('btn-outline-success');
+      setTimeout(() => {
+        $btn.html(origHtml).removeClass('btn-outline-success').addClass('btn-success');
+      }, 2000);
+    }).catch(err => {
+      app.messages.toast('Failed to copy: ' + err, 'danger');
+    });
+  }
+
+  function openAgentInstallModal() {
+    const currentOrigin = window.location.origin;
+    const initialToken = generateRandomHexToken(16);
+
+    const bodyHtml = `
+      <div class="mb-3 p-3 bg-light rounded border">
+        <div class="d-flex align-items-center">
+          <i class="fa-solid fa-shield-halved fa-2x text-primary me-3"></i>
+          <div>
+            <h6 class="mb-0 fw-bold">Theta Agent Endpoint Management Daemon</h6>
+            <small class="text-muted">A 2-way Command & Control (C2) daemon that streams real-time telemetry and enables secure, capability-controlled management operations on Linux hosts.</small>
+          </div>
+        </div>
+      </div>
+
+      <ul class="nav nav-pills mb-3" id="agent-install-tabs" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="tab-quick-btn" data-bs-toggle="pill" data-bs-target="#tab-quick-pane" type="button" role="tab">
+            <i class="fa-solid fa-bolt me-1"></i> Quick Install
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="tab-custom-btn" data-bs-toggle="pill" data-bs-target="#tab-custom-pane" type="button" role="tab">
+            <i class="fa-solid fa-sliders me-1"></i> Custom Config Wizard
+          </button>
+        </li>
+      </ul>
+
+      <div class="tab-content" id="agent-install-tab-content">
+        <!-- ── Tab 1: Quick Install ──────────────────────────────────────── -->
+        <div class="tab-pane fade show active" id="tab-quick-pane" role="tabpanel">
+          <div class="row g-2 mb-3">
+            <div class="col-md-6">
+              <label class="form-label small fw-bold mb-1">SSO Server URL</label>
+              <input type="text" id="agent-quick-url" class="form-control form-control-sm" value="${currentOrigin}" oninput="updateAgentCommands()">
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small fw-bold mb-1">Host Token</label>
+              <div class="input-group input-group-sm">
+                <input type="text" id="agent-quick-token" class="form-control font-monospace" value="${initialToken}" oninput="updateAgentCommands()">
+                <button class="btn btn-outline-secondary" type="button" onclick="regenerateAgentToken('agent-quick-token')" title="Regenerate Token">
+                  <i class="fa-solid fa-rotate"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <label class="form-label small fw-bold mb-1">Run this command on the target host (as root):</label>
+          <div class="position-relative mb-2">
+            <pre class="bg-dark text-light p-3 rounded font-monospace small mb-0 text-wrap text-break" id="agent-quick-command" style="user-select: all;"></pre>
+          </div>
+          <div class="d-flex justify-content-end">
+            <button class="btn btn-sm btn-success" id="btn-copy-quick" onclick="copyAgentCommand('agent-quick-command', 'btn-copy-quick')">
+              <i class="fa-solid fa-copy me-1"></i> Copy Quick Install Command
+            </button>
+          </div>
+        </div>
+
+        <!-- ── Tab 2: Custom Config Wizard ────────────────────────────────── -->
+        <div class="tab-pane fade" id="tab-custom-pane" role="tabpanel">
+          <div class="row g-2 mb-3">
+            <div class="col-md-5">
+              <label class="form-label small fw-bold mb-1">SSO Server URL</label>
+              <input type="text" id="agent-custom-url" class="form-control form-control-sm" value="${currentOrigin}" oninput="updateAgentCommands()">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label small fw-bold mb-1">Host Token</label>
+              <div class="input-group input-group-sm">
+                <input type="text" id="agent-custom-token" class="form-control font-monospace" value="${initialToken}" oninput="updateAgentCommands()">
+                <button class="btn btn-outline-secondary" type="button" onclick="regenerateAgentToken('agent-custom-token')" title="Regenerate Token">
+                  <i class="fa-solid fa-rotate"></i>
+                </button>
+              </div>
+            </div>
+            <div class="col-md-3">
+              <label class="form-label small fw-bold mb-1">Location Identifier</label>
+              <input type="text" id="agent-custom-location" class="form-control form-control-sm" placeholder="e.g. dc-01-rack-12" value="default" oninput="updateAgentCommands()">
+            </div>
+          </div>
+
+          <div class="card bg-light border mb-3">
+            <div class="card-header py-2 bg-light fw-bold small"><i class="fa-solid fa-key me-1"></i> Capability Matrix (Local-First Security Controls)</div>
+            <div class="card-body py-2">
+              <div class="row g-2">
+                <div class="col-md-6">
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="cap-telemetry" checked onchange="updateAgentCommands()">
+                    <label class="form-check-label small" for="cap-telemetry"><strong>Telemetry</strong> <span class="text-muted">(CPU, RAM, Disk, ZFS stats)</span></label>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="cap-configure-ldap" checked onchange="updateAgentCommands()">
+                    <label class="form-check-label small" for="cap-configure-ldap"><strong>Configure LDAP</strong> <span class="text-muted">(SSSD config & SSH keys)</span></label>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="cap-reboot" onchange="updateAgentCommands()">
+                    <label class="form-check-label small" for="cap-reboot"><strong>Reboot</strong> <span class="text-muted">(remote system reboot)</span></label>
+                  </div>
+                </div>
+                <div class="col-md-6">
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="cap-arbitrary-bash" onchange="updateAgentCommands()">
+                    <label class="form-check-label small text-danger" for="cap-arbitrary-bash"><strong>Arbitrary Bash</strong> <span class="text-muted">(remote root execution)</span></label>
+                  </div>
+                </div>
+                <div class="col-12 mt-2">
+                  <label class="form-label small fw-bold mb-1">Service Control Allowlist <span class="text-muted font-normal">(comma-separated services, e.g. nginx, gitea, sssd)</span></label>
+                  <input type="text" id="cap-services" class="form-control form-control-sm" placeholder="nginx, docker, sssd" oninput="updateAgentCommands()">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <ul class="nav nav-tabs nav-tabs-sm mb-2" id="preview-sub-tabs" role="tablist">
+            <li class="nav-item">
+              <button class="nav-link active py-1 px-3 small" id="subtab-cmd-btn" data-bs-toggle="tab" data-bs-target="#subtab-cmd-pane" type="button">Base64 Install Command</button>
+            </li>
+            <li class="nav-item">
+              <button class="nav-link py-1 px-3 small" id="subtab-yaml-btn" data-bs-toggle="tab" data-bs-target="#subtab-yaml-pane" type="button">Generated agent.yml</button>
+            </li>
+          </ul>
+
+          <div class="tab-content mb-2">
+            <div class="tab-pane fade show active" id="subtab-cmd-pane" role="tabpanel">
+              <pre class="bg-dark text-light p-3 rounded font-monospace small mb-0 text-wrap text-break" id="agent-custom-command" style="user-select: all;"></pre>
+            </div>
+            <div class="tab-pane fade" id="subtab-yaml-pane" role="tabpanel">
+              <pre class="bg-light text-dark p-3 rounded border font-monospace small mb-0" id="agent-yaml-preview"></pre>
+            </div>
+          </div>
+
+          <div class="d-flex justify-content-end">
+            <button class="btn btn-sm btn-success" id="btn-copy-custom" onclick="copyAgentCommand('agent-custom-command', 'btn-copy-custom')">
+              <i class="fa-solid fa-copy me-1"></i> Copy Base64 Command
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    app.modal.open({
+      title: '<i class="fa-solid fa-shield-halved text-primary me-2"></i> Install Theta Agent',
+      bodyHtml: bodyHtml,
+      size: 'lg'
+    });
+
+    updateAgentCommands();
   }
 
   // Plugin scheduling moved to the dedicated /plugins page (the Agents &

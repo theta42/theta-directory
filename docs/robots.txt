@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://theta42.github.io/sso-manager-node/sitemap.xml
