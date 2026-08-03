@@ -134,7 +134,12 @@ curl "$VAULT_ADDR/v1/secret/data/apps/<span id="app-name-display"></span>/conf" 
   // key relative to the subject's namespace (so 'foo' for a user means
   // secret/data/users/<uid>/foo).
   function vpath(kind, key) {
-    return `secret/${kind}/${VAULT_BASE}${key}`;
+    let cleanKey = key || '';
+    if (cleanKey.startsWith('/')) cleanKey = cleanKey.slice(1);
+    if (VAULT_BASE) {
+      return `secret/${kind}/${VAULT_BASE}${cleanKey}`;
+    }
+    return `secret/${kind}/${cleanKey}`;
   }
 
   function apiCall(method, path, body = null) {
@@ -156,7 +161,8 @@ curl "$VAULT_ADDR/v1/secret/data/apps/<span id="app-name-display"></span>/conf" 
 
   async function loadSecrets() {
     try {
-      const res = await apiCall('GET', vpath('metadata', '?list=true'));
+      const listPath = vpath('metadata', '').replace(/\/$/, '') + '?list=true';
+      const res = await apiCall('GET', listPath);
       const listEl = document.getElementById('secrets-list');
       listEl.innerHTML = '';
       if (!res || !res.data || !res.data.keys || res.data.keys.length === 0) {

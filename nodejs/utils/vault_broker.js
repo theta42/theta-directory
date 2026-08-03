@@ -80,16 +80,18 @@ async function mintToken(policies) {
 }
 
 // ── Per-user token ──────────────────────────────────────────────────────────
+// ── Per-user token ──────────────────────────────────────────────────────────
 function userPolicyHcl(uid) {
-	// uid is an LDAP uid (alphanumeric + a few separators); it is interpolated
-	// into a policy path, so reject anything but a safe charset.
-	// The bare `secret/metadata/users/<uid>` grant is required to LIST the
-	// contents of the namespace: `.../*` covers nested paths but NOT the
-	// directory itself, so without it the /vault secrets list 403s.
-	return `path "secret/data/users/${uid}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
-path "secret/metadata/users/${uid}" { capabilities = ["list", "read", "delete"] }
-path "secret/metadata/users/${uid}/" { capabilities = ["list", "read", "delete"] }
-path "secret/metadata/users/${uid}/*" { capabilities = ["list", "read", "delete"] }`;
+	return `path "secret/data/users/${uid}" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/data/users/${uid}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/users/${uid}" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/users/${uid}/" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/users/${uid}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/data/shared" { capabilities = ["read", "list"] }
+path "secret/data/shared/*" { capabilities = ["read", "list"] }
+path "secret/metadata/shared" { capabilities = ["read", "list"] }
+path "secret/metadata/shared/" { capabilities = ["read", "list"] }
+path "secret/metadata/shared/*" { capabilities = ["read", "list"] }`;
 }
 
 // Mint (or return the cached) per-user token confined to secret/users/<uid>/*.
@@ -107,13 +109,13 @@ async function getOrCreateUserToken(uid) {
 
 // ── Admin token (read/write all of secret/) ─────────────────────────────────
 function adminPolicyHcl() {
-	// The bare `secret/metadata` / `secret/metadata/` grants let an admin LIST
-	// the KV mount root (the top-level dirs); `secret/metadata/*` covers nested
-	// paths but NOT the root itself, so without it the /vault secrets list 403s.
-	return `path "secret/data/*" { capabilities = ["create", "read", "update", "delete", "list"] }
-path "secret/metadata" { capabilities = ["list", "read", "delete"] }
-path "secret/metadata/" { capabilities = ["list", "read", "delete"] }
-path "secret/metadata/*" { capabilities = ["list", "read", "delete"] }`;
+	return `path "secret/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/data/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/data" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/*" { capabilities = ["create", "read", "update", "delete", "list"] }`;
 }
 
 async function getOrCreateAdminToken(uid) {
@@ -128,11 +130,16 @@ async function getOrCreateAdminToken(uid) {
 
 // ── Per-app token (minted ONCE, returned to the caller, never cached) ───────
 function appPolicyHcl(name) {
-	// The bare `secret/metadata/apps/<name>` grant lets an app LIST its own
-	// namespace root (see userPolicyHcl for why `/*` alone isn't enough).
-	return `path "secret/data/apps/${name}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
-path "secret/metadata/apps/${name}" { capabilities = ["list", "read", "delete"] }
-path "secret/metadata/apps/${name}/*" { capabilities = ["list", "read", "delete"] }`;
+	return `path "secret/data/apps/${name}" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/data/apps/${name}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/apps/${name}" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/apps/${name}/" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/apps/${name}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/data/shared" { capabilities = ["read", "list"] }
+path "secret/data/shared/*" { capabilities = ["read", "list"] }
+path "secret/metadata/shared" { capabilities = ["read", "list"] }
+path "secret/metadata/shared/" { capabilities = ["read", "list"] }
+path "secret/metadata/shared/*" { capabilities = ["read", "list"] }`;
 }
 
 // Create the app-<name> policy + mint a token for it. Returns the token ONCE
@@ -190,17 +197,13 @@ async function scopeGuard(req, res, next) {
 		return res.status(503).json({ error: 'vault broker unavailable', detail: e.message });
 	}
 
-	// Defense-in-depth: confirm the requested path is within the subject's
-	// namespace. Admins roam all of secret/; users are confined to
-	// secret/users/<uid>/. (The token's own policy enforces the same at the
-	// OpenBao layer; this catches a buggy/malicious client early with a clear
-	// 403 instead of an opaque OpenBao denial.)
 	const norm = normalizeVaultPath(req.path);
 	if (norm === null) {
 		return res.status(403).json({ error: 'vault paths must be under /secret/' });
 	}
-	const base = `/secret/users/${uid}`;
-	const allowed = admin || norm === base || norm.startsWith(base + '/');
+	const userBase = `/secret/users/${uid}`;
+	const sharedBase = `/secret/shared`;
+	const allowed = admin || norm === userBase || norm.startsWith(userBase + '/') || norm === sharedBase || norm.startsWith(sharedBase + '/');
 	if (!allowed) {
 		return res.status(403).json({ error: 'path outside your vault namespace' });
 	}

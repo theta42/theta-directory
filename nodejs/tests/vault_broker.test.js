@@ -29,8 +29,8 @@ describe('vault_broker admin policy', () => {
         return { status: 404, text: async () => '' };
       }
       if (method === 'PUT' && path === 'sys/policies/acl/sso-admin') {
-        expect(body.policy).toContain('path "secret/metadata" { capabilities = ["list", "read", "delete"] }');
-        expect(body.policy).toContain('path "secret/metadata/" { capabilities = ["list", "read", "delete"] }');
+        expect(body.policy).toContain('path "secret/metadata" { capabilities = ["create", "read", "update", "delete", "list"] }');
+        expect(body.policy).toContain('path "secret/metadata/" { capabilities = ["create", "read", "update", "delete", "list"] }');
         return { status: 204, ok: true };
       }
       if (method === 'POST' && path === 'auth/token/create/sso-broker') {
