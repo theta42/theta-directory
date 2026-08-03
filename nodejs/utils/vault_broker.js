@@ -156,11 +156,12 @@ async function mintAppToken(name) {
 // client's sso auth headers so OpenBao never sees them.
 
 const VAULT_ADDR = process.env.VAULT_ADDR || 'http://openbao:8200';
+const ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_admin'];
 const ADMIN_GROUP = 'app_sso_admin';
 
 async function isAdmin(user) {
 	try {
-		await permission.byGroup(user, [ADMIN_GROUP]);
+		await permission.byGroup(user, ADMIN_GROUPS);
 		return true;
 	} catch (e) {
 		return false;

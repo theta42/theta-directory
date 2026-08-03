@@ -186,7 +186,7 @@ router.post('/promote/:slug', async (req, res, next) => {
 		
 		const meta = resource.metadata || {};
 		meta.managed = true;
-		await resource.update({ metadata: meta });
+		await Resource.update(resource.id, { metadata: meta });
 		
 		res.json(envelope({ success: true, groups: [accessGroup, adminGroup] }));
 	} catch (err) { next(err); }

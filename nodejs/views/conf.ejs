@@ -2,10 +2,14 @@
 <script type="text/javascript">
 	app.auth.forceLogin(['admin', 'app_sso_admin']);
 
+	var messagingTypes = {};
+	var messagingPlugins = [];
+
 	$(document).ready(function() {
 		loadConf();
 		loadProxyConf();
 		loadTos();
+		loadMessagingPlugins();
 	});
 
 	async function loadConf() {
@@ -76,7 +80,7 @@
 		} catch (error) {
 			app.messages.toast('Failed to save configuration: ' + error.message, 'danger');
 		} finally {
-			btn.prop('disabled', false).html('<i class="fas fa-save"></i> Save Configuration');
+			btn.prop('disabled', false).html('<i class="fas fa-save me-1"></i> Save Configuration');
 		}
 	}
 
@@ -87,13 +91,11 @@
 			return;
 		}
 
-		const $inputGroup = $('#test-email-to').closest('.input-group');
-		const btn = $inputGroup.find('button');
+		const btn = $('#btn-test-email');
 		const originalHtml = btn.html();
 		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Sending...');
 
 		try {
-			// First save the SMTP config, then send test email
 			const payload = {
 				smtp: {
 					host: $('#smtp-host').val(),
@@ -104,11 +106,7 @@
 					secure: $('#smtp-secure').is(':checked')
 				}
 			};
-
-			// Save config first
 			await app.api.post('conf', payload);
-
-			// Then send test email
 			const result = await app.api.post('conf/test-email', { to });
 			app.messages.toast(result.message || 'Test email sent!', 'success');
 			$('#test-email-to').val('');
@@ -126,13 +124,11 @@
 			return;
 		}
 
-		const $inputGroup = $('#test-sms-to').closest('.input-group');
-		const btn = $inputGroup.find('button');
+		const btn = $('#btn-test-sms');
 		const originalHtml = btn.html();
 		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i> Sending...');
 
 		try {
-			// First save the VoIP.ms config, then send test SMS
 			const payload = {
 				voipms: {
 					username: $('#voipms-username').val(),
@@ -140,11 +136,7 @@
 					password: $('#voipms-password').val()
 				}
 			};
-
-			// Save config first
 			await app.api.post('conf', payload);
-
-			// Then send test SMS
 			const result = await app.api.post('conf/test-sms', { to });
 			app.messages.toast(result.message || 'Test SMS sent!', 'success');
 			$('#test-sms-to').val('');
@@ -201,22 +193,18 @@
 		} catch (error) {
 			app.messages.toast('Failed to save Proxy configuration: ' + error.message, 'danger');
 		} finally {
-			btn.prop('disabled', false).html('<i class="fas fa-save"></i> Save Proxy Secrets');
+			btn.prop('disabled', false).html('<i class="fas fa-save me-1"></i> Save Proxy Secrets');
 		}
 	}
 
-	// ── Terms of Service editor ──────────────────────────────────────────
-	// Moved here from the admin Overview dashboard — it's a configuration
-	// control, so it belongs on the System Configuration page. The API is
-	// routes/tos.js (GET to read, PUT to save; PUT is app_sso_admin-gated, which
-	// matches this page's gate). app.tos.get/update are the shared frontend
-	// helpers (@simpleworkjs/frontend).
 	async function loadTos() {
 		try {
 			const tos = await app.tos.get();
-			document.getElementById('tos-content').value = tos.content;
-			document.getElementById('tos-meta').textContent =
-				'Last updated ' + moment(tos.updated_on, 'x').fromNow() + ' by ' + tos.updated_by;
+			if (tos && tos.content) {
+				document.getElementById('tos-content').value = tos.content;
+				document.getElementById('tos-meta').textContent =
+					'Last updated ' + moment(tos.updated_on, 'x').fromNow() + ' by ' + tos.updated_by;
+			}
 		} catch(e) {
 			console.error('Failed to load ToS:', e);
 		}
@@ -248,247 +236,332 @@
 			loadTos();
 		});
 	}
+
+	// ── Messaging Plugins ──────────────────────────────────────────────
+	function loadMessagingPlugins() {
+		app.api.get('plugins/types', function(err, res) {
+			if (!err && res && res.results) {
+				(res.results || []).forEach(t => { messagingTypes[t.type] = t; });
+			}
+			app.api.get('plugins', function(err, res) {
+				if (err) return;
+				messagingPlugins = (res.results || []).filter(p => p.category === 'messaging');
+				renderMessagingPlugins();
+			});
+		});
+	}
+
+	function renderMessagingPlugins() {
+		const $list = $('#messaging-plugins-list').empty();
+		if (messagingPlugins.length === 0) {
+			$list.append('<div class="text-muted text-center py-3"><i class="fas fa-plug text-secondary mb-2 fs-3"></i><br>No messaging plugins configured.</div>');
+			return;
+		}
+		messagingPlugins.forEach(p => {
+			const badgeClass = p.enabled ? 'bg-success' : 'bg-secondary';
+			const statusText = p.enabled ? 'Loaded' : 'Unloaded';
+			const card = `
+				<div class="card mb-3 border shadow-sm">
+					<div class="card-body d-flex align-items-center justify-content-between">
+						<div>
+							<h6 class="mb-1"><strong>${p.name}</strong> <span class="badge bg-secondary ms-2">${p.pluginType}</span></h6>
+							<div class="small text-muted font-monospace">${p.slug} | Schedule: ${p.cron}</div>
+						</div>
+						<div class="d-flex align-items-center gap-2">
+							<span class="badge ${badgeClass} me-2">${statusText}</span>
+							<button class="btn btn-sm btn-outline-primary" onclick="togglePlugin('${p.id}', ${!p.enabled})">${p.enabled ? 'Unload' : 'Load'}</button>
+							<button class="btn btn-sm btn-outline-danger" onclick="deletePlugin('${p.id}')"><i class="fas fa-trash"></i></button>
+						</div>
+					</div>
+				</div>
+			`;
+			$list.append(card);
+		});
+	}
+
+	async function togglePlugin(id, state) {
+		const endpoint = state ? 'load' : 'unload';
+		try {
+			await app.api.post(`plugins/${id}/${endpoint}`, {});
+			app.messages.toast(`Plugin ${state ? 'loaded' : 'unloaded'} successfully`, 'success');
+			loadMessagingPlugins();
+		} catch (e) {
+			app.messages.toast('Error toggling plugin: ' + e.message, 'danger');
+		}
+	}
+
+	async function deletePlugin(id) {
+		const ok = await app.messages.confirm('Are you sure you want to delete this plugin instance?');
+		if (!ok) return;
+		try {
+			await app.api.delete(`plugins/${id}`);
+			app.messages.toast('Plugin deleted', 'success');
+			loadMessagingPlugins();
+		} catch (e) {
+			app.messages.toast('Error deleting plugin: ' + e.message, 'danger');
+		}
+	}
 </script>
 
-<div class="container py-4">
-	<div class="row mb-4">
-		<div class="col d-flex justify-content-between align-items-center">
-			<div>
-				<h2><i class="fas fa-cogs"></i> System Configuration</h2>
-				<p class="text-muted mb-0">
-					Manage runtime configuration such as SMTP, SMS, OAuth, and Terms of Service
-					settings. These are stored securely in OpenBao and take effect immediately.
-					Secret fields (the SMTP password, OAuth JWT secret, and VoIP.ms API password)
-					are masked — leave them unchanged to keep the stored value.
-				</p>
-			</div>
-			<div>
-				<button class="btn btn-secondary me-2" onclick="loadConf()"><i class="fas fa-undo"></i> Reset</button>
-				<button id="btn-save" class="btn btn-primary" onclick="saveConf()"><i class="fas fa-save"></i> Save Configuration</button>
-			</div>
+<div class="container-fluid py-4 px-md-4">
+	<!-- Page Header -->
+	<div class="d-flex justify-content-between align-items-center mb-4 pb-3 border-bottom">
+		<div>
+			<h3 class="fw-bold mb-1"><i class="fas fa-sliders-h text-primary me-2"></i> System Configuration</h3>
+			<p class="text-muted mb-0 small">
+				Manage stack configuration (SMTP, OAuth, VoIP.ms, Proxy, Terms of Service, and Messaging Plugins). Secrets are stored in OpenBao.
+			</p>
+		</div>
+		<div>
+			<button class="btn btn-outline-secondary me-2" onclick="loadConf()"><i class="fas fa-rotate me-1"></i> Reset</button>
+			<button id="btn-save" class="btn btn-primary" onclick="saveConf()"><i class="fas fa-save me-1"></i> Save Configuration</button>
 		</div>
 	</div>
 
-	<ul class="nav nav-tabs mb-4" id="confTabs" role="tablist">
-		<li class="nav-item" role="presentation">
-			<button class="nav-link active" id="smtp-tab" data-bs-toggle="tab" data-bs-target="#smtp" type="button" role="tab">SMTP Settings</button>
-		</li>
-		<li class="nav-item" role="presentation">
-			<button class="nav-link" id="oauth-tab" data-bs-toggle="tab" data-bs-target="#oauth" type="button" role="tab">OAuth & JWT</button>
-		</li>
-		<li class="nav-item" role="presentation">
-			<button class="nav-link" id="sms-tab" data-bs-toggle="tab" data-bs-target="#sms" type="button" role="tab">SMS (VoIP.ms)</button>
-		</li>
-		<li class="nav-item" role="presentation">
-			<button class="nav-link" id="tos-tab" data-bs-toggle="tab" data-bs-target="#tos" type="button" role="tab">Terms of Service</button>
-		</li>
-		<li class="nav-item" role="presentation">
-			<button class="nav-link" id="proxy-tab" data-bs-toggle="tab" data-bs-target="#proxy" type="button" role="tab">Proxy Secrets</button>
-		</li>
-	</ul>
-
-	<div class="tab-content" id="confTabsContent">
-		<!-- SMTP Tab -->
-		<div class="tab-pane fade show active" id="smtp" role="tabpanel">
-			<div class="card shadow-sm border-0 mb-4">
-				<div class="card-header bg-white border-bottom-0 pt-4 pb-0">
-					<h5 class="mb-0"><i class="fas fa-envelope text-primary me-2"></i> SMTP Settings</h5>
+	<div class="row g-4">
+		<!-- Sidebar Navigation -->
+		<div class="col-lg-3 col-md-4">
+			<div class="card shadow-sm border-0 sticky-top" style="top: var(--sw-content-offset, 70px);">
+				<div class="list-group list-group-flush rounded-3" id="conf-nav-list" role="tablist">
+					<a class="list-group-item list-group-item-action active d-flex align-items-center py-3" id="tab-nav-oauth" data-bs-toggle="list" href="#pane-oauth" role="tab">
+						<i class="fas fa-key text-success me-3 fs-5" style="width: 24px;"></i>
+						<div>
+							<div class="fw-semibold">OAuth & JWT</div>
+							<div class="small text-muted">Issuer & Token Lifetimes</div>
+						</div>
+					</a>
+					<a class="list-group-item list-group-item-action d-flex align-items-center py-3" id="tab-nav-smtp" data-bs-toggle="list" href="#pane-smtp" role="tab">
+						<i class="fas fa-envelope text-primary me-3 fs-5" style="width: 24px;"></i>
+						<div>
+							<div class="fw-semibold">Email (SMTP)</div>
+							<div class="small text-muted">Mail Delivery & Testing</div>
+						</div>
+					</a>
+					<a class="list-group-item list-group-item-action d-flex align-items-center py-3" id="tab-nav-sms" data-bs-toggle="list" href="#pane-sms" role="tab">
+						<i class="fas fa-comment-sms text-info me-3 fs-5" style="width: 24px;"></i>
+						<div>
+							<div class="fw-semibold">SMS & Messaging</div>
+							<div class="small text-muted">VoIP.ms & Webhook Plugins</div>
+						</div>
+					</a>
+					<a class="list-group-item list-group-item-action d-flex align-items-center py-3" id="tab-nav-proxy" data-bs-toggle="list" href="#pane-proxy" role="tab">
+						<i class="fas fa-shield-alt text-warning me-3 fs-5" style="width: 24px;"></i>
+						<div>
+							<div class="fw-semibold">Proxy Secrets</div>
+							<div class="small text-muted">OpenBao Integration</div>
+						</div>
+					</a>
+					<a class="list-group-item list-group-item-action d-flex align-items-center py-3" id="tab-nav-tos" data-bs-toggle="list" href="#pane-tos" role="tab">
+						<i class="fas fa-file-contract text-secondary me-3 fs-5" style="width: 24px;"></i>
+						<div>
+							<div class="fw-semibold">Terms of Service</div>
+							<div class="small text-muted">User Agreement & Policy</div>
+						</div>
+					</a>
 				</div>
-				<div class="card-body">
-					<div class="mb-3">
-						<label class="form-label">Host</label>
-						<input type="text" class="form-control" id="smtp-host">
-					</div>
-					<div class="mb-3">
-						<label class="form-label">Port</label>
-						<input type="number" class="form-control" id="smtp-port">
-					</div>
-					<div class="mb-3">
-						<label class="form-label">User</label>
-						<input type="text" class="form-control" id="smtp-user">
-					</div>
-					<div class="mb-3">
-						<label class="form-label">Password</label>
-						<div class="input-group">
-							<input type="password" class="form-control" id="smtp-pass" placeholder="********">
-							<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('smtp-pass')"><i class="fas fa-eye"></i></button>
+			</div>
+		</div>
+
+		<!-- Main Content Panes -->
+		<div class="col-lg-9 col-md-8">
+			<div class="tab-content" id="conf-tab-content">
+				
+				<!-- OAuth Pane -->
+				<div class="tab-pane fade show active" id="pane-oauth" role="tabpanel">
+					<div class="card shadow-sm border-0 mb-4">
+						<div class="card-header bg-white pt-4 pb-3 border-bottom">
+							<h5 class="mb-0 fw-bold"><i class="fas fa-key text-success me-2"></i> OAuth 2.0 & JWT Settings</h5>
 						</div>
-						<div class="form-text">Leave unchanged to keep the current password stored in OpenBao. Clear and type a new value to replace it.</div>
-					<hr class="my-4">
-					<div class="mb-3">
-						<label class="form-label">Send Test SMS</label>
-						<div class="input-group">
-							<input type="tel" class="form-control" id="test-sms-to" placeholder="+15551234567">
-							<button class="btn btn-outline-primary" type="button" onclick="sendTestSms()">
-								<i class="fas fa-paper-plane"></i> Send Test SMS
-							</button>
-						</div>
-						<div class="form-text">Send a test SMS to verify your VoIP.ms configuration is working.</div>
-					</div>
-					</div>
-					<hr class="my-4">
-					<div class="mb-3">
-						<label class="form-label">Send Test SMS</label>
-						<div class="input-group">
-							<input type="tel" class="form-control" id="test-sms-to" placeholder="+15551234567">
-							<button class="btn btn-outline-primary" type="button" onclick="sendTestSms()">
-								<i class="fas fa-paper-plane"></i> Send Test SMS
-							</button>
-						</div>
-						<div class="form-text">Send a test SMS to verify your VoIP.ms configuration is working.</div>
-					</div>
-					<div class="mb-3">
-						<label class="form-label">From Address</label>
-						<input type="text" class="form-control" id="smtp-from">
-					</div>
-					<div class="form-check">
-						<input class="form-check-input" type="checkbox" id="smtp-secure">
-						<label class="form-check-label">Use Secure (TLS)</label>
-					</div>
-						<hr class="my-4">
-						<div class="mb-3">
-							<label class="form-label">Send Test Email</label>
-							<div class="input-group">
-								<input type="email" class="form-control" id="test-email-to" placeholder="recipient@example.com">
-								<button class="btn btn-outline-primary" type="button" onclick="sendTestEmail()">
-									<i class="fas fa-paper-plane"></i> Send Test Email
-								</button>
+						<div class="card-body p-4">
+							<div class="mb-3">
+								<label class="form-label fw-semibold">Issuer URL</label>
+								<input type="text" class="form-control" id="oauth-issuer" placeholder="https://sso.example.com">
 							</div>
-							<div class="form-text">Send a test email to verify your SMTP configuration is working.</div>
-						</div>
-				</div>
-			</div>
-		</div>
-
-		<!-- OAuth Tab -->
-		<div class="tab-pane fade" id="oauth" role="tabpanel">
-			<div class="card shadow-sm border-0 mb-4">
-				<div class="card-header bg-white border-bottom-0 pt-4 pb-0">
-					<h5 class="mb-0"><i class="fas fa-key text-success me-2"></i> OAuth & JWT Settings</h5>
-				</div>
-				<div class="card-body">
-					<div class="mb-3">
-						<label class="form-label">Issuer URL</label>
-						<input type="text" class="form-control" id="oauth-issuer">
-					</div>
-					<div class="mb-3">
-						<label class="form-label">JWT Secret</label>
-						<div class="input-group">
-							<input type="password" class="form-control" id="oauth-jwtsecret" placeholder="********">
-							<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('oauth-jwtsecret')"><i class="fas fa-eye"></i></button>
-						</div>
-						<div class="form-text">Leave unchanged to keep the current secret stored in OpenBao. Clear and type a new value to replace it.</div>
-					</div>
-					<div class="mb-3">
-						<label class="form-label">Access Token Lifetime (seconds)</label>
-						<input type="number" class="form-control" id="oauth-token-access">
-					</div>
-					<div class="mb-3">
-						<label class="form-label">Refresh Token Lifetime (seconds)</label>
-						<input type="number" class="form-control" id="oauth-token-refresh">
-					</div>
-				</div>
-			</div>
-		</div>
-
-		<!-- SMS Tab -->
-		<div class="tab-pane fade" id="sms" role="tabpanel">
-			<div class="card shadow-sm border-0 mb-4">
-				<div class="card-header bg-white border-bottom-0 pt-4 pb-0">
-					<h5 class="mb-0"><i class="fas fa-comment text-info me-2"></i> SMS (VoIP.ms)</h5>
-				</div>
-				<div class="card-body">
-					<p class="form-text">Used to deliver SMS 2FA login codes. The API password is stored in OpenBao and masked below.</p>
-					<div class="mb-3">
-						<label class="form-label">API Username</label>
-						<input type="text" class="form-control" id="voipms-username">
-					</div>
-					<div class="mb-3">
-						<label class="form-label">DID (sender number)</label>
-						<input type="text" class="form-control" id="voipms-did" placeholder="15551234567">
-					</div>
-					<div class="mb-3">
-						<label class="form-label">API Password</label>
-						<div class="input-group">
-							<input type="password" class="form-control" id="voipms-password" placeholder="********">
-							<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('voipms-password')"><i class="fas fa-eye"></i></button>
-						</div>
-						<div class="form-text">Leave unchanged to keep the current password stored in OpenBao. Clear and type a new value to replace it.</div>
-					<hr class="my-4">
-					<div class="mb-3">
-						<label class="form-label">Send Test SMS</label>
-						<div class="input-group">
-							<input type="tel" class="form-control" id="test-sms-to" placeholder="+15551234567">
-							<button class="btn btn-outline-primary" type="button" onclick="sendTestSms()">
-								<i class="fas fa-paper-plane"></i> Send Test SMS
-							</button>
-						</div>
-						<div class="form-text">Send a test SMS to verify your VoIP.ms configuration is working.</div>
-					</div>
-				</div>
-			</div>
-		</div>
-
-		<!-- Proxy Secrets Tab -->
-		<div class="tab-pane fade" id="proxy" role="tabpanel">
-			<div class="card shadow-sm border-0 mb-4">
-				<div class="card-header bg-white border-bottom-0 pt-4 pb-0">
-					<h5 class="mb-0"><i class="fas fa-shield-alt text-warning me-2"></i> Proxy Secrets (OpenBao)</h5>
-				</div>
-				<div class="card-body">
-					<p class="form-text">These secrets are stored directly in OpenBao (`secret/proxy/conf`) and read by the Proxy at boot.</p>
-					
-					<h6 class="mt-3 mb-2">OAuth / OIDC Integration</h6>
-					<div class="mb-3">
-						<label class="form-label">Issuer URL</label>
-						<input type="text" class="form-control" id="proxy-issuer" placeholder="https://sso.example.com">
-					</div>
-					<div class="mb-3">
-						<label class="form-label">Client ID</label>
-						<input type="text" class="form-control" id="proxy-client-id">
-					</div>
-					<div class="mb-3">
-						<label class="form-label">Client Secret</label>
-						<div class="input-group">
-							<input type="password" class="form-control" id="proxy-client-secret" placeholder="********">
-							<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('proxy-client-secret')"><i class="fas fa-eye"></i></button>
+							<div class="mb-3">
+								<label class="form-label fw-semibold">JWT Secret</label>
+								<div class="input-group">
+									<input type="password" class="form-control" id="oauth-jwtsecret" placeholder="********">
+									<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('oauth-jwtsecret')"><i class="fas fa-eye"></i></button>
+								</div>
+								<div class="form-text">Stored in OpenBao. Leave unchanged to preserve stored value.</div>
+							</div>
+							<div class="row">
+								<div class="col-md-6 mb-3">
+									<label class="form-label fw-semibold">Access Token Lifetime (seconds)</label>
+									<input type="number" class="form-control" id="oauth-token-access" placeholder="3600">
+								</div>
+								<div class="col-md-6 mb-3">
+									<label class="form-label fw-semibold">Refresh Token Lifetime (seconds)</label>
+									<input type="number" class="form-control" id="oauth-token-refresh" placeholder="2592000">
+								</div>
+							</div>
 						</div>
 					</div>
+				</div>
 
-					<h6 class="mt-4 mb-2">LDAP Integration</h6>
-					<div class="mb-3">
-						<label class="form-label">Bind Password</label>
-						<div class="input-group">
-							<input type="password" class="form-control" id="proxy-ldap-bindpass" placeholder="********">
-							<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('proxy-ldap-bindpass')"><i class="fas fa-eye"></i></button>
+				<!-- SMTP Pane -->
+				<div class="tab-pane fade" id="pane-smtp" role="tabpanel">
+					<div class="card shadow-sm border-0 mb-4">
+						<div class="card-header bg-white pt-4 pb-3 border-bottom">
+							<h5 class="mb-0 fw-bold"><i class="fas fa-envelope text-primary me-2"></i> SMTP Server Settings</h5>
 						</div>
-						<div class="form-text">Password for the Proxy's LDAP service account.</div>
-					</div>
+						<div class="card-body p-4">
+							<div class="row">
+								<div class="col-md-8 mb-3">
+									<label class="form-label fw-semibold">SMTP Host</label>
+									<input type="text" class="form-control" id="smtp-host" placeholder="smtp.example.com">
+								</div>
+								<div class="col-md-4 mb-3">
+									<label class="form-label fw-semibold">Port</label>
+									<input type="number" class="form-control" id="smtp-port" placeholder="587">
+								</div>
+							</div>
+							<div class="row">
+								<div class="col-md-6 mb-3">
+									<label class="form-label fw-semibold">User</label>
+									<input type="text" class="form-control" id="smtp-user">
+								</div>
+								<div class="col-md-6 mb-3">
+									<label class="form-label fw-semibold">Password</label>
+									<div class="input-group">
+										<input type="password" class="form-control" id="smtp-pass" placeholder="********">
+										<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('smtp-pass')"><i class="fas fa-eye"></i></button>
+									</div>
+								</div>
+							</div>
+							<div class="mb-3">
+								<label class="form-label fw-semibold">From Address</label>
+								<input type="text" class="form-control" id="smtp-from" placeholder="noreply@example.com">
+							</div>
+							<div class="form-check mb-4">
+								<input class="form-check-input" type="checkbox" id="smtp-secure">
+								<label class="form-check-label fw-semibold" for="smtp-secure">Use Secure TLS Connection</label>
+							</div>
 
-					<button id="btn-save-proxy" class="btn btn-warning mt-2" onclick="saveProxyConf()"><i class="fas fa-save"></i> Save Proxy Secrets</button>
+							<div class="p-3 bg-light rounded border">
+								<h6 class="fw-bold mb-2"><i class="fas fa-paper-plane text-primary me-2"></i> Send Test Email</h6>
+								<div class="input-group">
+									<input type="email" class="form-control" id="test-email-to" placeholder="recipient@example.com">
+									<button id="btn-test-email" class="btn btn-outline-primary" type="button" onclick="sendTestEmail()">
+										<i class="fas fa-paper-plane me-1"></i> Send Test Email
+									</button>
+								</div>
+								<div class="form-text">Saves current SMTP config and sends a test message.</div>
+							</div>
+						</div>
+					</div>
 				</div>
-			</div>
-		</div>
 
-		<!-- ToS Tab -->
-		<div class="tab-pane fade" id="tos" role="tabpanel">
-			<div class="card shadow-sm border-0 mb-4">
-				<div class="card-header bg-white border-bottom-0 pt-4 pb-0 d-flex justify-content-between align-items-center">
-					<h5 class="mb-0"><i class="fas fa-file-contract me-2"></i> Terms of Service</h5>
-					<small class="text-muted" id="tos-meta"></small>
-				</div>
-				<div class="card-body">
-					<div class="mb-3">
-						<label class="form-label">Content <small class="text-muted">(Markdown)</small></label>
-						<textarea class="form-control" id="tos-content" rows="8"></textarea>
+				<!-- SMS & Messaging Pane -->
+				<div class="tab-pane fade" id="pane-sms" role="tabpanel">
+					<div class="card shadow-sm border-0 mb-4">
+						<div class="card-header bg-white pt-4 pb-3 border-bottom">
+							<h5 class="mb-0 fw-bold"><i class="fas fa-comment-sms text-info me-2"></i> VoIP.ms SMS Integration</h5>
+						</div>
+						<div class="card-body p-4">
+							<div class="row">
+								<div class="col-md-6 mb-3">
+									<label class="form-label fw-semibold">API Username</label>
+									<input type="text" class="form-control" id="voipms-username">
+								</div>
+								<div class="col-md-6 mb-3">
+									<label class="form-label fw-semibold">DID Sender Number</label>
+									<input type="text" class="form-control" id="voipms-did" placeholder="15551234567">
+								</div>
+							</div>
+							<div class="mb-3">
+								<label class="form-label fw-semibold">API Password</label>
+								<div class="input-group">
+									<input type="password" class="form-control" id="voipms-password" placeholder="********">
+									<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('voipms-password')"><i class="fas fa-eye"></i></button>
+								</div>
+							</div>
+
+							<div class="p-3 bg-light rounded border mb-4">
+								<h6 class="fw-bold mb-2"><i class="fas fa-paper-plane text-info me-2"></i> Send Test SMS</h6>
+								<div class="input-group">
+									<input type="tel" class="form-control" id="test-sms-to" placeholder="+15551234567">
+									<button id="btn-test-sms" class="btn btn-outline-info" type="button" onclick="sendTestSms()">
+										<i class="fas fa-paper-plane me-1"></i> Send Test SMS
+									</button>
+								</div>
+							</div>
+
+							<hr class="my-4">
+
+							<div class="d-flex justify-content-between align-items-center mb-3">
+								<h5 class="mb-0 fw-bold"><i class="fas fa-plug text-primary me-2"></i> Messaging Plugins & Webhooks</h5>
+								<button class="btn btn-sm btn-outline-primary" onclick="loadMessagingPlugins()"><i class="fas fa-rotate"></i> Refresh</button>
+							</div>
+							<div id="messaging-plugins-list"></div>
+						</div>
 					</div>
-					<div class="form-check mb-3">
-						<input class="form-check-input" type="checkbox" id="tos-reset-acceptance">
-						<label class="form-check-label" for="tos-reset-acceptance">Require all users to re-accept these terms</label>
-					</div>
-					<button class="btn btn-primary" onclick="saveTos()"><i class="fas fa-floppy-disk"></i> Save Terms</button>
-					<div id="tos-result" style="display:none" class="mt-2"></div>
 				</div>
+
+				<!-- Proxy Secrets Pane -->
+				<div class="tab-pane fade" id="pane-proxy" role="tabpanel">
+					<div class="card shadow-sm border-0 mb-4">
+						<div class="card-header bg-white pt-4 pb-3 border-bottom">
+							<h5 class="mb-0 fw-bold"><i class="fas fa-shield-alt text-warning me-2"></i> OpenBao Proxy Integration</h5>
+						</div>
+						<div class="card-body p-4">
+							<p class="text-muted small">Secrets stored directly in OpenBao (<code>secret/proxy/conf</code>) and consumed by Proxy at boot.</p>
+							
+							<h6 class="fw-bold text-dark mt-3 mb-2">OAuth / OIDC Client</h6>
+							<div class="mb-3">
+								<label class="form-label fw-semibold">Issuer URL</label>
+								<input type="text" class="form-control" id="proxy-issuer" placeholder="https://sso.example.com">
+							</div>
+							<div class="row">
+								<div class="col-md-6 mb-3">
+									<label class="form-label fw-semibold">Client ID</label>
+									<input type="text" class="form-control" id="proxy-client-id">
+								</div>
+								<div class="col-md-6 mb-3">
+									<label class="form-label fw-semibold">Client Secret</label>
+									<div class="input-group">
+										<input type="password" class="form-control" id="proxy-client-secret" placeholder="********">
+										<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('proxy-client-secret')"><i class="fas fa-eye"></i></button>
+									</div>
+								</div>
+							</div>
+
+							<h6 class="fw-bold text-dark mt-4 mb-2">LDAP Bind Account</h6>
+							<div class="mb-3">
+								<label class="form-label fw-semibold">Proxy Bind Password</label>
+								<div class="input-group">
+									<input type="password" class="form-control" id="proxy-ldap-bindpass" placeholder="********">
+									<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('proxy-ldap-bindpass')"><i class="fas fa-eye"></i></button>
+								</div>
+							</div>
+
+							<button id="btn-save-proxy" class="btn btn-warning mt-2 text-dark fw-semibold" onclick="saveProxyConf()"><i class="fas fa-save me-1"></i> Save Proxy Secrets</button>
+						</div>
+					</div>
+				</div>
+
+				<!-- Terms of Service Pane -->
+				<div class="tab-pane fade" id="pane-tos" role="tabpanel">
+					<div class="card shadow-sm border-0 mb-4">
+						<div class="card-header bg-white pt-4 pb-3 border-bottom d-flex justify-content-between align-items-center">
+							<h5 class="mb-0 fw-bold"><i class="fas fa-file-contract me-2"></i> Terms of Service Editor</h5>
+							<span class="small text-muted" id="tos-meta"></span>
+						</div>
+						<div class="card-body p-4">
+							<div class="mb-3">
+								<label class="form-label fw-semibold">Terms Content (Markdown)</label>
+								<textarea class="form-control font-monospace" id="tos-content" rows="10" placeholder="Enter Terms of Service markdown content..."></textarea>
+							</div>
+							<div class="form-check mb-4">
+								<input class="form-check-input" type="checkbox" id="tos-reset-acceptance">
+								<label class="form-check-label fw-semibold" for="tos-reset-acceptance">Require all users to re-accept these terms upon next login</label>
+							</div>
+							<button class="btn btn-primary" onclick="saveTos()"><i class="fas fa-floppy-disk me-1"></i> Save Terms of Service</button>
+							<div id="tos-result" style="display:none" class="mt-3"></div>
+						</div>
+					</div>
+				</div>
+
 			</div>
 		</div>
 	</div>

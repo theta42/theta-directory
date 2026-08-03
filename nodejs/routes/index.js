@@ -84,14 +84,7 @@ router.get('/discovery', function(req, res, next) {
 });
 
 router.get('/plugins', function(req, res, next) {
-  // Plugin instances page — loadable/unloadable, configurable plugin copies
-  // with per-instance secrets in OpenBao. Renders the shell for anyone; the
-  // client gates with app.auth.forceLogin(['app_sso_admin',
-  // 'app_sso_directory_admin','admin']) and the /api/plugins endpoints enforce
-  // the same server-side. Same header-vs-navigation auth model as /conf and
-  // /vault (auth-token is a client-set header, not a cookie).
-  const registry = require('../services/plugin_registry');
-  res.render('plugins', {...values, pluginTypes: registry.types });
+  res.redirect('/directory');
 });
 
 router.get('/vault', function(req, res) {
