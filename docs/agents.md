@@ -1,88 +1,92 @@
 ---
 layout: default
-title: Discovery Agents
+title: Theta Agent & Endpoint Management
 nav_order: 5
 ---
 
-# Discovery Agents
+# Theta Agent & Endpoint Management
 
-The SSO Manager supports a robust agent architecture for auto-discovering devices, hosts, and services across your home lab or data center. Agents run on a scheduled cron and feed their data into a central **Reconciliation Engine** that smartly merges information based on MAC addresses and IPs.
+The **Theta Agent** (`theta-agent`) is a unified, 2-way Command & Control (C2) endpoint management daemon written in Go for Linux hosts across your home lab, infrastructure, or data center. It connects outbound via a long-lived WebSocket connection to the central **SSO Manager** (`wss://<sso-host>/api/agent/ws`), enabling real-time host telemetry, automated host discovery, and local-first administrative management.
 
-## Writing a Custom Agent
+---
 
-Agents are simple JavaScript files placed in `nodejs/agents/discovery/`.
+## Core Functionality
 
-A agent must export a single `discover` async function that returns a standardized graph of `resources` and `edges`.
+### 1. Host Discovery & Inventory
+Upon establishing a WebSocket connection, the agent immediately pushes a comprehensive discovery payload:
+- **Hostname & Network Interfaces**: Hostname and all non-loopback IPv4 addresses and MACs.
+- **Operating System & Kernel**: Linux distribution, platform, and kernel version.
+- **Hardware Specs**: CPU model, total RAM (GB), and total root disk capacity (GB).
+- **Physical Location**: Location identifier string (e.g. `dc-01-rack-12`) configured in `agent.yml`.
 
-### Agent Skeleton
+If the agent detects a network IP change, it automatically re-pushes an updated discovery payload to the SSO Manager.
 
-```javascript
-// nodejs/agents/discovery/my_custom_agent.js
-module.exports = {
-  discover: async (config) => {
-    const { url, apiKey } = config; // Provided by your configuration
-    
-    const resources = [];
-    const edges = [];
+### 2. Real-Time Telemetry Streaming
+Every 30 seconds, the agent streams real-time performance metrics:
+- **CPU Load**: System-wide CPU utilization percentage.
+- **Memory Utilization**: RAM usage percentage and available memory.
+- **Disk Utilization**: Root filesystem usage percentage.
+- **ZFS Storage Health**: Health status of ZFS pools (e.g., `ONLINE`).
+- **NVIDIA GPU Load**: GPU compute utilization percentage (via `nvidia-smi`).
 
-    // 1. Fetch your data from an API
-    // const data = await fetch(...);
+---
 
-    // 2. Map data to Resources
-    resources.push({
-      kind: 'network_device', // 'host', 'service', 'network_device', 'unmanaged_device'
-      name: 'My Switch',
-      slug: 'my-switch-01',
-      metadata: {
-        make: 'Vendor',
-        model: 'Model X',
-        interfaces: [
-          { mac: '00:1A:2B:3C:4D:5E', ip: '10.0.0.5' }
-        ]
-      }
-    });
+## Local-First Security & Capability Matrix
 
-    // 3. Map relations to Edges (optional)
-    edges.push({
-      parentSlug: 'my-switch-01',
-      childSlug: 'some-connected-client-slug',
-      relation: 'connected_to' // 'hosts', 'exposes', 'connected_to'
-    });
+To protect hosts against unauthorized control, `theta-agent` enforces a **strict, local-first capability matrix** defined in `/etc/theta42/agent.yml`. Central SSO Manager requests are checked against local configuration before execution; permissions cannot be overridden remotely.
 
-    return { resources, edges };
-  }
-};
+| Capability | Config Key | Risk Level | Description & Impact |
+| :--- | :--- | :--- | :--- |
+| **Telemetry** | `telemetry` | Safe | Streams read-only system metrics (CPU, RAM, Disk, ZFS, GPU). |
+| **Configure LDAP** | `configure_ldap` | Moderate | Writes updated SSSD configuration to `/etc/sssd/sssd.conf` & restarts `sssd`. |
+| **Service Control** | `service_control` | High | Restarts systemd services listed in an explicit allowlist (e.g., `["nginx", "docker", "sssd"]`). |
+| **Reboot** | `reboot` | High | Triggers an immediate system reboot (`systemctl reboot`). |
+| **Arbitrary Bash** | `arbitrary_bash` | Critical | Executes raw bash scripts sent from the SSO Manager as `root` (used for automated GitOps). |
+
+---
+
+## High-Risk Command Verification (Protocol v1.1.0)
+
+High-risk management commands (`reboot`, `service_restart`, `configure_ldap`, `arbitrary_bash`, `update_binary`) are cryptographically verified using **Ed25519 signatures**:
+1. The SSO Manager canonicalizes the command payload (sorted keys, no whitespace).
+2. The payload is signed with the SSO Manager's Ed25519 private key.
+3. The Base64 signature is appended to the message payload.
+4. The agent verifies the signature against the configured `public_key` in `/etc/theta42/agent.yml` before executing the action.
+
+---
+
+## Installation & Deployment
+
+### Quick One-Liner Install
+Run the following command as `root` on the target Linux host:
+
+```bash
+curl -fsSL https://<SSO_HOST>/resources/theta-agent/install.sh | sh -s -- --url "https://<SSO_HOST>" --token "<HOST_TOKEN>"
 ```
 
-## Configuration
+### Custom Config Wizard
+You can generate a Base64-encoded custom configuration using the **Install Agent** button on the **Directory Management** page in the SSO Manager UI:
 
-Agents are automatically loaded and executed by the internal BullMQ job scheduler. You configure them in your `config/sso-secrets.js`:
-
-```javascript
-module.exports = {
-  // ... existing config ...
-  discovery: {
-    agents: {
-      my_custom_agent: {
-        enabled: true,
-        cron: '*/30 * * * *', // Run every 30 minutes
-        url: 'https://api.example.com',
-        apiKey: 'secret-key'
-      },
-      nmap: {
-        enabled: true,
-        cron: '0 * * * *',
-        targetRange: '192.168.1.0/24'
-      }
-    }
-  }
-};
+```bash
+curl -fsSL https://<SSO_HOST>/resources/theta-agent/install.sh | sh -s -- "<BASE64_ENCODED_CONFIG>"
 ```
 
-## The Reconciliation Engine
+---
 
-When your agent returns its graph, the Reconciliation Engine takes over:
-1. **Matching:** It tries to find an existing device in the database matching any MAC address provided in the `interfaces` array. If no MAC matches, it falls back to IP address, and then to `slug`.
-2. **Merging:** If it finds a match, it gracefully merges the metadata (so your agent can add CPU info to a host that NMAP previously found).
-3. **Source Tracking:** It records your agent's filename in the `discovery_sources` array on the resource, and updates the `last_seen` timestamp.
-4. **LDAP Spam Prevention:** Brand new devices are marked as `managed: false`. They will not pollute your LDAP directory until an admin explicitly promotes them.
+## Configuration File Example (`/etc/theta42/agent.yml`)
+
+```yaml
+# /etc/theta42/agent.yml
+server_url: "wss://sso.example.com"
+auth_token: "your-unique-host-token"
+location: "dc-01-rack-12"
+public_key: "MCowBQYDK2VwAyEA..."
+
+capabilities:
+  telemetry: true
+  configure_ldap: true
+  reboot: false
+  service_control: ["nginx", "docker", "sssd"]
+  arbitrary_bash: false
+```
+
