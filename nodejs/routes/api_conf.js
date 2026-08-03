@@ -128,4 +128,67 @@ router.post('/proxy', async (req, res, next) => {
   }
 });
 
+// Send a test email to verify SMTP configuration
+router.post('/test-email', async (req, res, next) => {
+  try {
+    const { to, subject, body } = req.body || {};
+    if (!to) {
+      return res.status(400).json({ error: 'Recipient email address is required' });
+    }
+
+    // Use the email model to send the test message
+    const Email = require('../models/email');
+    const testSubject = subject || 'SSO Manager Test Email';
+    const testBody = body || `<p>This is a test email from SSO Manager.</p><p>If you received this, your SMTP configuration is working correctly.</p><p>Sent at: ${new Date().toISOString()}</p>`;
+
+    await Email.send(to, testSubject, testBody);
+    res.json({ success: true, message: `Test email sent to ${to}` });
+  } catch(err) {
+    next(err);
+  }
+});
+
+// Send a test SMS to verify VoIP.ms configuration
+router.post('/test-sms', async (req, res, next) => {
+  try {
+    const { to, message } = req.body || {};
+    if (!to) {
+      return res.status(400).json({ error: 'Recipient phone number is required' });
+    }
+
+    const voipmsConf = conf.voipms || {};
+    if (!voipmsConf.username || !voipmsConf.password || !voipmsConf.did) {
+      return res.status(400).json({ error: 'VoIP.ms credentials not configured. Please configure username, DID, and password in the SMS tab.' });
+    }
+
+    const testMessage = message || `SSO Manager Test SMS: This is a test message from ${conf.name}. If you received this, your VoIP.ms configuration is working correctly.`;
+
+    // VoIP.ms SMS API endpoint
+    const voipmsApiUrl = 'https://api.voip.ms/v1.0';
+    const authHeader = Buffer.from(`${voipmsConf.username}:${voipmsConf.password}`).toString('base64');
+
+    const response = await fetch(`${voipmsApiUrl}/sms/send`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Basic ${authHeader}`,
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        did: voipmsConf.did,
+        to: to,
+        message: testMessage
+      })
+    });
+
+    const result = await response.json();
+    if (result.status === 'success') {
+      res.json({ success: true, message: `Test SMS sent to ${to}` });
+    } else {
+      res.status(400).json({ error: `VoIP.ms API error: ${result.message || 'Unknown error'}` });
+    }
+  } catch(err) {
+    next(err);
+  }
+});
+
 module.exports = router;
