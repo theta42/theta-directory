@@ -32,10 +32,13 @@ module.exports = {
 
     return new Promise((resolve, reject) => {
       // OsAndPortScan requires root (for -O). NmapScan does a basic port scan (TCP connect if non-root).
-      const scan = new nmap.NmapScan(targetRange);
-      scan.command.push('-Pn');
-      scan.command.push('-F'); // fast scan, 100 top ports
-      scan.command.push('--min-rate', '100'); // speed up the scan
+      // Pass custom arguments in constructor so node-nmap includes them before spawning nmap process.
+      // -Pn: treat all hosts as online (skip ping/ARP host discovery which fails inside Docker containers NAT/bridge)
+      // -sT: TCP connect scan (unprivileged scan compatible with container environments)
+      // -F: fast scan (100 top ports)
+      // --min-rate 100: speed up scan rate
+      const customFlags = ['-Pn', '-sT', '-F', '--min-rate', '100'];
+      const scan = new nmap.NmapScan(targetRange, customFlags);
       
       if (config.log) config.log(`Starting nmap scan: ${scan.command.join(' ')}`);
 

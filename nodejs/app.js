@@ -72,7 +72,8 @@ app.locals.ui = require('./utils/ui');
 // Have express server static content( images, CSS, browser JS) from the public
 // local folder. maxAge is short since this is the app's own JS/CSS, which
 // changes on every deploy and isn't cache-busted/fingerprinted.
-app.use('/static', express.static(path.join(__dirname, 'public'), {maxAge: '1h'}))
+app.use('/static', express.static(path.join(__dirname, 'public'), {maxAge: '1h'}));
+app.use('/resources', express.static(path.join(__dirname, 'public/resources'), {maxAge: '1h'}));
 
 // Routes for front end content.
 app.use('/', require('./routes/index'));

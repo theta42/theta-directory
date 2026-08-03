@@ -106,10 +106,21 @@ async function getOrCreateUserToken(uid) {
 }
 
 // ── Admin token (read/write all of secret/) ─────────────────────────────────
+function adminPolicyHcl() {
+	// The bare `secret/metadata` / `secret/metadata/` grants let an admin LIST
+	// the KV mount root (the top-level dirs); `secret/metadata/*` covers nested
+	// paths but NOT the root itself, so without it the /vault secrets list 403s.
+	return `path "secret/data/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata" { capabilities = ["list", "read", "delete"] }
+path "secret/metadata/" { capabilities = ["list", "read", "delete"] }
+path "secret/metadata/*" { capabilities = ["list", "read", "delete"] }`;
+}
+
 async function getOrCreateAdminToken(uid) {
 	const cacheKey = `vault_token:admin:${uid || 'global'}`;
 	const cached = await cacheGet(cacheKey);
 	if (cached) return cached;
+	await ensurePolicy('sso-admin', adminPolicyHcl());
 	const { token, ttl } = await mintToken(['sso-admin']);
 	await cacheSet(cacheKey, token, Math.max(ttl - 60, 60));
 	return token;
