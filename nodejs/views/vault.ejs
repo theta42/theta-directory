@@ -543,7 +543,8 @@ curl "$VAULT_ADDR/v1/secret/data/apps/<span id="app-name-display"></span>/conf" 
   }
 
   async function deleteShared(id) {
-    if (!confirm('Delete this shared secret? Grantees will immediately lose access.')) return;
+    const confirmed = await app.messages.confirm('Delete this shared secret? Grantees will immediately lose access.', $('#shared-mine-list'), 'warning');
+    if (!confirmed) return;
     try { await sharedApi('/' + id, 'DELETE'); await loadShared(); }
     catch (e) { app.messages.toast('Error deleting: ' + e.message, 'danger'); }
   }
