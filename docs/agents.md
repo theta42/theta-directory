@@ -31,6 +31,25 @@ Every 30 seconds, the agent streams real-time performance metrics:
 
 ---
 
+## Viewing in the SSO Manager
+
+Agent status and telemetry live on the **Directory** page — there is no separate
+Agents page. For each **host** resource that has a connected theta-agent, the
+Directory shows a status dot in the row:
+
+| Color | Meaning |
+| :--- | :--- |
+| **Green** | Connected, healthy (CPU/RAM/disk within limits). |
+| **Yellow** | Connected but under high load (CPU > 80% or RAM > 80% or disk > 90%). |
+| **Red** | Not connected (no agent, or the agent is offline). |
+
+Opening a host's resource modal reveals a **Metrics** tab with the agent's live
+telemetry (CPU/RAM/disk/ZFS/GPU) and discovery info (OS, kernel, IPs, location).
+The agent is joined to its host by hostname (`agent.discovery.hostname` ↔ the
+resource name), so name the Directory host the same as the machine's hostname.
+
+---
+
 ## Local-First Security & Capability Matrix
 
 To protect hosts against unauthorized control, `theta-agent` enforces a **strict, local-first capability matrix** defined in `/etc/theta42/agent.yml`. Central SSO Manager requests are checked against local configuration before execution; permissions cannot be overridden remotely.
@@ -89,4 +108,29 @@ capabilities:
   service_control: ["nginx", "docker", "sssd"]
   arbitrary_bash: false
 ```
+
+---
+
+## Troubleshooting: agent can't connect (`dial tcp ... i/o timeout`)
+
+If the agent host logs `Dial error: dial tcp <ip>:443: i/o timeout` while
+connecting to `wss://<sso-host>/api/agent/ws`, the WebSocket path is usually
+fine — this is a **network/NAT** problem, not an agent or SSO bug. A host behind
+the same NAT that owns the SSO often cannot reach its own **public IP** (no
+hairpin/loopback NAT on many home routers), so the TCP dial times out even
+though the same address works from outside.
+
+Fix options:
+1. Point `agent.yml` `server_url` at an address the host can reach directly —
+   e.g. the SSO host's LAN IP (`http://<lan-ip>` or `http://<lan-ip>:3001` for a
+   no-TLS direct path).
+2. Enable **NAT reflection / hairpin NAT** on the router so LAN hosts can reach
+   their own public IP:443.
+3. Add a local route/firewall rule on the agent host for its public IP.
+
+> Note: on a deployment where the theta42 proxy fronts `sso.suite.example`, make
+> sure the proxy has a **persistent Host record** for the real SSO domain — not
+> just the `localtest.me` placeholder — so routing survives a proxy restart
+> (an in-memory lookup cache can mask a missing Redis record for up to ~1h).
+
 

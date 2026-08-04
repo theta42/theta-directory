@@ -1,27 +1,29 @@
 <%- include('top') %>
 
-<div class="container-fluid py-4">
-  <div class="d-flex justify-content-between align-items-center mb-3">
-    <h2 id="vault-title"><i class="fas fa-lock"></i> My Secrets <small class="text-muted">(personal namespace)</small></h2>
-    <ul class="nav nav-pills" id="vault-tabs">
-      <li class="nav-item"><button class="nav-link active" data-bs-toggle="pill" data-bs-target="#tab-secrets" type="button">Secrets</button></li>
-      <li class="nav-item" id="vault-apps-tab" style="display:none"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-apps" type="button">Apps</button></li>
-      <li class="nav-item"><button class="nav-link" data-bs-toggle="pill" data-bs-target="#tab-shared" type="button">Shared</button></li>
-    </ul>
-  </div>
-
-  <div class="tab-content">
+<div class="container mt-4">
+  <div class="row">
+    <div class="col-12">
+      <div class="card shadow">
+        <div class="card-header">
+          <ul class="nav nav-tabs card-header-tabs" id="vault-tabs" role="tablist">
+            <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-secrets" type="button"><i class="fa-solid fa-lock"></i> Secrets</button></li>
+            <li class="nav-item" id="vault-apps-tab" style="display:none"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-apps" type="button"><i class="fa-solid fa-key"></i> Apps</button></li>
+            <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-shared" type="button"><i class="fa-solid fa-share-nodes"></i> Shared</button></li>
+          </ul>
+        </div>
+        <div class="card-body p-0">
+          <div class="tab-content">
     <!-- ── Secrets tab ─────────────────────────────────────────────────── -->
     <div class="tab-pane fade show active" id="tab-secrets">
-      <div class="d-flex justify-content-end mb-3">
-        <button class="btn btn-primary" onclick="showCreateModal()">
-          <i class="fas fa-plus"></i> New Secret
-        </button>
+      <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
+        <h5 class="mb-0" id="vault-title"><i class="fas fa-lock"></i> My Secrets <small class="text-muted">(personal namespace)</small></h5>
+        <button class="btn btn-primary btn-sm" onclick="showCreateModal()"><i class="fas fa-plus"></i> New Secret</button>
       </div>
-      <div class="row">
+      <div class="p-3">
+        <div class="row">
         <div class="col-md-4">
           <div class="card shadow-sm">
-            <div class="card-header bg-light"><h5 class="card-title mb-0">Secrets List</h5></div>
+            <div class="card-header"><h5 class="card-title mb-0">Secrets List</h5></div>
             <div class="list-group list-group-flush" id="secrets-list">
               <div class="list-group-item text-center text-muted">Loading...</div>
             </div>
@@ -29,7 +31,7 @@
         </div>
         <div class="col-md-8">
           <div class="card shadow-sm" id="secret-details-card" style="display: none;">
-            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+            <div class="card-header d-flex justify-content-between align-items-center">
               <h5 class="card-title mb-0" id="secret-title">Secret Details</h5>
               <div>
                 <button class="btn btn-sm btn-outline-primary me-2" onclick="editCurrentSecret()"><i class="fas fa-edit"></i> Edit</button>
@@ -45,15 +47,17 @@
             <h4>Select a secret to view its details</h4>
           </div>
         </div>
+        </div>
       </div>
     </div>
 
     <!-- ── Apps tab (admin only; revealed client-side for admins) ─────── -->
     <div class="tab-pane fade" id="tab-apps">
-      <div class="row">
+      <div class="p-3">
+        <div class="row">
         <div class="col-md-5">
           <div class="card shadow-sm">
-            <div class="card-header bg-light"><h5 class="card-title mb-0">Mint an app token</h5></div>
+            <div class="card-header"><h5 class="card-title mb-0">Mint an app token</h5></div>
             <div class="card-body">
               <p class="text-muted small">Mints a scoped OpenBao token confined to <code>secret/apps/&lt;name&gt;/*</code> for an external app. The token is shown <strong>once</strong> — record it in the app immediately; it cannot be recovered later.</p>
               <p class="text-muted small">The token is periodic: it stays valid as long as the app renews it within its period (<code>POST /v1/auth/token/renew-self</code>). If it lapses, mint a new one here — the app's policy and stored secrets are kept.</p>
@@ -68,7 +72,7 @@
         </div>
         <div class="col-md-7">
           <div class="card shadow-sm d-none" id="app-result-card">
-            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+            <div class="card-header d-flex justify-content-between align-items-center">
               <h5 class="card-title mb-0">App token</h5>
               <button class="btn btn-sm btn-outline-primary" onclick="copyText(document.getElementById('app-token').textContent)"><i class="fas fa-copy"></i> Copy</button>
             </div>
@@ -83,15 +87,17 @@ curl "$VAULT_ADDR/v1/secret/data/apps/<span id="app-name-display"></span>/conf" 
             </div>
           </div>
         </div>
+        </div>
       </div>
     </div>
 
     <!-- ── Shared tab ─────────────────────────────────────────────────── -->
     <div class="tab-pane fade" id="tab-shared">
-      <div class="row">
+      <div class="p-3">
+        <div class="row">
         <div class="col-md-6">
           <div class="card shadow-sm">
-            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+            <div class="card-header d-flex justify-content-between align-items-center">
               <h5 class="card-title mb-0">My shared secrets</h5>
               <button class="btn btn-sm btn-primary" onclick="showCreateSharedModal()"><i class="fas fa-plus"></i> New</button>
             </div>
@@ -102,10 +108,15 @@ curl "$VAULT_ADDR/v1/secret/data/apps/<span id="app-name-display"></span>/conf" 
         </div>
         <div class="col-md-6">
           <div class="card shadow-sm">
-            <div class="card-header bg-light"><h5 class="card-title mb-0">Shared with me</h5></div>
+            <div class="card-header"><h5 class="card-title mb-0">Shared with me</h5></div>
             <div class="list-group list-group-flush" id="shared-granted-list">
               <div class="list-group-item text-center text-muted">Loading...</div>
             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
           </div>
         </div>
       </div>

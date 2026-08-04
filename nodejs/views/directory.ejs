@@ -30,6 +30,7 @@
 				<div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
 				    <div>
     					<i class="fa-solid fa-server"></i> Directory Management
+    					<a href="/docs/groups" class="text-reset ms-1" title="Group & permission model"><i class="fa-solid fa-circle-question"></i></a>
     				</div>
 					<div class="d-flex flex-wrap gap-2 align-items-center">
                         <input type="text" id="search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search..." onkeyup="renderTable()" style="width: 200px;">
@@ -72,6 +73,7 @@
               <tr id="resource-row-{{id}}">
                 <td class="ps-3">
                   {{{indentHtml}}}
+                  {{#isHost}}<span class="d-inline-block rounded-circle me-1" style="width:10px;height:10px;background:{{agentColor}};" title="{{agentStatusTitle}}"></span>{{/isHost}}
                   <span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
                   {{#metadata.isProduction}}<span class="badge bg-danger">Prod</span>{{/metadata.isProduction}}
                   {{^metadata.isProduction}}<span class="badge bg-info">Dev</span>{{/metadata.isProduction}}
@@ -235,7 +237,8 @@
       </div>
       <div class="col-6">
         <label class="form-label">Slug</label>
-        <input type="text" id="res-slug" class="form-control shadow-sm font-monospace">
+        <input type="text" id="res-slug" class="form-control shadow-sm font-monospace" readonly>
+        <div class="form-text">Derived from the name; read-only.</div>
       </div>
     </div>
 
@@ -476,6 +479,7 @@
         {id: 'details', label: 'Details', bodyHtml: detailsTabHtml},
         {id: 'groups', label: 'Associated LDAP Groups', bodyHtml: groupsTabHtml},
         {id: 'children', label: 'Children', bodyHtml: childrenTabHtml},
+        {id: 'metrics', label: 'Metrics', bodyHtml: metricsTabHtml(resourcesById[id] && resourcesById[id].agent)},
       ],
       footer: {
         metaHtml: id ? app.modal.formatAudit(resourcesById[id], {formatDate: function(ms){ return moment(ms).format('YYYY-MM-DD HH:mm'); }}) : '',
@@ -521,24 +525,34 @@
     }
   });
   
+  // Connected theta-agent join: hostname->agent and token->agent (case-insensitive
+  // hostname). Populated by loadResources/refreshAgents; host rows + the Metrics
+  // tab read from these. Agent data comes from /api/agent/nodes (admin-gated).
+  var agentsByHost = {};
+  var agentsByToken = {};
+
   async function loadResources() {
     try {
-      const [resResources, resGroups, resEdges, resAccess] = await Promise.all([
+      const [resResources, resGroups, resEdges, resAccess, resAgents] = await Promise.all([
         app.api.get('directory-admin/resources'),
         app.api.get('directory-admin/groups'),
         app.api.get('directory-admin/edges'),
         // Access counts are a nicety, not load-bearing: if the LDAP join fails
         // the table still renders, just without the Access column populated.
-        app.api.get('directory-admin/access-summary').catch(function(){ return {results: {}}; })
+        app.api.get('directory-admin/access-summary').catch(function(){ return {results: {}}; }),
+        // Agents are a nicety too: never block the directory on them.
+        app.api.get('agent/nodes').catch(function(){ return {agents: []}; })
       ]);
 
       accessSummary = (resAccess && resAccess.results) || {};
       resourcesById = {};
-      
+
       for (const r of resResources.results) {
         r.metadata = r.metadata || {};
         resourcesById[r.id] = r;
       }
+
+      indexAgents((resAgents && resAgents.agents) || []);
       
       allGroups = resGroups.results;
       allEdges = resEdges.results;
@@ -570,6 +584,79 @@
       console.error(err);
       app.messages.toast('Failed to load data', 'danger');
     }
+  }
+
+  // Build the hostname->agent and token->agent lookup maps from /api/agent/nodes.
+  function indexAgents(agents) {
+    agentsByHost = {};
+    agentsByToken = {};
+    for (const a of agents || []) {
+      const hn = (a.hostname || (a.discovery && a.discovery.hostname) || '').toLowerCase();
+      if (hn) agentsByHost[hn] = a;
+      if (a.token) agentsByToken[a.token] = a;
+    }
+  }
+
+  function esc(s) { return s == null ? '' : app.util.escapeHtml(String(s)); }
+  function timeAgo(iso) { if (!iso) return ''; var m = moment(iso); return m.isValid() ? m.fromNow() : ''; }
+
+  // Green (online, healthy) / Yellow (online, high load) / Red (not connected
+  // or offline). Attaches n.isHost + a colored dot + tooltip for host rows, and
+  // stores the agent on resourcesById so the Metrics tab can find it.
+  function attachAgentStatus(n) {
+    n.isHost = true;
+    const name = (n.name || '').toLowerCase();
+    const slug = (n.slug || '').replace(/^host_/, '').toLowerCase();
+    const a = agentsByHost[name] || (slug && agentsByHost[slug]);
+    n.agent = a || null;
+    if (resourcesById[n.id]) resourcesById[n.id].agent = a || null;
+    if (!a) { n.agentColor = '#dc3545'; n.agentStatusTitle = 'No theta-agent connected'; return; }
+    if (!a.isOnline) { n.agentColor = '#dc3545'; n.agentStatusTitle = 'Agent offline (' + (a.hostname || 'unknown') + ')'; return; }
+    const t = a.telemetry || {};
+    const high = (t.cpu_usage_percent > 80) || (t.ram_usage_percent > 80) || (t.disk_usage_percent > 90);
+    n.agentColor = high ? '#ffc107' : '#198754';
+    n.agentStatusTitle = high ? 'Connected — high load' : 'Connected — healthy';
+  }
+
+  // Metrics tab body for the resource modal (snapshot of the joined agent).
+  function metricsTabHtml(agent) {
+    if (!agent) {
+      return '<div class="p-3 text-center text-muted"><i class="fa-solid fa-microchip fa-3x mb-3"></i><h6>No theta-agent connected</h6><p class="small">Install the agent on this host to see live metrics.</p></div>';
+    }
+    const d = agent.discovery || {};
+    const t = agent.telemetry || {};
+    const bar = (val) => `<div class="progress" style="height:8px"><div class="progress-bar" style="width:${Math.max(0, Math.min(100, val || 0))}%"></div></div>`;
+    const online = agent.isOnline ? '<span class="badge bg-success">Online</span>' : '<span class="badge bg-secondary">Offline</span>';
+    const gpu = (t.gpu_usage_percent != null && t.gpu_usage_percent >= 0) ? t.gpu_usage_percent + '%' : 'N/A';
+    return `<div class="p-3">
+      <div class="mb-3 d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">${esc(agent.hostname || 'unknown')} ${online}</h5>
+        <small class="text-muted">Last seen ${timeAgo(agent.lastSeen)}</small>
+      </div>
+      <div class="row g-3">
+        <div class="col-6">CPU <strong>${t.cpu_usage_percent ?? 0}%</strong>${bar(t.cpu_usage_percent)}</div>
+        <div class="col-6">RAM <strong>${t.ram_usage_percent ?? 0}%</strong>${bar(t.ram_usage_percent)}</div>
+        <div class="col-6">Disk <strong>${t.disk_usage_percent ?? 0}%</strong>${bar(t.disk_usage_percent)}</div>
+        <div class="col-6">GPU <strong>${gpu}</strong></div>
+        <div class="col-6">ZFS <strong>${esc(t.zfs_health || 'N/A')}</strong></div>
+      </div>
+      <hr><h6>Discovery</h6>
+      <div class="row small text-muted">
+        <div class="col-6">OS: ${esc(d.os || '')}</div>
+        <div class="col-6">Kernel: ${esc(d.kernel || '')}</div>
+        <div class="col-6">IPs: ${esc((d.ip_addresses || []).join(', '))}</div>
+        <div class="col-6">Location: ${esc(d.location || '')}</div>
+      </div>
+    </div>`;
+  }
+
+  // Re-fetch agents (every 30s + on socket events) so status dots stay live.
+  async function refreshAgents() {
+    try {
+      const res = await app.api.get('agent/nodes');
+      indexAgents((res && res.agents) || []);
+      renderTable();
+    } catch (e) { /* non-fatal */ }
   }
 
   // "Who can reach this?" at a glance. A resource with no linked group is not a
@@ -679,6 +766,7 @@
          }
          n.indentHtml = indentHtml;
          n.accessHtml = accessCellHtml(n.id);
+         if (n.kind === 'host') attachAgentStatus(n);
          finalRenderList.push(n);
          if (n.children.length > 0) {
            flatten(n.children, depth + 1);
@@ -1588,6 +1676,79 @@
 
   var discoveryPluginTypes = [];
 
+  // ── Discovery plugin config helpers (ported from plugins.ejs) ─────────────
+  // Stored value is always a 5-field cron string; the dropdown picks a preset
+  // and "Custom…" reveals the raw input. Config fields are driven by each
+  // plugin type's configSchema so per-plugin settings (e.g. Proxmox url /
+  // tokenId / tokenSecret) are collected at create time.
+  var DP_CRON_PRESETS = [
+    { key: 'hourly', label: 'Hourly',           cron: '0 * * * *' },
+    { key: 'daily',  label: 'Daily (midnight)',  cron: '0 0 * * *' },
+    { key: 'weekly', label: 'Weekly (Sun)',      cron: '0 0 * * 0' },
+    { key: 'custom', label: 'Custom…',           cron: null },
+  ];
+  function dpCronKeyFor(cron) {
+    var m = DP_CRON_PRESETS.filter(function(p){ return p.cron === cron; })[0];
+    return m ? m.key : 'custom';
+  }
+  function dpCronSelectHtml(prefix, current) {
+    current = current || '0 * * * *';
+    var key = dpCronKeyFor(current);
+    var opts = DP_CRON_PRESETS.map(function(p){
+      return '<option value="' + p.key + '"' + (p.key === key ? ' selected' : '') + '>' + p.label + '</option>';
+    }).join('');
+    var rawStyle = key === 'custom' ? '' : ' style="display:none"';
+    return '<select class="form-select" id="' + prefix + 'cron-select" onchange="dpOnCronChange(\'' + prefix + '\')">' + opts + '</select>' +
+      '<input type="text" class="form-control font-monospace mt-2" id="' + prefix + 'cron" value="' + current + '"' + rawStyle + '>';
+  }
+  function dpOnCronChange(prefix) {
+    var sel = document.getElementById(prefix + 'cron-select');
+    var raw = document.getElementById(prefix + 'cron');
+    if (!sel || !raw) return;
+    if (sel.value === 'custom') { raw.style.display = ''; }
+    else {
+      raw.style.display = 'none';
+      var preset = DP_CRON_PRESETS.filter(function(p){ return p.key === sel.value; })[0];
+      if (preset) raw.value = preset.cron;
+    }
+  }
+  function dpCronFromForm(prefix) {
+    var sel = document.getElementById(prefix + 'cron-select');
+    if (sel && sel.value !== 'custom') {
+      var preset = DP_CRON_PRESETS.filter(function(p){ return p.key === sel.value; })[0];
+      if (preset) return preset.cron;
+    }
+    var raw = document.getElementById(prefix + 'cron');
+    return (raw && raw.value.trim()) || '0 * * * *';
+  }
+  function dpConfigFormHtml(type, prefix) {
+    var t = discoveryPluginTypes.filter(function(x){ return x.type === type; })[0];
+    var schema = t && t.configSchema;
+    if (!schema || !schema.length) return '<p class="text-muted">No configuration fields for this plugin.</p>';
+    var html = '';
+    schema.forEach(function(f) {
+      var inputType = f.type === 'password' ? 'password' : (f.type === 'url' ? 'url' : 'text');
+      var req = f.required ? ' required' : '';
+      var ph = f.placeholder ? (' placeholder="' + f.placeholder + '"') : '';
+      var label = f.label + (f.secret ? ' <span class="text-warning" title="stored in OpenBao"><i class="fa-solid fa-key"></i></span>' : '') + (f.required ? ' <span class="text-danger">*</span>' : '');
+      html += '<div class="mb-3"><label class="form-label">' + label + '</label>' +
+        '<input type="' + inputType + '" class="form-control" id="' + prefix + f.key + '"' + req + ph + '></div>';
+    });
+    return html;
+  }
+  function dpCollectConfig(type, prefix) {
+    var t = discoveryPluginTypes.filter(function(x){ return x.type === type; })[0];
+    var schema = t && t.configSchema;
+    var out = {};
+    if (!schema) return out;
+    schema.forEach(function(f) { var el = document.getElementById(prefix + f.key); if (el) out[f.key] = el.value; });
+    return out;
+  }
+  function dpRenderFields() {
+    var type = document.getElementById('new-plugin-type').value;
+    document.getElementById('new-plugin-config-fields').innerHTML = dpConfigFormHtml(type, 'np-');
+  }
+
   function openNewDiscoveryPluginModal() {
     app.api.get('plugins/types', function(err, res) {
       if (err) { app.messages.toast('Error loading plugin types: ' + err.message, 'danger'); return; }
@@ -1601,25 +1762,22 @@
       const bodyHtml = `
         <div class="mb-3">
           <label class="form-label fw-bold">Plugin Type</label>
-          <select id="new-plugin-type" class="form-select shadow-sm">${options}</select>
+          <select id="new-plugin-type" class="form-select shadow-sm" onchange="dpRenderFields()">${options}</select>
         </div>
         <div class="mb-3">
           <label class="form-label fw-bold">Instance Name</label>
           <input type="text" id="new-plugin-name" class="form-control shadow-sm" placeholder="e.g. Local Subnet Scanner">
+          <div class="form-text">A slug is derived automatically from the name.</div>
         </div>
         <div class="mb-3">
-          <label class="form-label fw-bold">Slug</label>
-          <input type="text" id="new-plugin-slug" class="form-control shadow-sm font-monospace" placeholder="e.g. local-subnet-scanner">
-        </div>
-        <div class="mb-3">
-          <label class="form-label fw-bold">Cron Schedule</label>
-          <input type="text" id="new-plugin-cron" class="form-control shadow-sm font-monospace" value="*/15 * * * *">
-          <div class="form-text">Standard 5-field cron expression (e.g. */15 * * * * for every 15 mins)</div>
+          <label class="form-label fw-bold">Schedule</label>
+          ${dpCronSelectHtml('np-', '0 * * * *')}
         </div>
         <div class="form-check mb-3">
           <input class="form-check-input" type="checkbox" id="new-plugin-enabled" checked>
           <label class="form-check-label fw-semibold" for="new-plugin-enabled">Enable (load on create)</label>
         </div>
+        <hr><h6 class="fw-bold">Configuration</h6><div id="new-plugin-config-fields">${dpConfigFormHtml(discoveryPluginTypes[0].type, 'np-')}</div>
         <div class="d-flex justify-content-end gap-2">
           <button class="btn btn-secondary" onclick="app.modal.close()">Cancel</button>
           <button class="btn btn-primary" onclick="saveNewDiscoveryPlugin()">Create Plugin</button>
@@ -1629,7 +1787,7 @@
       app.modal.open({
         title: 'Configure New Discovery Plugin',
         bodyHtml: bodyHtml,
-        size: 'md'
+        size: 'lg'
       });
     });
   }
@@ -1637,20 +1795,20 @@
   async function saveNewDiscoveryPlugin() {
     const type = $('#new-plugin-type').val();
     const name = $('#new-plugin-name').val().trim();
-    const slug = $('#new-plugin-slug').val().trim() || name.toLowerCase().replace(/[^a-z0-9]/g, '-');
-    const cron = $('#new-plugin-cron').val().trim() || '*/15 * * * *';
+    const cron = dpCronFromForm('np-');
     const enabled = $('#new-plugin-enabled').is(':checked');
+    const config = dpCollectConfig(type, 'np-');
 
+    if (!type) return app.messages.action('Select a plugin type.', app.modal.body(), 'danger');
     if (!name) return app.messages.action('Name is required', app.modal.body(), 'danger');
 
     try {
       await app.api.post('plugins', {
         pluginType: type,
         name,
-        slug,
         cron,
         enabled,
-        config: {}
+        config
       });
       app.messages.toast('Discovery plugin created successfully!', 'success');
       app.modal.close();
@@ -1663,6 +1821,21 @@
   $(document).ready(function(){
     loadDiscoveryResources();
     loadDiscoveryPlugins();
+    // Keep the host status dots live: refresh the agent join periodically and on
+    // socket.io agent.* broadcasts (dedicated socket — the app default is P2PSub).
+    refreshAgents();
+    setInterval(refreshAgents, 30000);
+    try {
+      const dirAgentSocket = io({ auth: { token: app.auth.getToken() } });
+      dirAgentSocket.on('agent.telemetry', function(msg){
+        const a = msg && agentsByToken[msg.token];
+        if (a) { a.telemetry = msg.payload; a.isOnline = true; renderTable(); }
+      });
+      dirAgentSocket.on('agent.discovery', function(msg){
+        const a = msg && agentsByToken[msg.token];
+        if (a) { a.discovery = msg.payload; if (msg.payload && msg.payload.hostname) a.hostname = msg.payload.hostname; a.isOnline = true; renderTable(); }
+      });
+    } catch (e) { /* socket is optional; periodic refresh still runs */ }
   });
 </script>
 
