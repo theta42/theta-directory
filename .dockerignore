@@ -19,6 +19,9 @@
 !API.md
 !directory_spec.md
 !docs/**/*.md
+# The screenshots the README (served at /docs/overview) links. `COPY docs /docs`
+# in Dockerfile.openldap needs these present in the build context.
+!docs/images/**
 
 # Tests (excluded from production builds; test-runner Dockerfile copies them explicitly)
 # nodejs/tests/

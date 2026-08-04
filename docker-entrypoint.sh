@@ -355,7 +355,11 @@ EOF
     # Required SSO groups. The app gates admin/invite/oauth-admin on these;
     # app_sso_service_account is a marker (not a permission gate) for
     # non-person accounts -- see the Users page.
-    for group in app_super_admin app_sso_admin app_sso_invite app_sso_oauth_admin app_sso_service_account; do
+    #
+    # god_admin is the global super group (docs/GROUPS.md §2), the top of the
+    # group-inheritance lattice. It is seeded here so it exists from first boot;
+    # the theta-suite bootstrap puts the first admin person into it.
+    for group in god_admin app_super_admin app_sso_admin app_sso_invite app_sso_oauth_admin app_sso_service_account; do
         ldapadd -x -D "$LDAP_BIND_DN" -w "$LDAP_ADMIN_PASS" -H ldap://localhost:389 << EOF || true
 dn: cn=${group},ou=groups,${LDAP_BASE_DN}
 objectClass: groupOfNames
@@ -385,6 +389,17 @@ member: cn=app_super_admin,ou=groups,${LDAP_BASE_DN}
 EOF
         done
         info "Nested app_super_admin into the SSO admin groups"
+
+        # god_admin is the top of the lattice; nesting it into app_super_admin
+        # (which is itself nested into the app_sso_* groups above) makes it
+        # resolve to everything app_super_admin holds at the LDAP level too.
+        ldapmodify -x -D "$LDAP_BIND_DN" -w "$LDAP_ADMIN_PASS" -H ldap://localhost:389 >/dev/null 2>&1 << EOF || true
+dn: cn=app_super_admin,ou=groups,${LDAP_BASE_DN}
+changetype: modify
+add: member
+member: cn=god_admin,ou=groups,${LDAP_BASE_DN}
+EOF
+        info "Nested god_admin into app_super_admin"
     fi
 
     info "LDAP directory initialized"

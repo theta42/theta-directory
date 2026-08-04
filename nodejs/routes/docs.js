@@ -55,7 +55,7 @@ const docList = Object.entries(DOCS).map(([slug, d]) => ({slug, title: d.title})
 // only resolves correctly on GitHub. Serve that same folder here and rewrite
 // the rendered markup to point at it absolutely, so the images work when
 // read from /docs/overview too.
-router.use('/images', require('express').static(path.join(__dirname, '../../docs/images')));
+router.use('/docs/images', require('express').static(path.join(__dirname, '../../docs/images')));
 function fixImagePaths(html) {
 	return html.replace(/(["(])docs\/images\//g, '$1/docs/images/');
 }

@@ -1,3 +1,12 @@
+# v1.26.0
+- feat: complete the group model (docs/GROUPS.md) — `god_admin` is now seeded into LDAP and nested into `app_super_admin`; every site auto-provisions `{site}_super_admin`, `{site}_hosts_*`/`{site}_apps_*` aggregates and `{site}_everyone`; per-resource `_admin`/`_access` groups (named `{site}_{slug}_{level}`, the kind carried in the resource slug) are nested into the site aggregates so the inheritance lattice exists in LDAP, not just in the resolver. Site/aggregate groups are self-healed idempotently on every Directory load, so a directory seeded by an older release picks them up without a rebuild.
+- feat: the naming convention is now enforced server-side — `POST /api/directory-admin/groups` rejects a group CN that isn't a valid group for the target resource (its own `_admin`/`_access`/capability, a site aggregate, a site-level group, or `god_admin`), so the free-text field can no longer mint `*_accessmember`-style names
+- feat: `god_admin` is managed from the Directory — the site resource modal surfaces `god_admin` + the site-level groups as associated groups, so its members (and the site's) are editable right there
+- fix: Directory agent status dots no longer paint every host red when the `/api/agent/nodes` endpoint is unreachable (older app or transient outage) — they now show a neutral grey "agent service unreachable" instead of a false alarm
+- fix: Profile + API Tokens cards are both full-width on the profile page (the API card was a narrower centered block)
+- fix: in-app `/docs/<slug>` pages returned 500 — `Dockerfile.openldap` never copied the `docs/` tree into the image (only the root README/CHANGELOG/API/directory_spec), so every page but those few hit a missing-file error; the whole `docs/` dir now ships, and doc images are served at `/docs/images`
+- test: group resolver tests now cover the prefixed site-slug convention (`site_local_...` is kept verbatim, not re-slugified to `site-local`)
+
 # v1.25.0
 - feat: hierarchical group & permission model (docs/GROUPS.md) — god_admin, {site}_super_admin, {site}_hosts_*/{site}_apps_* aggregates, and per-resource {site}_host_<slug>_admin/access/<capability>; inheritance resolver (admin implies access, capabilities explicit), meta everyone/{site}_everyone groups
 - feat: remove the standalone Groups page — group management is tied to adopted Directory resources (help link to the model in the Directory toolbar)

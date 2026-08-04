@@ -41,26 +41,33 @@ function assertKind(kind) {
   if (!KINDS.includes(kind)) throw new Error(`invalid resource kind: ${kind} (must be host or app)`);
 }
 
-// {site}_host_<slug>_<level> / {site}_app_<slug>_<level>
-function resourceGroupCns(site, kind, slug, level) {
-  assertKind(kind);
-  return `${slugify(site)}_${kind}_${slugify(slug)}_${level}`;
+// {site}_{slug}_{level} — the per-resource group for one resource.
+//
+// Both `site` and `slug` are the resource slugs verbatim (e.g. `site_local`,
+// `host_theta-env`), NOT slugified or kind-inserted: directory resource slugs
+// carry their kind as a prefix (`host_theta-env`), so `site_local` + `host_theta-env`
+// yields `site_local_host_theta-env_access`. Services are stored without a
+// prefix (`sso-manager`), yielding `site_local_sso-manager_access`. This is the
+// convention the auto-provisioner, the resolver, and the access-request tests
+// all share -- re-slugifying or inserting a kind would double the delimiter.
+function resourceGroupCns(site, slug, level) {
+  return `${site}_${slug}_${level}`;
 }
 
 // {site}_hosts_<level> / {site}_apps_<level> (plural kind — the aggregate).
 function aggregateGroupCns(site, kind, level) {
   assertKind(kind);
-  return `${slugify(site)}_${kind}s_${level}`;
+  return `${site}_${kind}s_${level}`;
 }
 
 // {site}_super_admin
 function siteSuperAdminCns(site) {
-  return `${slugify(site)}_super_admin`;
+  return `${site}_super_admin`;
 }
 
 // {site}_everyone
 function siteEveryoneCns(site) {
-  return `${slugify(site)}_everyone`;
+  return `${site}_everyone`;
 }
 
 // True if `level` is a known admin/access level (not an opaque capability).
@@ -87,9 +94,11 @@ function levelGrants(level, wanted) {
 // granted groups (see permission.onResource). This keeps the function pure over
 // the user's membership only.
 function hasPermission(memberOf, resource, level) {
-  const site = slugify(resource && resource.site);
+  // `site` and `slug` are used verbatim (resource slugs may carry a kind prefix,
+  // e.g. `site_local` / `host_theta-env`) -- see resourceGroupCns.
+  const site = resource && resource.site;
   const kind = resource && resource.kind;
-  const slug = slugify(resource && resource.slug);
+  const slug = resource && resource.slug;
   const set = new Set(memberOf || []);
 
   if (set.has(GOD_ADMIN)) return true;
@@ -98,13 +107,13 @@ function hasPermission(memberOf, resource, level) {
   if (isKnownLevel(level)) {
     // admin / access
     if (set.has(aggregateGroupCns(site, kind, level))) return true;
-    if (set.has(resourceGroupCns(site, kind, slug, level))) return true;
+    if (set.has(resourceGroupCns(site, slug, level))) return true;
     if (level === 'access' && hasPermission(memberOf, resource, 'admin')) return true;
     return false;
   }
   // Opaque capability — exact aggregate or specific grant only.
   if (set.has(aggregateGroupCns(site, kind, level))) return true;
-  if (set.has(resourceGroupCns(site, kind, slug, level))) return true;
+  if (set.has(resourceGroupCns(site, slug, level))) return true;
   return false;
 }
 

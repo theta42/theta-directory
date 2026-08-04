@@ -530,6 +530,11 @@
   // tab read from these. Agent data comes from /api/agent/nodes (admin-gated).
   var agentsByHost = {};
   var agentsByToken = {};
+  // True when the agent/nodes endpoint itself was unreachable (network, or an
+  // older app without the agent route). When set we cannot tell "this host has
+  // no agent" apart from "the agent service is down", so we must NOT paint every
+  // host red as if it lacked an agent.
+  var agentsUnavailable = false;
 
   async function loadResources() {
     try {
@@ -540,8 +545,12 @@
         // Access counts are a nicety, not load-bearing: if the LDAP join fails
         // the table still renders, just without the Access column populated.
         app.api.get('directory-admin/access-summary').catch(function(){ return {results: {}}; }),
-        // Agents are a nicety too: never block the directory on them.
-        app.api.get('agent/nodes').catch(function(){ return {agents: []}; })
+        // Agents are a nicety too: never block the directory on them. Track
+        // whether the endpoint itself is reachable so host rows can tell "no
+        // agent on this host" from "agent service is down" (see attachAgentStatus).
+        app.api.get('agent/nodes')
+          .then(function(res){ agentsUnavailable = false; return res; })
+          .catch(function(){ agentsUnavailable = true; return {agents: []}; })
       ]);
 
       accessSummary = (resAccess && resAccess.results) || {};
@@ -610,7 +619,12 @@
     const a = agentsByHost[name] || (slug && agentsByHost[slug]);
     n.agent = a || null;
     if (resourcesById[n.id]) resourcesById[n.id].agent = a || null;
-    if (!a) { n.agentColor = '#dc3545'; n.agentStatusTitle = 'No theta-agent connected'; return; }
+    if (!a) {
+      // Endpoint unreachable: we genuinely don't know -- neutral grey, not a
+      // false red alarm across every host.
+      if (agentsUnavailable) { n.agentColor = '#adb5bd'; n.agentStatusTitle = 'Agent service unreachable'; return; }
+      n.agentColor = '#dc3545'; n.agentStatusTitle = 'No theta-agent connected'; return;
+    }
     if (!a.isOnline) { n.agentColor = '#dc3545'; n.agentStatusTitle = 'Agent offline (' + (a.hostname || 'unknown') + ')'; return; }
     const t = a.telemetry || {};
     const high = (t.cpu_usage_percent > 80) || (t.ram_usage_percent > 80) || (t.disk_usage_percent > 90);
@@ -655,8 +669,12 @@
     try {
       const res = await app.api.get('agent/nodes');
       indexAgents((res && res.agents) || []);
+      agentsUnavailable = false;
       renderTable();
-    } catch (e) { /* non-fatal */ }
+    } catch (e) {
+      agentsUnavailable = true;
+      renderTable(); // re-render so dots flip to neutral, not stale green
+    }
   }
 
   // "Who can reach this?" at a glance. A resource with no linked group is not a

@@ -8,6 +8,7 @@ const { cnFromDn } = require('../utils/user_groups');
 const { projectResources } = require('@simpleworkjs/directory-schema');
 
 const SUPER_ADMIN_GROUP = permission.SUPER_ADMIN_GROUP;
+const groups = require('../utils/groups');
 
 // Make `childCn` a member of `parentCn`, i.e. everyone in the child is
 // transitively in the parent. Idempotent and non-fatal: "already a member" is
@@ -27,6 +28,148 @@ async function nestGroup(childCn, parentCn) {
     const benign = err.name === 'TypeOrValueExistsError' || err.code === 20 || err.name === 'GroupNotFound';
     if (!benign) console.error(`nestGroup: ${childCn} -> ${parentCn} failed:`, err.message);
   }
+}
+
+// ── Group-model provisioning (docs/GROUPS.md) ───────────────────────────────
+// The directory is the single place groups are created, as a projection of the
+// resource graph. These helpers materialize the group-inheritance lattice for
+// a resource so it exists in LDAP as well as in the resolver (utils/groups.js).
+// All of them are idempotent, so calling them again for a resource a newer
+// release is backfilling is a no-op.
+
+// Map a directory resource kind onto a group-model kind (GROUPS.md §2).
+// host -> host; service -> app (services/consoles are the group model's "apps");
+// site gets site-level groups (handled separately); oauth/container get no
+// per-resource groups (oauth clients hang off their owning service).
+function groupKind(resource) {
+  if (resource.kind === 'host') return 'host';
+  if (resource.kind === 'service') return 'app';
+  return null;
+}
+
+// Create a groupOfNames if it doesn't already exist. Idempotent; `ownerDn`
+// seeds the mandatory first member. Returns true when created.
+async function ensureGroup(name, ownerDn, description) {
+  try {
+    await Group.add({ name, owner: ownerDn, description });
+    return true;
+  } catch (err) {
+    if (err.name !== 'EntryAlreadyExistsError' && err.code !== 68) {
+      console.error(`ensureGroup: failed to create ${name}:`, err);
+    }
+    return false;
+  }
+}
+
+// Provision the site-level groups + the aggregates the per-resource groups nest
+// into. Idempotent -- called on every directory list so a site seeded by an
+// older release gets its groups without a rebuild:
+//
+//   god_admin -> {site}_super_admin
+//   {site}_super_admin -> {site}_hosts_admin, {site}_apps_admin
+//   {site}_hosts_admin -> {site}_hosts_access ; {site}_apps_admin -> {site}_apps_access
+//
+// `{site}_everyone` is created for completeness; it has implicit membership and
+// is granted to a resource as a grantee, never enumerated.
+async function ensureSiteGroups(siteSlug, ownerDn, siteName, siteResourceId) {
+  if (!siteSlug) return;
+
+  // Link a site group to the site resource (so it shows + is member-manageable
+  // on the site's modal). Idempotent. Admin groups link as owner; access/meta
+  // groups as member.
+  const link = async (cn, isAdmin) => {
+    if (!siteResourceId) return;
+    await ResourceGroup.create({ resourceId: siteResourceId, groupCn: cn, accessLevel: isAdmin ? 'owner' : 'member' }).catch(() => {});
+  };
+
+  const sAdmin = groups.siteSuperAdminCns(siteSlug);
+  await ensureGroup(sAdmin, ownerDn, `Site admin for ${siteName || siteSlug}`);
+  await link(sAdmin, true);
+  for (const kind of ['host', 'app']) {
+    const aggAdmin = groups.aggregateGroupCns(siteSlug, kind, 'admin');
+    const aggAccess = groups.aggregateGroupCns(siteSlug, kind, 'access');
+    await ensureGroup(aggAdmin, ownerDn, `Admin on all ${kind}s at ${siteSlug}`);
+    await ensureGroup(aggAccess, ownerDn, `Access to all ${kind}s at ${siteSlug}`);
+    await link(aggAdmin, true);
+    await link(aggAccess, false);
+  }
+  await ensureGroup(groups.siteEveryoneCns(siteSlug), ownerDn, `All users at ${siteSlug}`);
+  await link(groups.siteEveryoneCns(siteSlug), false);
+  // god_admin is the global group; surface it on the site modal so its members
+  // can be managed from the Directory (it has no home on a single resource).
+  await link(groups.GOD_ADMIN, true);
+
+  // Wire the lattice as nesting so LDAP-level consumers (SSSD, sudo, anything
+  // binding directly) resolve it transitively, not just utils/permission.js.
+  // nestGroup(child, parent) makes child a member of parent -- membership flows
+  // child -> parent ("up"), so a group's members inherit what its parents hold.
+  await nestGroup(groups.GOD_ADMIN, sAdmin); // god admins are site admins everywhere
+  for (const kind of ['host', 'app']) {
+    const aggAdmin = groups.aggregateGroupCns(siteSlug, kind, 'admin');
+    const aggAccess = groups.aggregateGroupCns(siteSlug, kind, 'access');
+    await nestGroup(sAdmin, aggAdmin);        // site admins administer all hosts/apps
+    await nestGroup(aggAdmin, aggAccess);     // site admin implies site access
+  }
+}
+
+// Provision the per-resource groups for a host/app and nest them into the site
+// aggregates (so a site/aggregate admin reaches this resource by membership).
+// The specific group name uses the resource's slug verbatim
+// (`{site}_{slug}_{level}` -- the kind is carried in the slug, e.g. `host_theta-env`);
+// `kind` (host/app) selects which aggregate the group nests into:
+//
+//   {site}_{slug}_admin  -> {site}_{slug}_access
+//   {site}_{slug}_admin  -> {site}_{kind}s_admin    (aggregate)
+//   {site}_{slug}_access -> {site}_{kind}s_access   (aggregate)
+//   app_super_admin      -> {site}_{slug}_admin     (legacy cross-app)
+async function provisionResourceGroups(resource, kind, siteSlug, ownerDn) {
+  const accessCn = groups.resourceGroupCns(siteSlug, resource.slug, 'access');
+  const adminCn = groups.resourceGroupCns(siteSlug, resource.slug, 'admin');
+
+  await ensureGroup(accessCn, ownerDn, `Access group for ${resource.name}`);
+  await ensureGroup(adminCn, ownerDn, `Admin group for ${resource.name}`);
+
+  // Link both groups to the resource so the Directory can show/revoke them.
+  await ResourceGroup.create({ resourceId: resource.id, groupCn: accessCn, accessLevel: 'member' }).catch(() => {});
+  await ResourceGroup.create({ resourceId: resource.id, groupCn: adminCn, accessLevel: 'owner' }).catch(() => {});
+
+  await nestGroup(adminCn, accessCn); // administering implies using
+  await nestGroup(adminCn, groups.aggregateGroupCns(siteSlug, kind, 'admin'));  // aggregate admin reaches this resource
+  await nestGroup(accessCn, groups.aggregateGroupCns(siteSlug, kind, 'access')); // aggregate access reaches this resource
+  await nestGroup(SUPER_ADMIN_GROUP, adminCn); // legacy cross-app super admin
+}
+
+// The group CNs it is valid to associate with a given resource (docs/GROUPS.md
+// §2/§3). This is what "force the correct naming convention" means: a group
+// linked to a resource must be one that parses for consumers -- the resource's
+// own specific groups, its site's aggregates, site-level groups, or the global
+// god_admin. Returns a Set of the fixed valid CNs plus a RegExp for opaque
+// capability groups following the same shapes.
+function validGroupCnsForResource(resource, siteSlug) {
+  const valid = new Set();
+  if (resource.kind === 'site') {
+    valid.add(groups.siteSuperAdminCns(siteSlug));
+    valid.add(groups.siteEveryoneCns(siteSlug));
+    for (const k of ['host', 'app']) {
+      valid.add(groups.aggregateGroupCns(siteSlug, k, 'admin'));
+      valid.add(groups.aggregateGroupCns(siteSlug, k, 'access'));
+    }
+    return { valid, capRe: new RegExp(`^${siteSlug}_(hosts|apps)_[a-z0-9-]+$`) };
+  }
+  const kind = groupKind(resource); // 'host'|'app'|null
+  if (kind) {
+    const slug = resource.slug; // verbatim (kind is carried in the slug)
+    valid.add(groups.resourceGroupCns(siteSlug, slug, 'admin'));
+    valid.add(groups.resourceGroupCns(siteSlug, slug, 'access'));
+    valid.add(groups.aggregateGroupCns(siteSlug, kind, 'admin'));
+    valid.add(groups.aggregateGroupCns(siteSlug, kind, 'access'));
+    valid.add(groups.siteSuperAdminCns(siteSlug));
+    valid.add(groups.siteEveryoneCns(siteSlug));
+    return { valid, capRe: new RegExp(`^${siteSlug}_(${slug}_|${kind}s_)[a-z0-9-]+$`) };
+  }
+  // oauth/container etc. — only the global god_admin makes sense to pin here.
+  valid.add(groups.siteSuperAdminCns(siteSlug));
+  return { valid, capRe: null };
 }
 
 // Require the admin group
@@ -50,6 +193,36 @@ router.get('/resources', async (req, res, next) => {
     });
     // Even admins never receive secret metadata (e.g. client_secret_hash) over
     // the wire; projectResources strips it unconditionally.
+
+    // Self-heal the group model (docs/GROUPS.md): ensure every site has its
+    // site-level groups (S_super_admin, S_hosts_*, S_apps_*, S_everyone) + the
+    // aggregates, and every host/app resource has its per-resource groups nested
+    // into them. Idempotent, so this is a cheap no-op once present -- it's what
+    // backfills a directory seeded by an older release without a rebuild.
+    // Never fails the list.
+    const sites = resources.filter(r => r.kind === 'site');
+    await Promise.all(sites.map(site =>
+      ensureSiteGroups(site.slug, req.user.dn, site.name, site.id)
+        .catch(err => console.error(`ensureSiteGroups(${site.slug}) failed:`, err.message))
+    ));
+    const siteByResource = new Map();
+    for (const site of sites) siteByResource.set(site.id, site.slug);
+    const siteOf = async (r) => {
+      const direct = siteByResource.get(r.id);
+      if (direct) return direct;
+      // findAncestorSiteSlug returns the site's full slug (`site_local`) -- the
+      // group-model builders take it verbatim, so do NOT strip the `site_` prefix.
+      return await Resource.findAncestorSiteSlug(r.id).catch(() => null);
+    };
+    await Promise.all(resources.map(async (r) => {
+      const gKind = groupKind(r);
+      if (!gKind) return;
+      const siteSlug = await siteOf(r);
+      if (!siteSlug) return;
+      await provisionResourceGroups(r, gKind, siteSlug, req.user.dn)
+        .catch(err => console.error(`provisionResourceGroups(${r.slug}) failed:`, err.message));
+    }));
+
     res.json({ results: projectResources(resources, { fullMetadata: true }) });
   } catch (err) { next(err); }
 });
@@ -95,46 +268,25 @@ router.post('/resources', async (req, res, next) => {
       await ResourceEdge.create({ parentId: req.body.hostId, childId: r.id, relation: r.kind === 'oauth' ? 'oauth' : 'hosts' });
     }
 
-    if (r.kind === 'host' || r.kind === 'service') {
-      const siteSlug = await Resource.findAncestorSiteSlug(r.id);
-      const groupCn = suffix => (siteSlug ? `${siteSlug}_${r.slug}_${suffix}` : `${r.slug}_${suffix}`);
-
-      const createGroup = async (suffix, accessLevel) => {
-        const cn = groupCn(suffix);
-        try {
-          await Group.add({
-            name: cn,
-            owner: req.user.dn,
-            description: `${suffix === 'admin' ? 'Admin' : 'Access'} group for ${r.name}`
-          });
-        } catch (err) {
-          if (err.name !== 'EntryAlreadyExistsError' && err.code !== 68) {
-            console.error(`Failed to create LDAP group ${cn}:`, err);
-          }
-        }
-        try {
-          await ResourceGroup.create({ resourceId: r.id, groupCn: cn, accessLevel });
-        } catch(err) { /* ignore duplicate links */ }
-      };
-      await createGroup('access', 'member');
-      await createGroup('admin', 'owner');
-
-      // Wire up the two standing relationships every resource has, as nesting
-      // rather than as membership that has to be maintained per resource:
-      //
-      //   app_super_admin -> <slug>_admin   cross-app super admins administer
-      //                                     every resource, automatically
-      //   <slug>_admin    -> <slug>_access  administering something implies
-      //                                     being able to use it
-      //
-      // Before nesting, both of these could only be expressed by adding every
-      // super admin to every new group by hand -- which nobody does, so the
-      // groups drifted. A failure here must not fail resource creation: the
-      // resource and its groups already exist and the nesting is repairable.
-      await nestGroup(groupCn('admin'), groupCn('access'));
-      await nestGroup(SUPER_ADMIN_GROUP, groupCn('admin'));
+    // ── Group provisioning (docs/GROUPS.md) ───────────────────────────────
+    // Materialize the group-model for the new resource. Site resources get the
+    // site-level groups; host/app resources get their per-resource groups nested
+    // into the site aggregates. Idempotent -- safe for a resource created by an
+    // older release. A provisioning failure must not fail resource creation: the
+    // resource already exists and the groups are repairable (re-run ensures them).
+    //
+    // `siteSlug` is the site resource's slug verbatim (`site_local`) -- the
+    // group-model builders treat it as opaque (docs/GROUPS.md §3) and re-apply
+    // the kind prefix themselves.
+    const gKind = groupKind(r);
+    const ancestorSite = await Resource.findAncestorSiteSlug(r.id);
+    if (r.kind === 'site') {
+      await ensureSiteGroups(r.slug, req.user.dn, r.name, r.id);
+    } else if (gKind && ancestorSite) {
+      await ensureSiteGroups(ancestorSite, req.user.dn, r.name); // backfill site tier if missing
+      await provisionResourceGroups(r, gKind, ancestorSite, req.user.dn);
     }
-    
+
     res.json({ results: r });
   } catch (err) {
     if (err.name === 'SequelizeUniqueConstraintError') {
@@ -265,6 +417,28 @@ router.get('/groups', async (req, res, next) => {
 
 router.post('/groups', async (req, res, next) => {
   try {
+    const { resourceId, groupCn } = req.body;
+    if (!resourceId || !groupCn) return res.status(400).json({ error: 'resourceId and groupCn are required' });
+
+    // Enforce the group-model naming convention (docs/GROUPS.md §3). The CN must
+    // be a valid group for this resource; reject free-form names so the groups
+    // consumers read are always parseable. god_admin is always allowed (it is
+    // the global group and is managed from a site's modal).
+    const resource = await Resource.get(resourceId);
+    // Full site slug verbatim (`site_local`) -- the builders take it as-is. A
+    // site resource's own slug is its site; a host/app uses its ancestor site.
+    const siteSlug = resource && resource.kind === 'site'
+      ? resource.slug
+      : await Resource.findAncestorSiteSlug(resourceId);
+    if (resource && siteSlug && groupCn !== groups.GOD_ADMIN) {
+      const { valid, capRe } = validGroupCnsForResource(resource, siteSlug);
+      if (!valid.has(groupCn) && !(capRe && capRe.test(groupCn))) {
+        const err = new Error(`"${groupCn}" is not a valid group for this ${resource.kind}. Use the resource's own groups, a site aggregate, a site-level group, or god_admin (e.g. ${[...valid].join(', ')}).`);
+        err.status = 400;
+        throw err;
+      }
+    }
+
     const g = await ResourceGroup.create(req.body);
     res.json({ results: g });
   } catch (err) { next(err); }
