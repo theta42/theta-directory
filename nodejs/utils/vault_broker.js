@@ -4,15 +4,25 @@
 // external apps, using the SSO_VAULT_TOKEN (policy `sso-broker`) and the
 // `sso-broker` token role created by theta-env/setup.sh.
 //
-//   secret/users/<uid>/*   per-user personal KV (user-<uid> policy)
-//   secret/apps/<name>/*   per-external-app namespace (app-<name> policy)
-//   secret/*               admin UI sessions (sso-admin policy)
+//   secret/users/<uid>/*          per-user personal KV (user-<uid> policy)
+//   secret/shared/<uid>/*         user-owned shared KV (user-<uid> policy)
+//   secret/apps/<name>/*          per-external-app namespace (app-<name> policy)
+//   secret/shared/<owner>/<slug>  granted read (added to grantee's policy)
+//   secret/*                      admin UI sessions (sso-admin policy)
 //
 // The sso-broker policy grants update on auth/token/create/sso-broker and on
 // sys/policies/acl/user-*, app-*, sso-admin — exactly what this module needs to
 // create the per-subject policies and mint their tokens. Per-user/admin tokens
 // are cached in Redis for the token's lifetime and re-minted on miss; per-app
 // tokens are returned ONCE (displayed in the UI, never stored retrievably).
+//
+// Policy reconciliation is the load-bearing part: OpenBao parses policy CONTENT
+// live at token use (only the SET of policy names on a token is fixed at mint),
+// so we ALWAYS reconcile a subject's policy content BEFORE returning any token
+// — cached or freshly minted. That way a stale cached token immediately gains
+// corrected/revoked capabilities, and a new shared-secret grant takes effect for
+// an existing grantee token with no re-mint. The Redis cache only short-circuits
+// token MINTING, never policy reconciliation.
 
 const baoConf = require('@simpleworkjs/bao-conf');
 const { createClient } = require('redis');
@@ -20,6 +30,8 @@ const express = require('express');
 const { createProxyMiddleware, fixRequestBody } = require('http-proxy-middleware');
 const conf = require('@simpleworkjs/conf');
 const permission = require('./permission');
+const { SharedSecret } = require('../models/shared_secret');
+const { SharedSecretGrant } = require('../models/shared_secret_grant');
 
 const ROLE = 'sso-broker';
 const DEFAULT_TTL = 24 * 60 * 60; // matches the role's token_period (24h)
@@ -54,16 +66,19 @@ async function bao(method, path, body) {
 	return res;
 }
 
-// Ensure an ACL policy exists AND carries the latest HCL. Always (re)writes —
-// `bao policy write` is an idempotent overwrite — so policy edits (e.g. adding
-// a list grant on a directory path) propagate on the next vault-page visit
-// without an operator re-running setup.sh. Skipping on an existing policy
-// would strand the old, narrower HCL forever.
+// Ensure an ACL policy carries exactly `hcl`. Compare-and-skip: read the current
+// content and only PUT when it differs. `bao policy write` is an idempotent
+// overwrite, so this is safe to call on every token fetch — edits (e.g. adding a
+// grant) propagate immediately because OpenBao parses policy content at use.
 async function ensurePolicy(name, hcl) {
 	const existing = await baoConf.request('GET', `sys/policies/acl/${name}`);
 	if (existing.status !== 200 && existing.status !== 404) {
 		const t = await existing.text().catch(() => '');
 		throw new Error(`OpenBao policy read ${name} failed (${existing.status}) ${t}`);
+	}
+	if (existing.status === 200) {
+		const body = await existing.json().catch(() => null);
+		if (body && typeof body.policy === 'string' && body.policy === hcl) return; // unchanged
 	}
 	await bao('PUT', `sys/policies/acl/${name}`, { policy: hcl });
 }
@@ -79,29 +94,55 @@ async function mintToken(policies) {
 	return { token, ttl };
 }
 
+// ── Shared-secret policy rules ───────────────────────────────────────────────
+// Returns the HCL rules granting `read` on every shared secret the given
+// grantee (a user uid or an app name) has been granted. Enforcement is
+// OpenBao ACL policy CONTENT — live-evaluated at token use, so these rules take
+// effect for the grantee's existing token immediately (no re-mint).
+async function sharedPolicyRules(granteeType, granteeId) {
+	const grants = await SharedSecretGrant.listForGrantee(granteeType, granteeId);
+	if (!grants.length) return '';
+	const secretIds = [...new Set(grants.map(g => g.secretId))];
+	const secrets = secretIds.length
+		? await SharedSecret.list({ where: { id: { in: secretIds } } }) : [];
+	const byId = new Map(secrets.map(s => [s.id, s]));
+	const rules = [];
+	for (const g of grants) {
+		const sec = byId.get(g.secretId);
+		if (!sec) continue;
+		const p = sec.path(); // shared/<ownerUid>/<slug>
+		rules.push(`path "secret/data/${p}" { capabilities = ["read"] }`);
+		rules.push(`path "secret/metadata/${p}" { capabilities = ["read", "list"] }`);
+	}
+	return rules.join('\n');
+}
+
 // ── Per-user token ──────────────────────────────────────────────────────────
-// ── Per-user token ──────────────────────────────────────────────────────────
-function userPolicyHcl(uid) {
+async function userPolicyHcl(uid) {
+	const granted = await sharedPolicyRules('user', uid);
 	return `path "secret/data/users/${uid}" { capabilities = ["create", "read", "update", "delete", "list"] }
 path "secret/data/users/${uid}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
 path "secret/metadata/users/${uid}" { capabilities = ["create", "read", "update", "delete", "list"] }
 path "secret/metadata/users/${uid}/" { capabilities = ["create", "read", "update", "delete", "list"] }
 path "secret/metadata/users/${uid}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
-path "secret/data/shared" { capabilities = ["read", "list"] }
-path "secret/data/shared/*" { capabilities = ["read", "list"] }
-path "secret/metadata/shared" { capabilities = ["read", "list"] }
-path "secret/metadata/shared/" { capabilities = ["read", "list"] }
-path "secret/metadata/shared/*" { capabilities = ["read", "list"] }`;
+path "secret/data/shared/${uid}" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/data/shared/${uid}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/shared/${uid}" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/shared/${uid}/" { capabilities = ["create", "read", "update", "delete", "list"] }
+path "secret/metadata/shared/${uid}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
+${granted}`.trim();
 }
 
-// Mint (or return the cached) per-user token confined to secret/users/<uid>/*.
-// Re-minted when the cache entry expires (a little before the token's own TTL).
+// Mint (or return the cached) per-user token. The policy is ALWAYS reconciled
+// (compare-and-skip) before the cache is consulted, so a cached token can never
+// outlive a policy change; the cache only short-circuits re-minting. Re-minted
+// when the cache entry expires (a little before the token's own TTL).
 async function getOrCreateUserToken(uid) {
 	if (!/^[A-Za-z0-9._-]{1,64}$/.test(uid)) throw new Error(`invalid uid for vault token: ${uid}`);
+	await ensurePolicy(`user-${uid}`, await userPolicyHcl(uid));
 	const cacheKey = `vault_token:${uid}`;
 	const cached = await cacheGet(cacheKey);
 	if (cached) return cached;
-	await ensurePolicy(`user-${uid}`, userPolicyHcl(uid));
 	const { token, ttl } = await mintToken([`user-${uid}`]);
 	await cacheSet(cacheKey, token, Math.max(ttl - 60, 60));
 	return token;
@@ -119,40 +160,73 @@ path "secret/metadata/*" { capabilities = ["create", "read", "update", "delete",
 }
 
 async function getOrCreateAdminToken(uid) {
+	await ensurePolicy('sso-admin', adminPolicyHcl());
 	const cacheKey = `vault_token:admin:${uid || 'global'}`;
 	const cached = await cacheGet(cacheKey);
 	if (cached) return cached;
-	await ensurePolicy('sso-admin', adminPolicyHcl());
 	const { token, ttl } = await mintToken(['sso-admin']);
 	await cacheSet(cacheKey, token, Math.max(ttl - 60, 60));
 	return token;
 }
 
 // ── Per-app token (minted ONCE, returned to the caller, never cached) ───────
-function appPolicyHcl(name) {
+async function appPolicyHcl(name) {
+	const granted = await sharedPolicyRules('app', name);
 	return `path "secret/data/apps/${name}" { capabilities = ["create", "read", "update", "delete", "list"] }
 path "secret/data/apps/${name}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
 path "secret/metadata/apps/${name}" { capabilities = ["create", "read", "update", "delete", "list"] }
 path "secret/metadata/apps/${name}/" { capabilities = ["create", "read", "update", "delete", "list"] }
 path "secret/metadata/apps/${name}/*" { capabilities = ["create", "read", "update", "delete", "list"] }
-path "secret/data/shared" { capabilities = ["read", "list"] }
-path "secret/data/shared/*" { capabilities = ["read", "list"] }
-path "secret/metadata/shared" { capabilities = ["read", "list"] }
-path "secret/metadata/shared/" { capabilities = ["read", "list"] }
-path "secret/metadata/shared/*" { capabilities = ["read", "list"] }`;
+${granted}`.trim();
 }
 
 // Create the app-<name> policy + mint a token for it. Returns the token ONCE
 // (the admin UI shows it with a copy button); it is not stored retrievably, so
 // a later compromise of an admin session cannot recover previously-minted app
-// tokens. The caller must record it in the external app immediately.
+// tokens. The caller must record it in the external app immediately. Later
+// grants to the app edit app-<name> policy content (live-applied to this token).
 async function mintAppToken(name) {
 	if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) {
 		throw new Error('invalid app name (lowercase letters, digits, hyphens; max 63 chars)');
 	}
-	await ensurePolicy(`app-${name}`, appPolicyHcl(name));
+	await ensurePolicy(`app-${name}`, await appPolicyHcl(name));
 	const { token, ttl } = await mintToken([`app-${name}`]);
 	return { token, ttl, policy: `app-${name}`, path: `secret/apps/${name}/` };
+}
+
+// ── Grant / revoke shared-secret access ─────────────────────────────────────
+// Creating a grant writes the DB row and then edits the grantee's policy content
+// to add read on the shared path; revoking removes both. Because OpenBao parses
+// policy content live, the change applies to the grantee's existing token
+// immediately — no token re-mint, no cache invalidation needed.
+async function grantSharedSecret(secretId, granteeType, granteeId, actorUid) {
+	const grant = await SharedSecretGrant.create({
+		secretId, granteeType, granteeId, capability: 'read',
+		created_by: actorUid, created_on: Date.now(),
+		updated_by: actorUid, updated_on: Date.now(),
+	});
+	await reconcileGrantee(granteeType, granteeId);
+	return grant;
+}
+
+async function revokeSharedSecret(grantId, actorUid) {
+	const grant = await SharedSecretGrant.get(grantId);
+	if (!grant) return null;
+	const { granteeType, granteeId } = grant;
+	await grant.delete();
+	await reconcileGrantee(granteeType, granteeId);
+	return grant;
+}
+
+// Recompute and rewrite a grantee's policy content after a grant/revoke.
+async function reconcileGrantee(granteeType, granteeId) {
+	if (granteeType === 'user') {
+		await ensurePolicy(`user-${granteeId}`, await userPolicyHcl(granteeId));
+	} else if (granteeType === 'app') {
+		await ensurePolicy(`app-${granteeId}`, await appPolicyHcl(granteeId));
+	} else {
+		throw new Error(`invalid granteeType: ${granteeType}`);
+	}
 }
 
 // ── /api/vault proxy: scope guard + token-injecting proxy ───────────────────
@@ -256,4 +330,12 @@ module.exports = {
 	scopeGuard,
 	vaultProxy,
 	mintAppRouter,
+	// sharing
+	SharedSecret,
+	SharedSecretGrant,
+	userPolicyHcl,
+	appPolicyHcl,
+	grantSharedSecret,
+	revokeSharedSecret,
+	reconcileGrantee,
 };
