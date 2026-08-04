@@ -37,6 +37,7 @@ const DOCS = {
 	agents:          {title: 'Plugins',                file: path.join(__dirname, '../../docs/plugins.md')},
 	plugins:         {title: 'Plugins',                file: path.join(__dirname, '../../docs/plugins.md')},
 	vault:           {title: 'Vault Secrets',           file: path.join(__dirname, '../../docs/vault.md')},
+	groups:          {title: 'Groups & Permissions',   file: path.join(__dirname, '../../docs/groups.md')},
 
 	overview:        {title: 'Overview',        file: path.join(__dirname, '../../README.md')},
 	changelog:       {title: 'Changelog',       file: path.join(__dirname, '../../CHANGELOG.md')},

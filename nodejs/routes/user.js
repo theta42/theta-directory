@@ -90,7 +90,13 @@ router.get('/me', async function(req, res, next){
 		// same answer in both modes.
 		const groups = await groupCns(user);
 		user.groups = groups;
-		user.isAdmin = groups.includes('app_sso_admin') || groups.includes(permission.SUPER_ADMIN_GROUP);
+		// Console admin under the group model (docs/GROUPS.md §11): god_admin,
+		// a site super admin, the SSO-as-app admin ({site}_app_sso_admin), or the
+		// legacy app_sso_admin/app_super_admin during migration.
+		user.isAdmin = groups.some((g) =>
+			g === 'app_sso_admin' || g === 'app_super_admin' ||
+			g === permission.SUPER_ADMIN_GROUP ||
+			g.endsWith('_super_admin') || g.endsWith('_app_sso_admin'));
 
 		return res.json(user);
 	}catch(error){

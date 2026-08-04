@@ -188,10 +188,6 @@ router.get('/users/:uid', function(req, res, next) {
   res.render('profile', {...values});
 });
 
-router.get('/groups', function(req, res, next) {
-  res.render('groups', {...values});
-});
-
 router.get('/token', function(req, res, next) {
   res.render('token', {...values});
 });

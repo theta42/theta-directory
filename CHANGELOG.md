@@ -1,3 +1,8 @@
+# v1.25.0
+- feat: hierarchical group & permission model (docs/GROUPS.md) — god_admin, {site}_super_admin, {site}_hosts_*/{site}_apps_* aggregates, and per-resource {site}_host_<slug>_admin/access/<capability>; inheritance resolver (admin implies access, capabilities explicit), meta everyone/{site}_everyone groups
+- feat: remove the standalone Groups page — group management is tied to adopted Directory resources (help link to the model in the Directory toolbar)
+- feat: console admin recognizes god_admin and site-scoped super/app-admin groups (legacy app_sso_admin/app_super_admin kept as migration aliases)
+
 # v1.24.0
 - feat: Agents merged into the Directory — removed the standalone Agents page. Host rows show a green/yellow/red theta-agent status dot (healthy / high-load / not connected) and the resource modal gained a Metrics tab with live telemetry + discovery
 - feat: Discovery Plugins New-plugin modal — slug is now derived from the name (field removed), the cron field is a dropdown (hourly/daily/weekly + custom), and per-plugin settings are collected from the configSchema (e.g. Proxmox url/tokenId/tokenSecret) instead of an empty config

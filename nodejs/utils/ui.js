@@ -41,7 +41,6 @@ module.exports = {
 		// Catalog requires login - it's the end-user view of their accessible resources.
 		{href: '/', icon: 'fa-solid fa-compass', label: 'Catalog', groups: ['login']},
 		{href: '/users', icon: 'fa-solid fa-users', label: 'Users', groups: ['app_sso_admin', 'admin']},
-		{href: '/groups', icon: 'fas fa-users-cog', label: 'Groups', groups: ['app_sso_admin']},
 		{href: '/conf', icon: 'fas fa-cogs', label: 'Configuration', groups: ['app_sso_admin']},
 		{href: '/directory', icon: 'fa-solid fa-server', label: 'Directory', groups: ['app_sso_admin', 'app_sso_directory_admin', 'admin']},
 		// Vault requires login - per-user secrets at secret/users/<uid>/*.
