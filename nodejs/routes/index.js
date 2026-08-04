@@ -59,12 +59,6 @@ router.get('/overview', function(req, res) {
   res.render('overview', {...values});
 });
 
-// Connected theta-agent hosts + live telemetry (admin). Data from
-// GET /api/agent/nodes; live updates via socket.io 'agent.*' events.
-router.get('/agents', function(req, res) {
-  res.render('agents', {...values});
-});
-
 router.get('/admin', (req, res) => res.redirect(301, '/overview'));
 router.get('/notifications', (req, res) => res.redirect(301, '/overview'));
 router.get('/dashboard', (req, res) => res.redirect(301, '/overview'));

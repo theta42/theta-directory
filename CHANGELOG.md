@@ -1,3 +1,10 @@
+# v1.24.0
+- feat: Agents merged into the Directory — removed the standalone Agents page. Host rows show a green/yellow/red theta-agent status dot (healthy / high-load / not connected) and the resource modal gained a Metrics tab with live telemetry + discovery
+- feat: Discovery Plugins New-plugin modal — slug is now derived from the name (field removed), the cron field is a dropdown (hourly/daily/weekly + custom), and per-plugin settings are collected from the configSchema (e.g. Proxmox url/tokenId/tokenSecret) instead of an empty config
+- feat: Directory resource slug is now read-only and derived from the name
+- feat: Vault page restyled to match the rest of the site (bounded container, card + nav-tabs header, h4)
+- feat: navbar — the username is no longer underlined; only the active nav link is bold + underlined
+
 # v1.23.0
 - fix: /api/vault proxy never injected X-Vault-Token — the true root cause of the recurring vault 403 "permission denied". The proxy declared its hook with http-proxy-middleware v3 syntax (`on: { proxyReq }`), which the installed HPM v2 silently ignores, so every request reached OpenBao unauthenticated (and the client's sso auth headers were never stripped). Rewritten as v2 `onProxyReq`.
 - fix: vault proxy header injection ordered before `fixRequestBody` — the body write flushes headers, so setting X-Vault-Token after it silently failed on every POST/PUT (writes would still 403 even with the hook fixed)
