@@ -17,6 +17,8 @@ const { Resource, ResourceEdge, ResourceGroup } = require('./resource');
 const { AccessRequest } = require('./access_request');
 const { Webhook } = require('./webhook');
 const { PluginInstance } = require('./plugin_instance');
+const { SharedSecret } = require('./shared_secret');
+const { SharedSecretGrant } = require('./shared_secret_grant');
 async function initORM() {
   const ormConf = conf.orm || {
     dialect: 'sqlite',
@@ -31,6 +33,7 @@ async function initORM() {
       conf: { orm: ormConf },
       models: [
         Resource, ResourceEdge, ResourceGroup, AccessRequest, Webhook, PluginInstance,
+        SharedSecret, SharedSecretGrant,
         Token, AuthToken, InviteToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken
       ]
     });

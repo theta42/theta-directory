@@ -1,3 +1,11 @@
+# v1.21.0
+- fix: always reconcile OpenBao policy content before serving a (possibly cached) token, so stale stored policies can no longer cause a recurring vault 403 "permission denied"
+- feat: shared secrets — users can publish secrets to secret/shared/<owner>/<slug> and grant read access to other users and downstream apps (OpenBao ACL policy edits, applied live)
+- feat: shared-secrets API + Shared tab in the vault UI
+
+# v1.20.0
+- fix: OpenBao 403 on vault secrets list (directory list grants + policy self-heal)
+
 ## v1.19.0
 - Added WebSocket endpoint for theta-agent C2
 

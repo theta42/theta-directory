@@ -126,6 +126,8 @@ app.use('/api/plugins', middleware.auth, require('./routes/api_plugins'));
 const vaultBroker = require('./utils/vault_broker');
 app.use('/api/vault/apps', middleware.auth, vaultBroker.mintAppRouter);
 app.use('/api/vault', middleware.auth, vaultBroker.scopeGuard, vaultBroker.vaultProxy());
+// Shared secrets (metadata + grants; data reads go through /api/vault proxy).
+app.use('/api/shared-secrets', middleware.auth, require('./routes/api_shared_secrets'));
 
 // Catch 404 and forward to error handler. If none of the above routes are
 // used, this is what will be called.
