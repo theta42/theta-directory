@@ -32,6 +32,7 @@ const conf = require('@simpleworkjs/conf');
 const permission = require('./permission');
 const { SharedSecret } = require('../models/shared_secret');
 const { SharedSecretGrant } = require('../models/shared_secret_grant');
+const { VaultAppToken } = require('../models/vault_app_token');
 
 const ROLE = 'sso-broker';
 const DEFAULT_TTL = 24 * 60 * 60; // matches the role's token_period (24h)
@@ -83,15 +84,18 @@ async function ensurePolicy(name, hcl) {
 	await bao('PUT', `sys/policies/acl/${name}`, { policy: hcl });
 }
 
-// Mint a token through the sso-broker role with the given policies. Returns
-// { token, ttl } (ttl = lease_duration seconds, falls back to DEFAULT_TTL).
-async function mintToken(policies) {
-	const res = await bao('POST', 'auth/token/create/sso-broker', { policies });
+// Mint a token through a token role with the given policies. Returns
+// { token, accessor, ttl } (ttl = lease_duration seconds, falls back to
+// DEFAULT_TTL). Roles: sso-broker (24h period — user/admin tokens, re-minted
+// from cache) and sso-app (768h period — long-lived external-app credentials,
+// kept alive via their stored accessor by the renewal loop below).
+async function mintToken(policies, role = ROLE) {
+	const res = await bao('POST', `auth/token/create/${role}`, { policies });
 	const json = await res.json();
 	const token = json && json.auth && json.auth.client_token;
 	if (!token) throw new Error(`OpenBao token mint returned no client_token: ${JSON.stringify(json)}`);
 	const ttl = (json.auth && json.auth.lease_duration) || DEFAULT_TTL;
-	return { token, ttl };
+	return { token, accessor: json.auth.accessor, ttl };
 }
 
 // ── Shared-secret policy rules ───────────────────────────────────────────────
@@ -185,13 +189,92 @@ ${granted}`.trim();
 // a later compromise of an admin session cannot recover previously-minted app
 // tokens. The caller must record it in the external app immediately. Later
 // grants to the app edit app-<name> policy content (live-applied to this token).
-async function mintAppToken(name) {
+//
+// What IS stored is the token's ACCESSOR (VaultAppToken row): an accessor
+// cannot authenticate, but it lets the renewal loop below keep the (periodic)
+// token alive and lets a re-mint revoke the app's previous token so exactly
+// one credential per app is ever live.
+async function mintAppToken(name, actorUid) {
 	if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(name)) {
 		throw new Error('invalid app name (lowercase letters, digits, hyphens; max 63 chars)');
 	}
 	await ensurePolicy(`app-${name}`, await appPolicyHcl(name));
-	const { token, ttl } = await mintToken([`app-${name}`]);
+	// App tokens are long-lived credentials: mint via the sso-app role (768h
+	// period) so a renewal inside every 32-day window keeps them alive forever.
+	// Fall back to the broker's own 24h role on deployments whose setup.sh
+	// predates the sso-app role (re-running setup.sh creates it).
+	let minted;
+	try {
+		minted = await mintToken([`app-${name}`], 'sso-app');
+	} catch (e) {
+		console.warn(`vault_broker: sso-app token role unavailable (${e.message}); falling back to sso-broker (24h period). Re-run theta-env setup.sh to create the sso-app role.`);
+		minted = await mintToken([`app-${name}`]);
+	}
+	const { token, accessor, ttl } = minted;
+	// Replace the app's accessor row; revoke the superseded token (best-effort —
+	// it may already be expired) so re-minting never leaves a zombie credential.
+	try {
+		const existing = await VaultAppToken.getByName(name);
+		if (existing) {
+			await baoConf.request('POST', 'auth/token/revoke-accessor', { accessor: existing.accessor });
+			await existing.delete();
+		}
+		if (accessor) {
+			await VaultAppToken.create({
+				name, accessor,
+				lastRenewedAt: Date.now(),
+				created_by: actorUid, created_on: Date.now(),
+			});
+		}
+	} catch (e) {
+		// Accessor bookkeeping must never block handing the token out; without a
+		// row the token simply isn't auto-renewed (it still lives one full period).
+		console.error(`vault_broker: could not store accessor for app-${name}:`, e.message);
+	}
 	return { token, ttl, policy: `app-${name}`, path: `secret/apps/${name}/` };
+}
+
+// ── App-token renewal loop ──────────────────────────────────────────────────
+// Walks the stored accessors and renews each token (auth/token/renew-accessor),
+// resetting its periodic clock. Runs at boot and then every RENEW_INTERVAL_MS —
+// far inside both possible periods (24h fallback and 768h), so a downstream
+// app's token stays valid for as long as sso is running. Failures are recorded
+// on the row (visible to admins in the DB / future UI) and never throw.
+const RENEW_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h — several chances per 24h period
+let renewTimer;
+
+async function renewAppTokens() {
+	let rows;
+	try { rows = await VaultAppToken.list(); }
+	catch (e) { console.error('vault_broker: app-token renewal: could not list accessors:', e.message); return; }
+	for (const row of rows) {
+		try {
+			const res = await baoConf.request('POST', 'auth/token/renew-accessor', { accessor: row.accessor });
+			if (res.ok) {
+				await row.update({ lastRenewedAt: Date.now(), lastError: null });
+			} else {
+				const text = await res.text().catch(() => '');
+				// 400 "invalid accessor" = token expired or was revoked out-of-band;
+				// keep the row + error so the admin can see the app needs a re-mint.
+				await row.update({ lastError: `renew failed (${res.status}) ${text}` });
+				console.warn(`vault_broker: renew of app token '${row.name}' failed (${res.status}) — re-mint it from the vault UI if the app is still in use.`);
+			}
+		} catch (e) {
+			try { await row.update({ lastError: e.message }); } catch (e2) { /* best-effort */ }
+			console.error(`vault_broker: renew of app token '${row.name}' errored:`, e.message);
+		}
+	}
+}
+
+// Start the loop (idempotent). unref() so an open handle never blocks exit.
+function startAppTokenRenewal() {
+	if (renewTimer) return renewTimer;
+	renewAppTokens().catch((e) => console.error('vault_broker: initial app-token renewal failed:', e.message));
+	renewTimer = setInterval(() => {
+		renewAppTokens().catch((e) => console.error('vault_broker: app-token renewal failed:', e.message));
+	}, RENEW_INTERVAL_MS);
+	if (renewTimer.unref) renewTimer.unref();
+	return renewTimer;
 }
 
 // ── Grant / revoke shared-secret access ─────────────────────────────────────
@@ -292,15 +375,20 @@ function vaultProxy() {
 		target: VAULT_ADDR,
 		changeOrigin: true,
 		pathRewrite: { '^/api/vault': '/v1' },
-		on: {
-			proxyReq(proxyReq, req, res, options) {
-				fixRequestBody(proxyReq, req, res, options);
-				// Inject ONLY the server-minted scoped token; strip the client's
-				// sso session/api auth so it never reaches OpenBao.
-				proxyReq.setHeader('X-Vault-Token', req.vaultToken);
-				proxyReq.removeHeader('auth-token');
-				proxyReq.removeHeader('authorization');
-			},
+		// http-proxy-middleware v2 API: hooks are top-level onProxyReq/onError,
+		// NOT the v3 `on: { proxyReq }` shape. v2 silently ignores an `on` key,
+		// which shipped this proxy with NO token injection — every /api/vault
+		// call reached OpenBao unauthenticated and 403'd.
+		onProxyReq(proxyReq, req, res, options) {
+			// Header ops MUST precede fixRequestBody: it write()s the parsed body
+			// onto proxyReq, which flushes headers — setHeader after that throws
+			// (swallowed upstream), silently dropping the token on every write.
+			// Inject ONLY the server-minted scoped token; strip the client's
+			// sso session/api auth so it never reaches OpenBao.
+			proxyReq.setHeader('X-Vault-Token', req.vaultToken);
+			proxyReq.removeHeader('auth-token');
+			proxyReq.removeHeader('authorization');
+			fixRequestBody(proxyReq, req, res, options);
 		},
 	});
 }
@@ -314,7 +402,7 @@ mintAppRouter.post('/', async (req, res, next) => {
 		await permission.byGroup(req.user, [ADMIN_GROUP]);
 		const name = (req.body && req.body.name || '').trim();
 		if (!name) return res.status(400).json({ error: 'name is required' });
-		const result = await mintAppToken(name);
+		const result = await mintAppToken(name, req.user && req.user.uid);
 		res.json(result);
 	} catch (e) {
 		if (e.status === 401) return res.status(403).json({ error: 'admin only' });
@@ -330,6 +418,10 @@ module.exports = {
 	scopeGuard,
 	vaultProxy,
 	mintAppRouter,
+	// app-token lifecycle
+	renewAppTokens,
+	startAppTokenRenewal,
+	VaultAppToken,
 	// sharing
 	SharedSecret,
 	SharedSecretGrant,

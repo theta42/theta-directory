@@ -60,6 +60,13 @@ models.initORM().then(() => {
   initScheduler(conf.discovery).catch(err => {
     console.error('Failed to initialize scheduler:', err);
   });
+
+  // Keep external-app vault tokens alive: renew every stored accessor now and
+  // on an interval (see vault_broker.startAppTokenRenewal). Only meaningful
+  // when OpenBao is configured; without VAULT_TOKEN the loop's calls fail soft.
+  if (process.env.VAULT_TOKEN) {
+    require('../utils/vault_broker').startAppTokenRenewal();
+  }
 }).catch(err => {
   console.error('Failed to initialize ORM:', err);
   process.exit(1);
