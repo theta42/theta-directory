@@ -12,7 +12,7 @@ const groups = require('../utils/groups');
 
 // Make `childCn` a member of `parentCn`, i.e. everyone in the child is
 // transitively in the parent. Idempotent and non-fatal: "already a member" is
-// the goal state, and a missing group (e.g. app_super_admin absent on a
+// the goal state, and a missing group (e.g. god_admin absent on a
 // directory seeded by an older entrypoint) is a reason to skip, not to fail the
 // caller's real work.
 async function nestGroup(childCn, parentCn) {
@@ -121,7 +121,7 @@ async function ensureSiteGroups(siteSlug, ownerDn, siteName, siteResourceId) {
 //   {site}_{slug}_admin  -> {site}_{slug}_access
 //   {site}_{slug}_admin  -> {site}_{kind}s_admin    (aggregate)
 //   {site}_{slug}_access -> {site}_{kind}s_access   (aggregate)
-//   app_super_admin      -> {site}_{slug}_admin     (legacy cross-app)
+//   god_admin            -> {site}_{slug}_admin     (global super admin)
 async function provisionResourceGroups(resource, kind, siteSlug, ownerDn) {
   const accessCn = groups.resourceGroupCns(siteSlug, resource.slug, 'access');
   const adminCn = groups.resourceGroupCns(siteSlug, resource.slug, 'admin');
@@ -487,7 +487,7 @@ router.get('/access-summary', async (req, res, next) => {
       //
       // Counts come from the transitive closure, not from `member`. Reading the
       // attribute would report only who is listed on the group, missing anyone
-      // who reaches it through a nested group -- and since app_super_admin is
+      // who reaches it through a nested group -- and since god_admin is
       // nested into every resource's _admin group, that is not an edge case.
       let members = [];
       if (group) {

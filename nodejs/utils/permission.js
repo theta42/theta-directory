@@ -4,13 +4,14 @@ const {Group} = require('../models/group_ldap');
 const groups = require('./groups');
 
 // The group nested into every resource's _admin group by api_directory_admin
-// (cross-resource super-admin administration). KEEP the legacy `app_super_admin`
-// here: it is the group that actually exists and gets nested. The new schema's
-// global `god_admin` is recognized in isSuperAdmin() below, and api_directory_admin
-// nests SUPER_ADMIN_GROUP -- so until `god_admin` is created during bootstrap, this
-// must stay `app_super_admin` or resource auto-provisioning's nesting silently
-// no-ops (leaving only the creator as the group's sole member).
-const SUPER_ADMIN_GROUP = 'app_super_admin';
+// (cross-resource super-admin administration). This is `god_admin` -- the global
+// super group of the new model (docs/GROUPS.md), seeded by docker-entrypoint.sh.
+// It used to be the legacy `app_super_admin`, which existed while god_admin
+// didn't; now that god_admin is created at boot, the provisioning nests it.
+// LEGACY_SUPER_ADMIN_ALIASES still recognizes a `app_super_admin` that predates
+// the migration, so an existing deployment isn't stripped of rights until it's
+// rebuilt.
+const SUPER_ADMIN_GROUP = 'god_admin';
 const LEGACY_SUPER_ADMIN_ALIASES = ['app_super_admin'];
 
 // True if the user (by resolved member cns) is a global god/super admin.
