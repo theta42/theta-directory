@@ -1,3 +1,11 @@
+# v1.23.0
+- fix: /api/vault proxy never injected X-Vault-Token — the true root cause of the recurring vault 403 "permission denied". The proxy declared its hook with http-proxy-middleware v3 syntax (`on: { proxyReq }`), which the installed HPM v2 silently ignores, so every request reached OpenBao unauthenticated (and the client's sso auth headers were never stripped). Rewritten as v2 `onProxyReq`.
+- fix: vault proxy header injection ordered before `fixRequestBody` — the body write flushes headers, so setting X-Vault-Token after it silently failed on every POST/PUT (writes would still 403 even with the hook fixed)
+- fix: initORM add-only schema heal — `sequelize.sync()` never ALTERs existing tables, so columns added by newer releases (e.g. `PluginInstance.lastLog`, which crashed the scheduler on every boot of an upgraded deployment) are now detected via describeTable and added with addColumn (additive only, per-column fail-soft)
+- feat: external-app vault tokens are long-lived and auto-renewed — minted via the new `sso-app` token role (periodic 768h, falls back to sso-broker's 24h role until theta-suite setup.sh is re-run); sso stores each token's accessor (new VaultAppToken model — an accessor can renew/revoke but not authenticate) and renews all of them at boot + every 6h via auth/token/renew-accessor, so a downstream app's credential stays valid as long as sso runs with zero renewal code in the app
+- feat: re-minting an app token revokes the app's previous token via its stored accessor — exactly one live credential per app, no zombies
+- test: wire-level tests for the vault proxy (real HTTP round-trip asserting token injection, auth-header stripping, path rewrite, and POST body integrity) + app-token accessor lifecycle tests
+
 # v1.22.0
 - feat: Agents page — live list of connected theta-agent hosts with telemetry (CPU/RAM/disk/ZFS/GPU) + online status, updating via socket.io
 - security: auth + admin-gate the /api/agent REST routes (previously unauthenticated)
