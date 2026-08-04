@@ -3,12 +3,18 @@
 const {Group} = require('../models/group_ldap');
 const groups = require('./groups');
 
-// The global god-admin group (everything, everywhere). During migration the
-// legacy `app_super_admin` is recognized as an alias (docs/GROUPS.md §10).
-const SUPER_ADMIN_GROUP = groups.GOD_ADMIN;
+// The group nested into every resource's _admin group by api_directory_admin
+// (cross-resource super-admin administration). KEEP the legacy `app_super_admin`
+// here: it is the group that actually exists and gets nested. The new schema's
+// global `god_admin` is recognized in isSuperAdmin() below, and api_directory_admin
+// nests SUPER_ADMIN_GROUP -- so until `god_admin` is created during bootstrap, this
+// must stay `app_super_admin` or resource auto-provisioning's nesting silently
+// no-ops (leaving only the creator as the group's sole member).
+const SUPER_ADMIN_GROUP = 'app_super_admin';
 const LEGACY_SUPER_ADMIN_ALIASES = ['app_super_admin'];
 
 // True if the user (by resolved member cns) is a global god/super admin.
+// Recognizes BOTH the new schema's `god_admin` and the legacy `app_super_admin`.
 async function isSuperAdmin(memberOfCns) {
 	return memberOfCns.includes(groups.GOD_ADMIN) ||
 		memberOfCns.some((cn) => LEGACY_SUPER_ADMIN_ALIASES.includes(cn));
