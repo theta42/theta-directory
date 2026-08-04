@@ -1,7 +1,11 @@
 'use strict';
 
 const express = require('express');
+const middleware = require('../middleware/auth');
+const permission = require('../utils/permission');
 const agentManager = require('../utils/agent_manager');
+
+const ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_admin'];
 
 module.exports = function initAgentWebSockets(app) {
   if (!app.wss) {
@@ -71,8 +75,23 @@ module.exports = function initAgentWebSockets(app) {
     } catch (e) {}
   });
 
-  // REST API routes for Agent Management (mounted under /api/agent)
+  // REST API routes for Agent Management (mounted under /api/agent). The agent
+  // WebSocket (/api/agent/ws) is handled by the raw `wss` upgrade server in
+  // bin/www with its own ?token= auth — unaffected by the express middleware
+  // here. These REST routes are admin-facing, so they're auth + admin gated.
   const router = express.Router();
+  router.use(middleware.auth);
+  router.use(async (req, res, next) => {
+    try {
+      await permission.byGroup(req.user, ADMIN_GROUPS);
+      next();
+    } catch (err) {
+      if (err && (err.status === 401 || err.name === 'Insufficient Permission')) {
+        return res.status(403).json({ status: 'error', message: 'admin only' });
+      }
+      next(err);
+    }
+  });
 
   router.get('/nodes', (req, res) => {
     res.json({

@@ -1,3 +1,7 @@
+# v1.22.0
+- feat: Agents page — live list of connected theta-agent hosts with telemetry (CPU/RAM/disk/ZFS/GPU) + online status, updating via socket.io
+- security: auth + admin-gate the /api/agent REST routes (previously unauthenticated)
+
 # v1.21.0
 - fix: always reconcile OpenBao policy content before serving a (possibly cached) token, so stale stored policies can no longer cause a recurring vault 403 "permission denied"
 - feat: shared secrets — users can publish secrets to secret/shared/<owner>/<slug> and grant read access to other users and downstream apps (OpenBao ACL policy edits, applied live)
