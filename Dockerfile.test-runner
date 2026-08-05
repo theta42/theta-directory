@@ -22,6 +22,10 @@ COPY nodejs/conf ./conf
 COPY nodejs/controller ./controller
 COPY nodejs/middleware ./middleware
 COPY nodejs/models ./models
+# Without this the discovery/plugin suites cannot even load their subject and
+# fail as "Cannot find module ../plugins/discovery/..." -- plugin code was
+# effectively untested in CI.
+COPY nodejs/plugins ./plugins
 COPY nodejs/routes ./routes
 COPY nodejs/services ./services
 COPY nodejs/utils ./utils
