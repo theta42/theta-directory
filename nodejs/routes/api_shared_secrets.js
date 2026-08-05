@@ -24,7 +24,10 @@ const { SharedSecretGrant } = require('../models/shared_secret_grant');
 const vaultBroker = require('../utils/vault_broker');
 
 const ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_admin'];
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+// Allow hyphens AND underscores (matching the plugin-instance slug convention);
+// only reject values that can't be a sane secret path segment (spaces, slashes,
+// leading non-alnum, too long).
+const SLUG_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 
 const router = express.Router();
 
@@ -77,7 +80,9 @@ router.get('/', async (req, res, next) => {
 			if (byId.has(g.id)) continue; // already owner
 			byId.set(g.id, { role: 'grantee', ...g });
 		}
-		res.json({ items: [...byId.values()].map(s => ({ id: s.id, slug: s.slug, ownerUid: s.ownerUid, description: s.description, path: s.path(), role: s.role })) });
+		// The `{ role, ...s }` spread above copies only own properties, so the
+		// instance method `path()` is dropped -- call the static builder instead.
+		res.json({ items: [...byId.values()].map(s => ({ id: s.id, slug: s.slug, ownerUid: s.ownerUid, description: s.description, path: SharedSecret.pathFor(s.ownerUid, s.slug), role: s.role })) });
 	} catch (e) { next(e); }
 });
 
@@ -86,7 +91,7 @@ router.post('/', async (req, res, next) => {
 	try {
 		const uid = req.user.uid;
 		const slug = String(req.body.slug || '').trim().toLowerCase();
-		if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'slug must be lowercase letters/digits/hyphens, 1-64 chars' });
+		if (!SLUG_RE.test(slug)) return res.status(400).json({ error: 'slug must be lowercase letters/digits/hyphens/underscores, 1-64 chars' });
 		const description = String(req.body.description || '').trim();
 		const data = (req.body.data && typeof req.body.data === 'object') ? req.body.data : {};
 

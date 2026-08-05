@@ -1651,15 +1651,28 @@
     discoveryPlugins.forEach(p => {
       const badgeClass = p.enabled ? 'bg-success' : 'bg-secondary';
       const statusText = p.enabled ? 'Loaded' : 'Unloaded';
+      // Last-run state is surfaced by the plugins API (lastRunAt/lastStatus/
+      // lastError/lastLog) but was dropped here; show it so a plugin that errors
+      // is visible without digging into logs.
+      const runOk = p.lastStatus === 'ok';
+      const runErr = p.lastStatus === 'error';
+      const runState = p.lastRunAt
+        ? `<span class="badge ${runOk ? 'bg-success' : runErr ? 'bg-danger' : 'bg-secondary'}" ${runErr && p.lastError ? 'title="' + esc(p.lastError) + '"' : ''}>${runOk ? 'ok' : runErr ? 'error' : esc(p.lastStatus) || 'ran'}</span> <span class="text-muted">${fmtRunTs(p.lastRunAt)}</span>`
+        : '<span class="text-muted">Never run</span>';
+      const logsBtn = (p.lastLog || p.lastError)
+        ? `<button class="btn btn-sm btn-outline-secondary" title="View run log" onclick="showPluginLog('${p.id}')"><i class="fa-solid fa-scroll"></i> Logs</button>`
+        : '';
       const card = `
         <div class="card mb-3 border shadow-sm">
           <div class="card-body d-flex align-items-center justify-content-between">
             <div>
               <h6 class="mb-1"><strong>${p.name}</strong> <span class="badge bg-secondary ms-2">${p.pluginType}</span></h6>
               <div class="small text-muted font-monospace">${p.slug} | Schedule: ${p.cron}</div>
+              <div class="small">Last run: ${runState}</div>
             </div>
             <div class="d-flex align-items-center gap-2">
               <span class="badge ${badgeClass} me-2">${statusText}</span>
+              ${logsBtn}
               <button class="btn btn-sm btn-outline-primary" onclick="toggleDiscoveryPlugin('${p.id}', ${!p.enabled})">${p.enabled ? 'Unload' : 'Load'}</button>
               <button class="btn btn-sm btn-success" title="Run now" onclick="runDiscoveryPluginNow('${p.id}')"><i class="fa-solid fa-play"></i> Run</button>
               <button class="btn btn-sm btn-outline-danger" onclick="deleteDiscoveryPlugin('${p.id}')"><i class="fas fa-trash"></i></button>
@@ -1668,6 +1681,30 @@
         </div>
       `;
       $list.append(card);
+    });
+  }
+
+  // "Never run" when a discovery plugin has no run yet; otherwise relative time.
+  function fmtRunTs(ts) {
+    if (!ts) return 'Never run';
+    const m = moment(ts);
+    return m.isValid() ? m.fromNow() : 'Never run';
+  }
+
+  // Modal showing the discovery plugin's last run log + error (from the plugins
+  // API's lastLog/lastError fields). Logs can be long, so render in a scrollable
+  // <pre> rather than a toast.
+  function showPluginLog(id) {
+    const p = discoveryPlugins.find(x => x.id === id);
+    if (!p) return;
+    const body = p.lastError
+      ? `<div class="alert alert-danger mb-2">${esc(p.lastError)}</div>`
+      : '';
+    const log = p.lastLog || '(no log captured for this run)';
+    app.modal.open({
+      title: 'Run log — ' + (p.name || p.slug),
+      size: 'lg',
+      bodyHtml: body + '<pre class="p-2 mb-0 bg-light border" style="max-height:55vh;overflow:auto;white-space:pre-wrap;font-size:.85rem;">' + esc(log) + '</pre>',
     });
   }
 

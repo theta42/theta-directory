@@ -17,7 +17,10 @@
     <div class="tab-pane fade show active" id="tab-secrets">
       <div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
         <h5 class="mb-0" id="vault-title"><i class="fas fa-lock"></i> My Secrets <small class="text-muted">(personal namespace)</small></h5>
-        <button class="btn btn-primary btn-sm" onclick="showCreateModal()"><i class="fas fa-plus"></i> New Secret</button>
+        <div class="d-flex align-items-center gap-2">
+          <a href="/docs/vault" class="text-reset" title="Vault help &amp; documentation"><i class="fa-solid fa-circle-question"></i></a>
+          <button class="btn btn-primary btn-sm" onclick="showCreateModal()"><i class="fas fa-plus"></i> New Secret</button>
+        </div>
       </div>
       <div class="p-3">
         <div class="row">
@@ -87,6 +90,20 @@ curl "$VAULT_ADDR/v1/secret/data/apps/<span id="app-name-display"></span>/conf" 
             </div>
           </div>
         </div>
+        </div>
+        <div class="row mt-3">
+          <div class="col-12">
+            <div class="card shadow-sm">
+              <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0"><i class="fa-solid fa-key me-1"></i> Minted apps</h5>
+                <button class="btn btn-sm btn-outline-primary" onclick="loadApps()"><i class="fas fa-rotate"></i> Refresh</button>
+              </div>
+              <div class="card-body">
+                <p class="text-muted small mb-2">Each entry is a scoped OpenBao credential an external service uses to read <code>secret/apps/&lt;name&gt;/*</code>. The token itself is shown <strong>once</strong> at mint — this list is metadata sso keeps so it can renew the token and so you can see what's been minted. If an app shows a renewal error, re-mint it here.</p>
+                <div id="apps-list"><div class="text-muted small">Loading…</div></div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -405,9 +422,41 @@ curl "$VAULT_ADDR/v1/secret/data/apps/<span id="app-name-display"></span>/conf" 
       document.getElementById('app-token').textContent = result.token;
       document.getElementById('app-name-display').textContent = name;
       document.getElementById('app-result-card').classList.remove('d-none');
+      loadApps();
     } catch (err) {
       errorEl.textContent = err.message;
       errorEl.classList.remove('d-none');
+    }
+  }
+
+  // List the minted external-app tokens (metadata only). Makes the Apps tab show
+  // what's been minted instead of a credential that vanishes after the once-only
+  // token display.
+  async function loadApps() {
+    const $list = document.getElementById('apps-list');
+    if (!$list) return;
+    $list.textContent = 'Loading…';
+    try {
+      const res = await fetch('/api/vault/apps', {
+        headers: { 'auth-token': app.auth.getToken() }
+      });
+      if (!res.ok) { $list.innerHTML = '<div class="text-danger small">Failed to load apps.</div>'; return; }
+      const { apps = [] } = await res.json();
+      if (!apps.length) { $list.innerHTML = '<div class="text-muted small">No apps minted yet.</div>'; return; }
+      $list.innerHTML = '<div class="list-group shadow-sm">' + apps.map(a => {
+        const ok = !a.lastError;
+        const renewed = a.lastRenewedAt ? ' · renewed ' + moment(a.lastRenewedAt).fromNow() : ' · never renewed';
+        return `<div class="list-group-item d-flex justify-content-between align-items-center">
+          <div>
+            <strong class="font-monospace">${app.util.escapeHtml(a.name)}</strong>
+            ${ok ? '<span class="badge bg-success ms-1">renewing</span>' : '<span class="badge bg-danger ms-1" title="' + app.util.escapeHtml(a.lastError) + '">renewal error</span>'}
+            <div class="small text-muted">minted ${moment(a.createdOn).format('YYYY-MM-DD HH:mm')}${renewed}</div>
+          </div>
+          <span class="font-monospace small text-muted">secret/apps/${app.util.escapeHtml(a.name)}/</span>
+        </div>`;
+      }).join('') + '</div>';
+    } catch (err) {
+      $list.innerHTML = '<div class="text-danger small">Failed to load apps: ' + app.util.escapeHtml(err.message) + '</div>';
     }
   }
 
@@ -572,6 +621,7 @@ curl "$VAULT_ADDR/v1/secret/data/apps/<span id="app-name-display"></span>/conf" 
         '<i class="fas fa-lock"></i> Vault Secrets <small class="text-muted">(admin — all of secret/)</small>';
       document.getElementById('secret-path-label').textContent = 'Secret path (under secret/)';
       document.getElementById('secret-path-input').placeholder = 'e.g. apps/my-service/conf';
+      loadApps();
     }
     loadSecrets();
     loadShared();

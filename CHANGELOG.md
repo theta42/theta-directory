@@ -1,3 +1,15 @@
+# v1.27.0
+- fix: Directory group names now match `docs/GROUPS.md` exactly — per-resource groups are `{site}_{kind}_{name}_{level}` (`site_local_host_theta-env_access`, `site_local_app_sso-manager_access`), with the kind always present and the resource name slug stripped of its kind prefix. Services map to the `app` kind. The access-request + resolver tests were updated to the documented convention.
+- fix: a site resource now carries only `god_admin` + the site-wide groups (`{site}_super_admin`, `{site}_everyone`); the kind-scoped aggregates are still created for nesting but are no longer surfaced on the site's modal.
+- fix: groups no longer appear 3× under a resource — the Directory self-heal (which runs on every load) was creating duplicate `ResourceGroup` links; linking is now idempotent (check-then-create).
+- fix: `/api/agent/nodes` no longer 404s — the agent REST router is mounted unconditionally instead of being gated on the WebSocket server being up.
+- fix: `POST /api/shared-secrets/` rejected valid slugs — the slug regex now allows underscores (was hyphens-only).
+- fix: `GET /api/shared-secrets/` crashed with `s.path is not a function` — the list spread dropped the instance's `path()` method; now uses the static `SharedSecret.pathFor`.
+- fix: promoting a discovered inventory resource crashed with `Resource.update is not a function` — `update` is an instance method; the promote handler now loads an instance and calls `update()` on it.
+- feat: Vault → Apps tab now lists minted app tokens (the "Minted apps" list) — each is a scoped OpenBao credential for an external service; sso renews them and the list shows renewal state, so a minted credential no longer vanishes after its once-only token display. New `GET /api/vault/apps`.
+- feat: Vault page documents itself — a `/docs/vault` help icon in the header, and the doc now covers the Apps + Shared tabs.
+- feat: discovery plugin cards show last-run time + status (ok/error) and a Logs button that opens the captured run log.
+
 # v1.26.1
 - fix: the legacy `app_super_admin` group is gone — `SUPER_ADMIN_GROUP` (nested into every resource's `_admin` group by auto-provisioning) is now `god_admin`, and `docker-entrypoint.sh` no longer seeds or nests `app_super_admin` (god_admin is nested into the `app_sso_*` groups directly). `isSuperAdmin` still recognizes a pre-existing `app_super_admin` as a migration alias, so an old deployment isn't stripped of rights until it's rebuilt.
 

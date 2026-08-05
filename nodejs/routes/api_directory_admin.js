@@ -61,6 +61,17 @@ async function ensureGroup(name, ownerDn, description) {
   }
 }
 
+// Link a group to a resource only if that link doesn't already exist. The
+// ResourceGroup table has no unique constraint on (resourceId, groupCn), so a
+// naive create on every Directory self-heal (which runs ensureSiteGroups /
+// provisionResourceGroups on each load) was accumulating duplicate links -- the
+// "groups appear 3x under a resource" bug. Always check first.
+async function ensureResourceGroup(resourceId, groupCn, accessLevel) {
+  const existing = await ResourceGroup.list({ where: { resourceId, groupCn } });
+  if (existing.length) return existing[0];
+  return ResourceGroup.create({ resourceId, groupCn, accessLevel });
+}
+
 // Provision the site-level groups + the aggregates the per-resource groups nest
 // into. Idempotent -- called on every directory list so a site seeded by an
 // older release gets its groups without a rebuild:
@@ -79,19 +90,20 @@ async function ensureSiteGroups(siteSlug, ownerDn, siteName, siteResourceId) {
   // groups as member.
   const link = async (cn, isAdmin) => {
     if (!siteResourceId) return;
-    await ResourceGroup.create({ resourceId: siteResourceId, groupCn: cn, accessLevel: isAdmin ? 'owner' : 'member' }).catch(() => {});
+    await ensureResourceGroup(siteResourceId, cn, isAdmin ? 'owner' : 'member');
   };
 
   const sAdmin = groups.siteSuperAdminCns(siteSlug);
   await ensureGroup(sAdmin, ownerDn, `Site admin for ${siteName || siteSlug}`);
   await link(sAdmin, true);
+  // The kind-scoped aggregates are CREATED here (per-resource groups nest into
+  // them), but are NOT linked to the site resource: a site carries only the god
+  // and site-wide groups (S_super_admin, S_everyone), per the user's model. The
+  // aggregates have no modal home; site-wide access is granted via S_super_admin
+  // and per-resource access via the host/app groups.
   for (const kind of ['host', 'app']) {
-    const aggAdmin = groups.aggregateGroupCns(siteSlug, kind, 'admin');
-    const aggAccess = groups.aggregateGroupCns(siteSlug, kind, 'access');
-    await ensureGroup(aggAdmin, ownerDn, `Admin on all ${kind}s at ${siteSlug}`);
-    await ensureGroup(aggAccess, ownerDn, `Access to all ${kind}s at ${siteSlug}`);
-    await link(aggAdmin, true);
-    await link(aggAccess, false);
+    await ensureGroup(groups.aggregateGroupCns(siteSlug, kind, 'admin'), ownerDn, `Admin on all ${kind}s at ${siteSlug}`);
+    await ensureGroup(groups.aggregateGroupCns(siteSlug, kind, 'access'), ownerDn, `Access to all ${kind}s at ${siteSlug}`);
   }
   await ensureGroup(groups.siteEveryoneCns(siteSlug), ownerDn, `All users at ${siteSlug}`);
   await link(groups.siteEveryoneCns(siteSlug), false);
@@ -114,29 +126,30 @@ async function ensureSiteGroups(siteSlug, ownerDn, siteName, siteResourceId) {
 
 // Provision the per-resource groups for a host/app and nest them into the site
 // aggregates (so a site/aggregate admin reaches this resource by membership).
-// The specific group name uses the resource's slug verbatim
-// (`{site}_{slug}_{level}` -- the kind is carried in the slug, e.g. `host_theta-env`);
-// `kind` (host/app) selects which aggregate the group nests into:
+// Group names follow docs/GROUPS.md §2: `{site}_{kind}_{nameSlug}_{level}` where
+// nameSlug is the resource name with the kind prefix stripped (`host_theta-env` ->
+// `theta-env`). `kind` (host/app) both goes in the name and selects the aggregate:
 //
-//   {site}_{slug}_admin  -> {site}_{slug}_access
-//   {site}_{slug}_admin  -> {site}_{kind}s_admin    (aggregate)
-//   {site}_{slug}_access -> {site}_{kind}s_access   (aggregate)
-//   god_admin            -> {site}_{slug}_admin     (global super admin)
+//   {site}_{kind}_{slug}_admin  -> {site}_{kind}_{slug}_access
+//   {site}_{kind}_{slug}_admin  -> {site}_{kind}s_admin    (aggregate)
+//   {site}_{kind}_{slug}_access -> {site}_{kind}s_access   (aggregate)
+//   god_admin                   -> {site}_{kind}_{slug}_admin  (global super admin)
 async function provisionResourceGroups(resource, kind, siteSlug, ownerDn) {
-  const accessCn = groups.resourceGroupCns(siteSlug, resource.slug, 'access');
-  const adminCn = groups.resourceGroupCns(siteSlug, resource.slug, 'admin');
+  const nameSlug = groups.resourceNameSlug(resource.slug);
+  const accessCn = groups.resourceGroupCns(siteSlug, kind, nameSlug, 'access');
+  const adminCn = groups.resourceGroupCns(siteSlug, kind, nameSlug, 'admin');
 
   await ensureGroup(accessCn, ownerDn, `Access group for ${resource.name}`);
   await ensureGroup(adminCn, ownerDn, `Admin group for ${resource.name}`);
 
   // Link both groups to the resource so the Directory can show/revoke them.
-  await ResourceGroup.create({ resourceId: resource.id, groupCn: accessCn, accessLevel: 'member' }).catch(() => {});
-  await ResourceGroup.create({ resourceId: resource.id, groupCn: adminCn, accessLevel: 'owner' }).catch(() => {});
+  await ensureResourceGroup(resource.id, accessCn, 'member');
+  await ensureResourceGroup(resource.id, adminCn, 'owner');
 
   await nestGroup(adminCn, accessCn); // administering implies using
   await nestGroup(adminCn, groups.aggregateGroupCns(siteSlug, kind, 'admin'));  // aggregate admin reaches this resource
   await nestGroup(accessCn, groups.aggregateGroupCns(siteSlug, kind, 'access')); // aggregate access reaches this resource
-  await nestGroup(SUPER_ADMIN_GROUP, adminCn); // legacy cross-app super admin
+  await nestGroup(SUPER_ADMIN_GROUP, adminCn); // global super admin
 }
 
 // The group CNs it is valid to associate with a given resource (docs/GROUPS.md
@@ -147,25 +160,24 @@ async function provisionResourceGroups(resource, kind, siteSlug, ownerDn) {
 // capability groups following the same shapes.
 function validGroupCnsForResource(resource, siteSlug) {
   const valid = new Set();
+  // A site resource only carries god_admin (added by the route) + the site-wide
+  // groups (S_super_admin, S_everyone). The kind-scoped host/app aggregates and
+  // specific groups belong to host/app resources, not to the site.
   if (resource.kind === 'site') {
     valid.add(groups.siteSuperAdminCns(siteSlug));
     valid.add(groups.siteEveryoneCns(siteSlug));
-    for (const k of ['host', 'app']) {
-      valid.add(groups.aggregateGroupCns(siteSlug, k, 'admin'));
-      valid.add(groups.aggregateGroupCns(siteSlug, k, 'access'));
-    }
-    return { valid, capRe: new RegExp(`^${siteSlug}_(hosts|apps)_[a-z0-9-]+$`) };
+    return { valid, capRe: new RegExp(`^${siteSlug}_super_admin$|^${siteSlug}_everyone$`) };
   }
   const kind = groupKind(resource); // 'host'|'app'|null
   if (kind) {
-    const slug = resource.slug; // verbatim (kind is carried in the slug)
-    valid.add(groups.resourceGroupCns(siteSlug, slug, 'admin'));
-    valid.add(groups.resourceGroupCns(siteSlug, slug, 'access'));
+    const nameSlug = groups.resourceNameSlug(resource.slug);
+    valid.add(groups.resourceGroupCns(siteSlug, kind, nameSlug, 'admin'));
+    valid.add(groups.resourceGroupCns(siteSlug, kind, nameSlug, 'access'));
     valid.add(groups.aggregateGroupCns(siteSlug, kind, 'admin'));
     valid.add(groups.aggregateGroupCns(siteSlug, kind, 'access'));
     valid.add(groups.siteSuperAdminCns(siteSlug));
     valid.add(groups.siteEveryoneCns(siteSlug));
-    return { valid, capRe: new RegExp(`^${siteSlug}_(${slug}_|${kind}s_)[a-z0-9-]+$`) };
+    return { valid, capRe: new RegExp(`^${siteSlug}_${kind}_${nameSlug}_[a-z0-9-]+$|^${siteSlug}_${kind}s_[a-z0-9-]+$`) };
   }
   // oauth/container etc. — only the global god_admin makes sense to pin here.
   valid.add(groups.siteSuperAdminCns(siteSlug));
@@ -439,7 +451,7 @@ router.post('/groups', async (req, res, next) => {
       }
     }
 
-    const g = await ResourceGroup.create(req.body);
+    const g = await ensureResourceGroup(req.body.resourceId, groupCn, req.body.accessLevel);
     res.json({ results: g });
   } catch (err) { next(err); }
 });

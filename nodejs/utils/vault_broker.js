@@ -410,6 +410,27 @@ mintAppRouter.post('/', async (req, res, next) => {
 	}
 });
 
+// List the minted external-app tokens (metadata only — the token itself is shown
+// once at mint and never stored; the accessor is a renewal/revoke handle and is
+// never exposed). Lets the Apps tab show what has been minted instead of a
+// credential vanishing into the void.
+mintAppRouter.get('/', async (req, res, next) => {
+	try {
+		await permission.byGroup(req.user, [ADMIN_GROUP]);
+		const rows = await VaultAppToken.list();
+		res.json({ apps: rows.map((r) => ({
+			name: r.name,
+			createdBy: r.created_by,
+			createdOn: r.created_on,
+			lastRenewedAt: r.lastRenewedAt || null,
+			lastError: r.lastError || null,
+		})) });
+	} catch (e) {
+		if (e.status === 401) return res.status(403).json({ error: 'admin only' });
+		next(e);
+	}
+});
+
 module.exports = {
 	getOrCreateUserToken,
 	getOrCreateAdminToken,

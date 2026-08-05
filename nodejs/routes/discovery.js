@@ -186,8 +186,11 @@ router.post('/promote/:slug', async (req, res, next) => {
 		
 		const meta = resource.metadata || {};
 		meta.managed = true;
-		await Resource.update(resource.id, { metadata: meta });
-		
+		// `Resource.update` is not a static — `update` is an instance method
+		// (@simpleworkjs/orm). Load a fresh instance and call it on that.
+		const inst = await Resource.get(resource.id);
+		await inst.update({ metadata: meta });
+
 		res.json(envelope({ success: true, groups: [accessGroup, adminGroup] }));
 	} catch (err) { next(err); }
 });

@@ -44,9 +44,10 @@ beforeAll(async () => {
 	expect(host.status).toBe(200);
 	hostId = host.body.results.id;
 
-	// Creating a host auto-provisions <site>_<slug>_access / _admin.
-	accessGroupCn = `${siteSlug}_${hostSlug}_access`;
-	const adminGroupCn = `${siteSlug}_${hostSlug}_admin`;
+	// Creating a host auto-provisions <site>_host_<slug>_access / _admin
+	// (docs/GROUPS.md §2 — the kind is part of the name).
+	accessGroupCn = `${siteSlug}_host_${hostSlug}_access`;
+	const adminGroupCn = `${siteSlug}_host_${hostSlug}_admin`;
 
 	// The creator is seeded into both groups -- groupOfNames requires at least
 	// one member, so Group.add puts the owner's DN there -- and _admin is nested
@@ -213,8 +214,9 @@ describe('Access requests — withdrawal', () => {
 		expect(host.status).toBe(200);
 
 		// Same as the top-level setup: step out of the auto-created groups the
-		// creator is seeded into, or this is a request for access already held.
-		for (const cn of [`${siteSlug}_${slug}_admin`, `${siteSlug}_${slug}_access`]) {
+		// creator is seeded into (docs/GROUPS.md §2 — kind is part of the name),
+		// or this is a request for access already held.
+		for (const cn of [`${siteSlug}_host_${slug}_admin`, `${siteSlug}_host_${slug}_access`]) {
 			await request(app)
 				.delete(`/api/group/${encodeURIComponent(cn)}/test`)
 				.set('auth-token', token);

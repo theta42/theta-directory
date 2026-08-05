@@ -41,17 +41,23 @@ function assertKind(kind) {
   if (!KINDS.includes(kind)) throw new Error(`invalid resource kind: ${kind} (must be host or app)`);
 }
 
-// {site}_{slug}_{level} — the per-resource group for one resource.
-//
-// Both `site` and `slug` are the resource slugs verbatim (e.g. `site_local`,
-// `host_theta-env`), NOT slugified or kind-inserted: directory resource slugs
-// carry their kind as a prefix (`host_theta-env`), so `site_local` + `host_theta-env`
-// yields `site_local_host_theta-env_access`. Services are stored without a
-// prefix (`sso-manager`), yielding `site_local_sso-manager_access`. This is the
-// convention the auto-provisioner, the resolver, and the access-request tests
-// all share -- re-slugifying or inserting a kind would double the delimiter.
-function resourceGroupCns(site, slug, level) {
-  return `${site}_${slug}_${level}`;
+// Strip the kind prefix a directory resource slug may carry (`host_theta-env` ->
+// `theta-env`), leaving the resource's name slug. Services are stored bare
+// (`sso-manager`), so this is a no-op for them.
+function resourceNameSlug(slug) {
+  return String(slug || '').replace(/^(site|host|app)_/, '');
+}
+
+// {site}_{kind}_{nameSlug}_{level} — the per-resource group for ONE resource.
+// Matches docs/GROUPS.md §2 (`S_host_<host>_<level>` / `S_app_<app>_<level>`):
+// `site` is the site resource's slug verbatim (`site_local`), `kind` is the
+// group-model kind (`host`/`app`), `nameSlug` is the resource's name (kind
+// stripped, e.g. `theta-env` from `host_theta-env`). So a host `host_theta-env`
+// yields `site_local_host_theta-env_access` and a service `sso-manager` yields
+// `site_local_app_sso-manager_access`.
+function resourceGroupCns(site, kind, nameSlug, level) {
+  assertKind(kind);
+  return `${site}_${kind}_${slugify(nameSlug)}_${level}`;
 }
 
 // {site}_hosts_<level> / {site}_apps_<level> (plural kind — the aggregate).
@@ -94,11 +100,13 @@ function levelGrants(level, wanted) {
 // granted groups (see permission.onResource). This keeps the function pure over
 // the user's membership only.
 function hasPermission(memberOf, resource, level) {
-  // `site` and `slug` are used verbatim (resource slugs may carry a kind prefix,
-  // e.g. `site_local` / `host_theta-env`) -- see resourceGroupCns.
+  // `site` is used verbatim (`site_local`); `kind` maps the directory `service`
+  // kind onto the group model's `app` (docs/GROUPS.md §11 — consoles/services are
+  // apps); `nameSlug` is the resource name with any kind prefix stripped.
   const site = resource && resource.site;
-  const kind = resource && resource.kind;
-  const slug = resource && resource.slug;
+  const rawKind = resource && resource.kind;
+  const kind = rawKind === 'service' ? 'app' : rawKind;
+  const nameSlug = resourceNameSlug(resource && resource.slug);
   const set = new Set(memberOf || []);
 
   if (set.has(GOD_ADMIN)) return true;
@@ -107,13 +115,13 @@ function hasPermission(memberOf, resource, level) {
   if (isKnownLevel(level)) {
     // admin / access
     if (set.has(aggregateGroupCns(site, kind, level))) return true;
-    if (set.has(resourceGroupCns(site, slug, level))) return true;
+    if (set.has(resourceGroupCns(site, kind, nameSlug, level))) return true;
     if (level === 'access' && hasPermission(memberOf, resource, 'admin')) return true;
     return false;
   }
   // Opaque capability — exact aggregate or specific grant only.
   if (set.has(aggregateGroupCns(site, kind, level))) return true;
-  if (set.has(resourceGroupCns(site, slug, level))) return true;
+  if (set.has(resourceGroupCns(site, kind, nameSlug, level))) return true;
   return false;
 }
 
@@ -122,6 +130,7 @@ module.exports = {
   KNOWN_LEVELS,
   KINDS,
   slugify,
+  resourceNameSlug,
   resourceGroupCns,
   aggregateGroupCns,
   siteSuperAdminCns,

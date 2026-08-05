@@ -8,12 +8,11 @@ const agentManager = require('../utils/agent_manager');
 const ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_admin'];
 
 module.exports = function initAgentWebSockets(app) {
-  if (!app.wss) {
-    console.warn("WebSocket server for agents is not initialized.");
-    return;
-  }
-
-  app.wss.on('connection', (ws, req) => {
+  // Only the WebSocket handler needs the WS server. The REST routes mounted
+  // below (/api/agent/*) must work regardless of the WS server state -- gating
+  // them on `app.wss` made them 404 whenever it wasn't initialized.
+  if (app.wss) {
+    app.wss.on('connection', (ws, req) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const token = url.searchParams.get('token') || req.headers['authorization'];
 
@@ -74,6 +73,7 @@ module.exports = function initAgentWebSockets(app) {
       }));
     } catch (e) {}
   });
+  } // end if (app.wss)
 
   // REST API routes for Agent Management (mounted under /api/agent). The agent
   // WebSocket (/api/agent/ws) is handled by the raw `wss` upgrade server in
