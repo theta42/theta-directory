@@ -78,7 +78,19 @@ Requests are decided by the resource's `owner`, or by any directory admin. Mark 
 
 ## Navigating the UI
 
-The Directory Management interface provides a **Tree View** toggle that visually nests your resources, making it easy to comprehend your network topography at a glance. You can also filter, search, and sort your entire infrastructure inventory. From the tree view, you can click the green `+` icon next to any resource to instantly add a child resource beneath it.
+The Directory Management interface nests your resources as a tree, making it easy
+to comprehend your network topography at a glance. You can filter, search, and
+sort your entire infrastructure inventory. Click the green `+` icon next to any
+resource to add a child resource beneath it.
+
+**Collapsing the tree.** Any resource with children carries a caret; click it to
+fold that subtree away. The toolbar's double-chevron buttons expand or collapse
+everything at once. Collapsed state is remembered per browser, so the shape you
+arrange survives a refresh (and the self-heal reload that follows most edits).
+
+While a search filter is active every match is shown regardless of collapsed
+ancestors — otherwise searching for something inside a folded subtree would
+silently return nothing. Clearing the box restores your saved shape.
 
 <a href="images/directory.png" target="_blank"><img src="images/directory.png" alt="Directory & inventory list view" width="80%"></a>
 
@@ -102,8 +114,16 @@ You don't have to build the graph by hand — the theta42 tooling registers itse
 
 - a **site** (name from `CFG_SITE_NAME` in `setup.env`, default `local` → slug `site_local`) marked as the current site
 - the **host** the stack runs on (`host_<hostname>`), with IP, MAC address, OS, and kernel collected from the machine
-- the **services** it composes — SSO Manager, Proxy (management UI), OpenLDAP Directory (the LDAPS endpoint Linux hosts and LDAP-native apps bind to), and OpenResty Edge (the 80/443 data plane) — each with its address, internal port, and git repo
+- the **hosts** for the proxy and jump host (`host_theta-proxy`, `host_theta-jump`)
+- the **services** it composes — SSO Manager, Proxy (management UI), OpenLDAP Directory (the LDAPS endpoint Linux hosts and LDAP-native apps bind to), OpenResty Edge (the 80/443 data plane), and the SSH Jump Host — each with its address, internal port, and git repo
 - the proxy's auto-registered **OAuth client**, linked under its service
+
+Services are parented to the host that actually runs them: Proxy and OpenResty
+Edge under `host_theta-proxy`, the SSH Jump Host under `host_theta-jump`, and the
+rest under the stack host. Installs seeded before this was fixed had all of them
+under the stack host, leaving the two purpose-made host resources childless; the
+seed re-parents those on its next run, and only when the current parent is the
+one the old code set, so a layout you arranged deliberately is left alone.
 
 The seed is idempotent and non-destructive: a resource whose slug already exists is considered operator-owned — the seed only fills in metadata fields you haven't set, and never overwrites your values.
 

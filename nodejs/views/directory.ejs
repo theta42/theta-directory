@@ -33,6 +33,10 @@
     					<a href="/docs/groups" class="text-reset ms-1" title="Group & permission model"><i class="fa-solid fa-circle-question"></i></a>
     				</div>
 					<div class="d-flex flex-wrap gap-2 align-items-center">
+                        <div class="btn-group btn-group-sm shadow-sm" role="group" aria-label="Expand or collapse the whole tree">
+                            <button type="button" class="btn btn-outline-secondary" onclick="expandAllTree()" title="Expand all"><i class="fa-solid fa-angles-down"></i></button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="collapseAllTree()" title="Collapse all"><i class="fa-solid fa-angles-up"></i></button>
+                        </div>
                         <input type="text" id="search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search..." onkeyup="renderTable()" style="width: 200px;">
                         <select id="sort-by" class="form-select form-select-sm shadow-sm" onchange="renderTable()" style="width: 150px;">
                           <option value="name">Name (A-Z)</option>
@@ -70,9 +74,10 @@
               </tr>
             </thead>
             <tbody id="resources-list" jq-repeat="resources">
-              <tr id="resource-row-{{id}}">
+              <tr id="resource-row-{{id}}" data-depth="{{depth}}">
                 <td class="ps-3">
                   {{{indentHtml}}}
+                  {{{caretHtml}}}
                   {{#isHost}}<span class="d-inline-block rounded-circle me-1" style="width:10px;height:10px;background:{{agentColor}};" title="{{agentStatusTitle}}"></span>{{/isHost}}
                   <span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
                   {{#metadata.isProduction}}<span class="badge bg-danger">Prod</span>{{/metadata.isProduction}}
@@ -138,6 +143,15 @@
                     <div class="text-muted small">
                       <i class="fa-solid fa-plug pe-1"></i> {{#metadata.source}}{{metadata.source}}{{/metadata.source}}{{^metadata.source}}Manual{{/metadata.source}}
                     </div>
+                    <div class="text-muted small font-monospace">
+                      {{#metadata.vmid}}<span class="me-2" title="Guest ID on the hypervisor">#{{metadata.vmid}}</span>{{/metadata.vmid}}
+                      <span title="Directory slug">{{slug}}</span>
+                    </div>
+                    {{#metadata.sourceId}}
+                    <div class="text-muted small font-monospace" title="Identifier at the discovery source">
+                      <i class="fa-solid fa-fingerprint pe-1"></i>{{metadata.sourceId}}
+                    </div>
+                    {{/metadata.sourceId}}
                   </td>
                   <td>
                     <span class="badge bg-secondary me-1">{{kind}}</span>
@@ -149,14 +163,22 @@
                     {{/metadata.subType}}
                   </td>
                   <td>
-                    {{#metadata.ip}}<div class="font-monospace small"><i class="fa-solid fa-network-wired pe-1"></i>{{metadata.ip}}</div>{{/metadata.ip}}
-                    {{^metadata.ip}}<span class="text-muted small fst-italic">Unknown IP</span>{{/metadata.ip}}
+                    {{#displayIp}}<div class="font-monospace small"><i class="fa-solid fa-network-wired pe-1"></i>{{displayIp}}</div>{{/displayIp}}
+                    {{^displayIp}}<span class="text-muted small fst-italic">Unknown IP</span>{{/displayIp}}
                     {{#metadata.interfaces.length}}
                     <div class="mt-1 small text-muted">
                       {{#metadata.interfaces}}
-                        <div><i class="fa-solid fa-microchip pe-1"></i> {{mac}} {{#ip}}<span class="text-black-50">({{ip}})</span>{{/ip}}</div>
+                        <div>
+                          <i class="fa-solid fa-microchip pe-1"></i>
+                          {{#mac}}<span class="font-monospace">{{mac}}</span>{{/mac}}{{^mac}}<span class="fst-italic">no MAC</span>{{/mac}}
+                          {{#ip}}<span class="text-black-50">({{ip}})</span>{{/ip}}
+                          {{#name}}<span class="text-black-50">{{name}}</span>{{/name}}
+                        </div>
                       {{/metadata.interfaces}}
                     </div>
+                    {{/metadata.interfaces.length}}
+                    {{^metadata.interfaces.length}}
+                      {{#metadata.macAddress}}<div class="mt-1 small text-muted"><i class="fa-solid fa-microchip pe-1"></i> <span class="font-monospace">{{metadata.macAddress}}</span></div>{{/metadata.macAddress}}
                     {{/metadata.interfaces.length}}
                   </td>
                   <td>
@@ -532,7 +554,8 @@
   // hostname). Populated by loadResources/refreshAgents; host rows + the Metrics
   // tab read from these. Agent data comes from /api/agent/nodes (admin-gated).
   var agentsByHost = {};
-  var agentsByToken = {};
+  var agentsByResource = {};
+  var agentsById = {};
   // True when the agent/nodes endpoint itself was unreachable (network, or an
   // older app without the agent route). When set we cannot tell "this host has
   // no agent" apart from "the agent service is down", so we must NOT paint every
@@ -598,14 +621,23 @@
     }
   }
 
-  // Build the hostname->agent and token->agent lookup maps from /api/agent/nodes.
+  // Index agents from /api/agent/nodes. `agentsByResource` is the real link --
+  // an agent row now carries the id of the host it was enrolled against, so a
+  // resource's agent is a lookup, not a guess.
+  //
+  // agentsByHost survives only as a fallback for agents enrolled without a
+  // resource binding. It used to be the ONLY mechanism, which meant a host
+  // whose directory name differed from its OS hostname silently showed "no
+  // agent", and two hosts sharing a hostname aliased onto each other.
   function indexAgents(agents) {
     agentsByHost = {};
-    agentsByToken = {};
+    agentsByResource = {};
+    agentsById = {};
     for (const a of agents || []) {
-      const hn = (a.hostname || (a.discovery && a.discovery.hostname) || '').toLowerCase();
-      if (hn) agentsByHost[hn] = a;
-      if (a.token) agentsByToken[a.token] = a;
+      agentsById[a.id] = a;
+      if (a.resourceId) agentsByResource[a.resourceId] = a;
+      const hn = ((a.lastDiscovery && a.lastDiscovery.hostname) || a.name || '').toLowerCase();
+      if (hn && !agentsByHost[hn]) agentsByHost[hn] = a;
     }
   }
 
@@ -617,19 +649,29 @@
   // stores the agent on resourcesById so the Metrics tab can find it.
   function attachAgentStatus(n) {
     n.isHost = true;
+    // Bound agent first; hostname match only for agents with no binding yet.
     const name = (n.name || '').toLowerCase();
     const slug = (n.slug || '').replace(/^host_/, '').toLowerCase();
-    const a = agentsByHost[name] || (slug && agentsByHost[slug]);
+    const a = agentsByResource[n.id] || agentsByHost[name] || (slug && agentsByHost[slug]);
     n.agent = a || null;
     if (resourcesById[n.id]) resourcesById[n.id].agent = a || null;
     if (!a) {
       // Endpoint unreachable: we genuinely don't know -- neutral grey, not a
       // false red alarm across every host.
       if (agentsUnavailable) { n.agentColor = '#adb5bd'; n.agentStatusTitle = 'Agent service unreachable'; return; }
-      n.agentColor = '#dc3545'; n.agentStatusTitle = 'No theta-agent connected'; return;
+      // No agent enrolled at all is a neutral fact about most hosts, not a
+      // fault -- red here made a directory of ordinary hosts look like an
+      // outage. Red is reserved for "enrolled, and not connected".
+      n.agentColor = '#adb5bd'; n.agentStatusTitle = 'No theta-agent enrolled'; return;
     }
-    if (!a.isOnline) { n.agentColor = '#dc3545'; n.agentStatusTitle = 'Agent offline (' + (a.hostname || 'unknown') + ')'; return; }
-    const t = a.telemetry || {};
+    if (a.revoked) { n.agentColor = '#6c757d'; n.agentStatusTitle = 'Agent enrollment revoked'; return; }
+    if (!a.isOnline) {
+      // Now distinguishable from "never existed", because the enrollment row
+      // outlives the connection.
+      const seen = a.last_seen ? ' — last seen ' + timeAgo(new Date(a.last_seen * 1000).toISOString()) : '';
+      n.agentColor = '#dc3545'; n.agentStatusTitle = 'Agent enrolled but offline' + seen; return;
+    }
+    const t = a.lastTelemetry || {};
     const high = (t.cpu_usage_percent > 80) || (t.ram_usage_percent > 80) || (t.disk_usage_percent > 90);
     n.agentColor = high ? '#ffc107' : '#198754';
     n.agentStatusTitle = high ? 'Connected — high load' : 'Connected — healthy';
@@ -640,8 +682,8 @@
     if (!agent) {
       return '<div class="p-3 text-center text-muted"><i class="fa-solid fa-microchip fa-3x mb-3"></i><h6>No theta-agent connected</h6><p class="small">Install the agent on this host to see live metrics.</p></div>';
     }
-    const d = agent.discovery || {};
-    const t = agent.telemetry || {};
+    const d = agent.lastDiscovery || {};
+    const t = agent.lastTelemetry || {};
     const bar = (val) => `<div class="progress" style="height:8px"><div class="progress-bar" style="width:${Math.max(0, Math.min(100, val || 0))}%"></div></div>`;
     const online = agent.isOnline ? '<span class="badge bg-success">Online</span>' : '<span class="badge bg-secondary">Offline</span>';
     const gpu = (t.gpu_usage_percent != null && t.gpu_usage_percent >= 0) ? t.gpu_usage_percent + '%' : 'N/A';
@@ -776,6 +818,10 @@
       }
     });
 
+    // Rows are emitted depth-first, so a node's descendants are exactly the
+    // rows that follow it until depth drops back to its own. `data-depth` is
+    // what applyTreeCollapse() below walks -- that ordering is the whole
+    // mechanism, so keep the traversal depth-first if you change this.
     const flatten = (nodes, depth) => {
        nodes.forEach(n => {
          let indentHtml = '';
@@ -786,6 +832,16 @@
             indentHtml += '<i class="fa-solid fa-turn-up fa-rotate-90 text-muted me-2"></i>';
          }
          n.indentHtml = indentHtml;
+         n.depth = depth;
+         // A leaf gets a spacer of the same width, so names stay aligned down
+         // the column instead of jittering by whether a row has children.
+         n.caretHtml = n.children.length
+           ? '<button type="button" class="btn btn-link btn-sm p-0 me-1 text-reset tree-caret" '
+             + 'onclick="toggleTreeNode(\'' + n.id + '\'); return false;" '
+             + 'aria-label="Expand or collapse ' + escapeHtmlAttr(n.name || '') + '" '
+             + 'title="Expand/collapse"><i class="fa-solid fa-chevron-down fa-fw"></i></button>'
+           : '<span class="d-inline-block me-1" style="width:1.1rem"></span>';
+         n.childCount = n.children.length;
          n.accessHtml = accessCellHtml(n.id);
          if (n.kind === 'host') attachAgentStatus(n);
          finalRenderList.push(n);
@@ -801,8 +857,100 @@
     for (const r of finalRenderList) {
       $.scope.resources.push(r);
     }
+
+    applyTreeCollapse();
   }
   
+  // ── Collapsible tree ───────────────────────────────────────────────────────
+  // Which nodes are collapsed, by resource id. Persisted so the shape of the
+  // tree survives a refresh (and the Directory self-heal reload that follows
+  // most edits) -- a tree that re-expands every time is worse than no tree.
+  var TREE_COLLAPSE_KEY = 'directory.collapsedNodes';
+
+  function loadCollapsed() {
+    try {
+      const raw = localStorage.getItem(TREE_COLLAPSE_KEY);
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch (e) { return new Set(); }
+  }
+
+  function saveCollapsed(set) {
+    try { localStorage.setItem(TREE_COLLAPSE_KEY, JSON.stringify([...set])); } catch (e) {}
+  }
+
+  function escapeHtmlAttr(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // Hide every row beneath a collapsed node and point its caret sideways.
+  // Rows are in depth-first order, so "beneath" is the run of following rows
+  // with a greater depth. A node inside an already-hidden run stays hidden
+  // regardless of its own state, which is what makes nesting work.
+  function applyTreeCollapse() {
+    const $rows = $('#resources-list tr');
+
+    // While a search is active every match must be visible, even one sitting
+    // under a collapsed ancestor -- otherwise searching silently returns
+    // nothing and looks broken. The collapsed set is left untouched, so the
+    // tree springs back to its saved shape as soon as the box is cleared.
+    if (($('#search-filter').val() || '').trim()) {
+      $rows.show();
+      $rows.find('.tree-caret i').removeClass('fa-chevron-right').addClass('fa-chevron-down');
+      return;
+    }
+
+    const collapsed = loadCollapsed();
+    let hideBelowDepth = null;
+
+    $rows.each(function() {
+      const $row = $(this);
+      const depth = parseInt($row.attr('data-depth') || '0', 10);
+      const id = ($row.attr('id') || '').replace('resource-row-', '');
+
+      if (hideBelowDepth !== null && depth > hideBelowDepth) {
+        $row.hide();
+        return; // still inside a collapsed subtree; its own state is moot
+      }
+      hideBelowDepth = null;
+      $row.show();
+
+      const $icon = $row.find('.tree-caret i');
+      if (!$icon.length) return;
+      if (collapsed.has(id)) {
+        $icon.removeClass('fa-chevron-down').addClass('fa-chevron-right');
+        hideBelowDepth = depth;
+      } else {
+        $icon.removeClass('fa-chevron-right').addClass('fa-chevron-down');
+      }
+    });
+  }
+
+  function toggleTreeNode(id) {
+    const collapsed = loadCollapsed();
+    if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id);
+    saveCollapsed(collapsed);
+    applyTreeCollapse();
+  }
+
+  function expandAllTree() {
+    saveCollapsed(new Set());
+    applyTreeCollapse();
+  }
+
+  // Collapse every row that has children. Reads the ids out of the rendered
+  // rows rather than the resource list so it can only ever collapse something
+  // that is actually on screen and actually has a caret.
+  function collapseAllTree() {
+    const collapsed = new Set();
+    $('#resources-list tr').each(function() {
+      const $row = $(this);
+      if (!$row.find('.tree-caret').length) return;
+      collapsed.add(($row.attr('id') || '').replace('resource-row-', ''));
+    });
+    saveCollapsed(collapsed);
+    applyTreeCollapse();
+  }
+
   function toggleFormFields() {
     const kind = $('#res-kind').val();
     if (kind === 'host') {
@@ -1405,6 +1553,14 @@
 
     $.scope.discoveryResources.empty();
     for(const r of filtered) {
+      // "Unknown IP" was shown for every device whose address is known per-NIC
+      // rather than in metadata.ip -- which is most of them, since a source
+      // that enumerates interfaces (UniFi, Proxmox guest agent) fills
+      // `interfaces[].ip`. Resolve a display address from the NICs so the
+      // column agrees with the interface list right beneath it.
+      const meta = r.metadata || {};
+      const fromNic = (meta.interfaces || []).map(i => i && i.ip).find(Boolean) || null;
+      r.displayIp = meta.ip || fromNic;
       $.scope.discoveryResources.push(r);
     }
     
@@ -1445,24 +1601,20 @@
   }
 
   // --- THETA AGENT INSTALL MODAL & WIZARD ---
-  function generateRandomHexToken(byteLen) {
-    const arr = new Uint8Array(byteLen || 16);
-    (window.crypto || window.msCrypto).getRandomValues(arr);
-    return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  function regenerateAgentToken(inputId) {
-    const newToken = generateRandomHexToken(16);
-    $('#' + inputId).val(newToken);
-    if (inputId === 'agent-quick-token') $('#agent-custom-token').val(newToken);
-    else $('#agent-quick-token').val(newToken);
-    updateAgentCommands();
-  }
+  // Agent tokens are no longer generated here. The browser minting a token the
+  // server had never heard of is exactly what made /api/agent/ws unauthenticated:
+  // there was nothing to validate against. Tokens now come from
+  // POST /api/agent/enroll (see enrollAgent).
 
   function updateAgentCommands() {
     const quickUrl = ($('#agent-quick-url').val() || window.location.origin).replace(/\/+$/, '');
     const quickToken = $('#agent-quick-token').val() || '';
-    const quickCmd = `curl -fsSL ${quickUrl}/resources/theta-agent/install.sh | sh -s -- --url "${quickUrl}" --token "${quickToken}"`;
+    // public_key must reach the host: without it the agent refuses every
+    // high-risk command. It was never emitted before, which is why signed
+    // commands only ever "worked" while verification was being skipped.
+    const pubKey = (pendingEnrollment && pendingEnrollment.publicKey) || '';
+    const quickCmd = `curl -fsSL ${quickUrl}/resources/theta-agent/install.sh | sh -s -- --url "${quickUrl}" --token "${quickToken}"`
+      + (pubKey ? ` --public-key "${pubKey}"` : '');
     $('#agent-quick-command').text(quickCmd);
 
     const customUrl = ($('#agent-custom-url').val() || window.location.origin).replace(/\/+$/, '');
@@ -1483,6 +1635,7 @@
     const yamlStr = [
       `server_url: "${customUrl}"`,
       `auth_token: "${customToken}"`,
+      `public_key: "${pubKey}"`,
       `location: "${customLocation}"`,
       `capabilities:`,
       `  telemetry: ${telemetry}`,
@@ -1518,9 +1671,14 @@
     });
   }
 
+  // Enrollment state for the open install modal. The token exists only here,
+  // in memory, between the enroll call and the operator copying it: the server
+  // stores a hash and cannot show it again.
+  var pendingEnrollment = null;
+
   function openAgentInstallModal() {
     const currentOrigin = window.location.origin;
-    const initialToken = generateRandomHexToken(16);
+    pendingEnrollment = null;
 
     const bodyHtml = `
       <div class="mb-3 p-3 bg-light rounded border">
@@ -1533,6 +1691,36 @@
         </div>
       </div>
 
+      <div class="card border-primary mb-3" id="agent-enroll-card">
+        <div class="card-header py-2 fw-bold small bg-primary-subtle">
+          <i class="fa-solid fa-id-badge me-1"></i> 1. Enroll this host
+        </div>
+        <div class="card-body py-3">
+          <p class="small text-muted mb-3">
+            The SSO issues the agent's token and records it. Tokens it did not issue are rejected,
+            so enroll the host first — the install command below is built from the result.
+          </p>
+          <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+              <label class="form-label small fw-bold mb-1">Agent name</label>
+              <input type="text" id="agent-enroll-name" class="form-control form-control-sm" placeholder="e.g. web01">
+            </div>
+            <div class="col-md-5">
+              <label class="form-label small fw-bold mb-1">Bind to host resource</label>
+              <select id="agent-enroll-resource" class="form-select form-select-sm"></select>
+              <div class="form-text small">Links the agent to a Directory host, so its status and metrics attach to that resource.</div>
+            </div>
+            <div class="col-md-3">
+              <button class="btn btn-sm btn-primary w-100" id="agent-enroll-btn" onclick="enrollAgent()">
+                <i class="fa-solid fa-key me-1"></i> Enroll &amp; issue token
+              </button>
+            </div>
+          </div>
+          <div id="agent-enroll-result" class="mt-3" style="display:none"></div>
+        </div>
+      </div>
+
+      <div id="agent-install-steps" style="display:none">
       <ul class="nav nav-pills mb-3" id="agent-install-tabs" role="tablist">
         <li class="nav-item" role="presentation">
           <button class="nav-link active" id="tab-quick-btn" data-bs-toggle="pill" data-bs-target="#tab-quick-pane" type="button" role="tab">
@@ -1555,12 +1743,9 @@
               <input type="text" id="agent-quick-url" class="form-control form-control-sm" value="${currentOrigin}" oninput="updateAgentCommands()">
             </div>
             <div class="col-md-6">
-              <label class="form-label small fw-bold mb-1">Host Token</label>
+              <label class="form-label small fw-bold mb-1">Issued Token</label>
               <div class="input-group input-group-sm">
-                <input type="text" id="agent-quick-token" class="form-control font-monospace" value="${initialToken}" oninput="updateAgentCommands()">
-                <button class="btn btn-outline-secondary" type="button" onclick="regenerateAgentToken('agent-quick-token')" title="Regenerate Token">
-                  <i class="fa-solid fa-rotate"></i>
-                </button>
+                <input type="text" id="agent-quick-token" class="form-control font-monospace" value="" readonly title="Issued by the SSO at enrollment">
               </div>
             </div>
           </div>
@@ -1584,12 +1769,9 @@
               <input type="text" id="agent-custom-url" class="form-control form-control-sm" value="${currentOrigin}" oninput="updateAgentCommands()">
             </div>
             <div class="col-md-4">
-              <label class="form-label small fw-bold mb-1">Host Token</label>
+              <label class="form-label small fw-bold mb-1">Issued Token</label>
               <div class="input-group input-group-sm">
-                <input type="text" id="agent-custom-token" class="form-control font-monospace" value="${initialToken}" oninput="updateAgentCommands()">
-                <button class="btn btn-outline-secondary" type="button" onclick="regenerateAgentToken('agent-custom-token')" title="Regenerate Token">
-                  <i class="fa-solid fa-rotate"></i>
-                </button>
+                <input type="text" id="agent-custom-token" class="form-control font-monospace" value="" readonly title="Issued by the SSO at enrollment">
               </div>
             </div>
             <div class="col-md-3">
@@ -1659,6 +1841,7 @@
           </div>
         </div>
       </div>
+      </div>
     `;
 
     app.modal.open({
@@ -1667,7 +1850,76 @@
       size: 'lg'
     });
 
+    // Only hosts can carry an agent -- the API rejects anything else, so don't
+    // offer it here.
+    const $sel = $('#agent-enroll-resource').empty();
+    $sel.append('<option value="">(not bound — bind later)</option>');
+    rawResources
+      .filter(r => r.kind === 'host')
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      .forEach(r => {
+        const taken = agentsByResource[r.id] ? ' — already has an agent' : '';
+        $sel.append($('<option>').val(r.id).text((r.name || r.slug) + taken).prop('disabled', !!agentsByResource[r.id]));
+      });
+
+    $('#agent-enroll-resource').on('change', function () {
+      const r = rawResources.find(x => x.id === this.value);
+      if (r && !$('#agent-enroll-name').val()) $('#agent-enroll-name').val(r.name || r.slug);
+    });
+
     updateAgentCommands();
+  }
+
+  // Mint the token server-side, then reveal the install steps built from it.
+  async function enrollAgent() {
+    const name = ($('#agent-enroll-name').val() || '').trim();
+    const resourceId = $('#agent-enroll-resource').val() || null;
+    if (!name) {
+      app.messages.toast('Give the agent a name first.', 'warning');
+      return;
+    }
+    const $btn = $('#agent-enroll-btn').prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin me-1"></i> Enrolling…');
+    try {
+      const res = await app.api.post('agent/enroll', { name, resourceId });
+      const body = res && (res.results || res);
+      if (!body || !body.token) throw new Error((body && body.message) || 'enrollment failed');
+
+      pendingEnrollment = body;
+      $('#agent-quick-token').val(body.token);
+      $('#agent-custom-token').val(body.token);
+
+      // The signing key is what makes reboot/arbitrary_bash possible. If the
+      // server could not load one, say so here rather than letting the operator
+      // discover it the first time a command is silently refused.
+      const keyWarn = body.signingAvailable === false
+        ? '<div class="alert alert-warning py-2 small mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i>'
+          + 'The SSO has no agent signing key, so high-risk commands (reboot, configure_ldap, arbitrary_bash) '
+          + 'will be refused. Re-run <code>./setup.sh</code> so OpenBao grants <code>secret/agent/*</code>.</div>'
+        : '';
+
+      $('#agent-enroll-result').show().html(
+        keyWarn +
+        '<div class="alert alert-success py-2 small mb-2">'
+        + '<i class="fa-solid fa-circle-check me-1"></i><strong>Enrolled.</strong> '
+        + 'This token is shown <strong>once</strong> — only its hash is stored. '
+        + 'If you lose it, rotate the agent to issue a new one.</div>'
+        + '<label class="form-label small fw-bold mb-1">Agent token</label>'
+        + '<div class="input-group input-group-sm mb-2">'
+        + '<input type="text" class="form-control font-monospace" id="agent-issued-token" readonly value="' + esc(body.token) + '">'
+        + '<button class="btn btn-outline-secondary" type="button" onclick="copyAgentCommand(\'agent-issued-token-copy\', \'btn-copy-token\')" id="btn-copy-token"><i class="fa-solid fa-copy"></i></button>'
+        + '</div>'
+        + '<span id="agent-issued-token-copy" class="d-none">' + esc(body.token) + '</span>'
+      );
+
+      $('#agent-enroll-card').removeClass('border-primary').addClass('border-success');
+      $btn.html('<i class="fa-solid fa-check me-1"></i> Enrolled');
+      $('#agent-install-steps').show();
+      updateAgentCommands();
+      refreshAgents();
+    } catch (err) {
+      $btn.prop('disabled', false).html('<i class="fa-solid fa-key me-1"></i> Enroll &amp; issue token');
+      app.messages.toast('Enrollment failed: ' + (err.message || err), 'danger');
+    }
   }
 
   var discoveryPlugins = [];
@@ -1921,12 +2173,12 @@
     try {
       const dirAgentSocket = io({ auth: { token: app.auth.getToken() } });
       dirAgentSocket.on('agent.telemetry', function(msg){
-        const a = msg && agentsByToken[msg.token];
-        if (a) { a.telemetry = msg.payload; a.isOnline = true; renderTable(); }
+        const a = msg && agentsById[msg.agentId];
+        if (a) { a.lastTelemetry = msg.payload; a.isOnline = true; renderTable(); }
       });
       dirAgentSocket.on('agent.discovery', function(msg){
-        const a = msg && agentsByToken[msg.token];
-        if (a) { a.discovery = msg.payload; if (msg.payload && msg.payload.hostname) a.hostname = msg.payload.hostname; a.isOnline = true; renderTable(); }
+        const a = msg && agentsById[msg.agentId];
+        if (a) { a.lastDiscovery = msg.payload; a.isOnline = true; renderTable(); }
       });
     } catch (e) { /* socket is optional; periodic refresh still runs */ }
   });

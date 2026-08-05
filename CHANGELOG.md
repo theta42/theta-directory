@@ -1,3 +1,48 @@
+# v1.29.0
+
+**Breaking:** theta-agent enrollment is now mandatory. Agents installed before this release carry a browser-generated token the server never recorded and will be rejected until re-enrolled. Requires theta-suite ≥ v1.42.0 (the `sso-broker` OpenBao policy must grant `secret/agent/*`); re-run `./setup.sh`.
+
+### Security — theta-agent channel
+
+- **sec: `/api/agent/ws` accepted any token.** There was no agent registry, so the endpoint authenticated nothing: any client that could reach the SSO could register as a node, publish discovery/telemetry into the admin view, and receive commands — including a signed `arbitrary_bash` — addressed to a token it guessed. Tokens were generated in the *browser* (`generateRandomHexToken`) and never recorded server-side, so there was nothing to validate against and no way to revoke one. Agents are now rows in a new `Agent` table, authenticated by SHA-256 token hash before the connection is registered or the welcome payload is sent; unknown or revoked tokens are closed with `4001` and audited.
+- **sec: the command signing key was ephemeral.** `AgentManager` generated an Ed25519 pair in its constructor, so it changed on every process start and the `public_key` an agent pinned in `agent.yml` stopped matching immediately. The key now lives in OpenBao at `secret/agent/signing-key` and survives restarts. If it cannot be loaded the SSO **refuses** to send high-risk commands rather than signing with a key no agent has seen (`signingAvailable: false` on `GET /api/agent/nodes`).
+- **sec: commands are addressed by agent id, not token.** A credential has no business in a URL, an access log or browser history.
+- **sec: agent actions are audited.** Enroll, update, rotate, revoke, delete, every command (with `signed`), and every rejected connection are emitted as structured `"component":"agent"` log records carrying the acting user.
+
+### theta-agent — enrollment & resource binding
+
+- feat: `POST /api/agent/enroll` mints the token server-side and returns it **once**; only its SHA-256 is stored. Plus `PUT /nodes/:id` (rename/rebind), `POST /nodes/:id/rotate`, `POST /nodes/:id/revoke`, `DELETE /nodes/:id`. Rotate, revoke and delete drop the live socket immediately (`4004`/`4003`) instead of waiting for a reconnect.
+- feat: an agent binds to a **host resource** (`resourceId`). The Directory reads that link instead of guessing by hostname — the old `agentsByHost[name]` match silently failed whenever a Directory name differed from the machine's hostname, and aliased two hosts that shared one.
+- feat: **agent discovery reaches the Directory.** A bound agent's facts (`os`, `kernel`, `cpu`, `ram_total_gb`, `disk_total_gb`, `ip`) are written onto its host resource, tagged `discovery_sources: ["theta-agent"]` with an `agentId` back-reference. An unbound agent goes through the normal reconciler. Previously `handleDiscovery` wrote to an in-memory record and updated nothing — the one source actually running *on* the host contributed nothing to the directory.
+- feat: agent state is persisted, so an agent that is installed but **offline** is now distinguishable from one that never existed; enrollments survive a restart. The Directory status dot reflects this: red means "enrolled and not connected" (a fault), grey means no agent enrolled / revoked / service unreachable. Red previously covered both, making an ordinary directory of hosts look like an outage.
+- feat: the Install Agent modal enrolls first and builds the install command from the result, including `--public-key`. `public_key` was never emitted into the generated `agent.yml` before, so no installed agent could verify anything.
+- fix: `registerAgent` is synchronous. Awaiting a database write before attaching the WebSocket `message` listener lost every agent's first `discovery` frame, which it sends the instant the socket opens (`ws` drops events emitted with no listener attached).
+
+### Directory
+
+- feat: **the resource tree is collapsible.** Any row with children has a caret; the toolbar collapses/expands everything. State persists per browser, so the shape survives the self-heal reload that follows most edits. An active search overrides collapse so matches inside a folded subtree are never hidden.
+- fix: **the Proxmox plugin mismatched MAC addresses to IPs.** It collected MACs and IPs into two flat lists and zipped them by index, so on any multi-NIC guest — or any guest where one NIC had no address — the directory recorded an address against the wrong MAC. NICs are now keyed by MAC, so a pairing can only come from the source that observed both together.
+- feat: Proxmox discovery emits an **endpoint resource** (named from `/cluster/status`) with every node parented beneath it, so one endpoint is one subtree instead of several orphan roots. It deliberately carries no IP: giving it the address it is reached at made the reconciler merge it with the node answering on that address, producing a resource that was its own parent.
+- feat: discovered guests carry `sourceId` (`<node>/qemu/<vmid>`), `node`, `vmid` and `macAddress`, so a row traces back to the exact guest on the exact hypervisor. Against a live 3-node cluster this took MAC coverage to 53/54 resources and `sourceId` to 54/54.
+- fix: Proxmox interfaces belonging to something running *inside* a guest (`docker0`, `veth*`, `br-*`, VPN tunnels) are filtered out — one Home Assistant VM reported 16 of them alongside its single real NIC, and their 172.x addresses gave the reconciler spurious matches.
+- fix: a stopped VM still reports its MAC (read from the VM config), a DHCP-configured LXC gets its address from the running container's interface list, and Proxmox **nodes** report their own IP/MAC (recovered from `enx<mac>` predictable names, since `/nodes/*/network` carries no `hwaddr`). Offline nodes are recorded with `status` instead of skipped, so a hypervisor that is down no longer looks decommissioned and get garbage-collected after a week.
+- fix: **the reconciler could make a resource its own parent.** Two slugs in one payload can resolve to the same row once merged; the resulting self-edge renders as an infinitely nested tree and defeats every ancestor walk in the app. Self-edges and cycle-closing edges are now refused and logged.
+- fix: **hosts were named after their MAC address.** `bestName` preferred the *longer* name, so UniFi's `ac:16:2d:b3:da:80` (17 chars) beat Proxmox's real hostname `dl380-0` (7). Names are now ranked (hostname > IP > MAC) with length only as a tie-break within a rank.
+- fix: `isIp` never matched anything — `\\.` inside a regex literal matches a backslash, not a dot — so an IP-shaped placeholder name was never replaced by a real hostname a later source discovered.
+- fix: a discovered device can only merge into a resource of the same kind. A VM named `gitea-runner` could match a hand-created *service* of the same name on the name rule and overwrite it.
+- perf: the reconciler reads the inventory once per run instead of once per incoming resource — a ~55-resource Proxmox payload against a similar-sized inventory was doing quadratic full-table reads every run.
+- fix: the Discovered Inventory table showed "Unknown IP" for almost everything, because it read `metadata.ip` while any source that enumerates interfaces stores addresses per-NIC. It now falls back to the first NIC address, and shows `vmid`, slug, `sourceId` and per-interface MAC/name.
+
+### Profile
+
+- fix: the API Tokens card is no longer wider than every other card on the site — the section sat outside the page's `.container`.
+
+### Build & docs
+
+- fix: `Dockerfile.test-runner` never copied `nodejs/plugins`, so every plugin test suite failed in CI as "Cannot find module" and plugin code was effectively untested. Suite count goes 27 → 29.
+- docs: `docs/agents.md` rewritten for enrollment, the close-code table, resource binding, the persistent signing key, and a corrected `public_key` example (the documented `MCowBQYDK2VwAyEA...` was an SPKI PEM body — 44 bytes decoded — where the agent requires the raw 32).
+- docs: `docs/directory.md` covers the collapsible tree and the corrected seed hierarchy; `docs/plugins.md` documents what the Proxmox plugin produces and why the endpoint has no IP.
+
 # v1.28.0
 - fix: `/api/agent/nodes` no longer 404s — the previous "unconditional mount" was still inside the post-listen `onListen` hook, so the REST router landed *behind* app.js's terminal 404 catch-all and every `/api/agent/*` request 404'd. The router is now mounted synchronously in `app.js` before the 404 handler; only the agent WebSocket setup runs on `onListen`.
 - feat: promoting a discovered inventory resource now opens the resource form pre-filled with the discovered data (name, kind, IP, subtype, …) for review; the modal's Save confirms the promote (creates the LDAP groups + marks it managed) instead of silently promoting.
