@@ -1,3 +1,9 @@
+# v1.28.0
+- fix: `/api/agent/nodes` no longer 404s — the previous "unconditional mount" was still inside the post-listen `onListen` hook, so the REST router landed *behind* app.js's terminal 404 catch-all and every `/api/agent/*` request 404'd. The router is now mounted synchronously in `app.js` before the 404 handler; only the agent WebSocket setup runs on `onListen`.
+- feat: promoting a discovered inventory resource now opens the resource form pre-filled with the discovered data (name, kind, IP, subtype, …) for review; the modal's Save confirms the promote (creates the LDAP groups + marks it managed) instead of silently promoting.
+- fix: Directory table no longer goes stale after add/remove edge — `addEdge`/`removeEdge` called an undefined `loadData()`, which threw and left the host/parent linkage stale until a manual refresh; they now call `loadResources()`. `addGroup`/`removeGroup` also refresh so the Access column stays accurate.
+- feat: Vault page states it's powered by OpenBao (header badge linking to openbao.org).
+
 # v1.27.0
 - fix: Directory group names now match `docs/GROUPS.md` exactly — per-resource groups are `{site}_{kind}_{name}_{level}` (`site_local_host_theta-env_access`, `site_local_app_sso-manager_access`), with the kind always present and the resource name slug stripped of its kind prefix. Services map to the `app` kind. The access-request + resolver tests were updated to the documented convention.
 - fix: a site resource now carries only `god_admin` + the site-wide groups (`{site}_super_admin`, `{site}_everyone`); the kind-scoped aggregates are still created for nesting but are no longer surfaced on the site's modal.

@@ -44,9 +44,10 @@ app.onListen.push(function(){
     });
   });
   
-  // Initialize Theta Agent WebSockets
-  require('./routes/api_agent')(app);
-}); 
+  // Initialize Theta Agent WebSockets. The REST router is already mounted
+  // synchronously above (see the /api/agent mount); this hook only wires the WS.
+  require('./routes/api_agent').initAgentWebSockets(app);
+});
 
 // Gzip text responses (HTML/JS/CSS/JSON). The admin UI loads ~13 separate,
 // uncompressed vendor JS/CSS files on every full page navigation (a
@@ -104,6 +105,12 @@ app.use('/api/metrics', middleware.auth, require('./routes/api_metrics'));
 app.use('/api/conf', middleware.auth, require('./routes/api_conf'));
 // Self-service API tokens (PATs) — owner-scoped, no admin group required.
 app.use('/api/api-token', middleware.auth, require('./routes/api_token'));
+
+// theta-agent REST API. Mounted SYNCHRONOUSLY (before the 404 catch-all below),
+// not from an onListen hook — a router registered post-listen would sit behind
+// the terminal 404 handler and make every /api/agent/* request 404. The agent
+// WebSocket handler (routes/api_agent.initAgentWebSockets) still runs on onListen.
+app.use('/api/agent', require('./routes/api_agent'));
 
 // OAuth 2.0 / OpenID Connect
 app.use('/oauth', oauthRouter);

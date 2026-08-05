@@ -7,12 +7,64 @@ const agentManager = require('../utils/agent_manager');
 
 const ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_admin'];
 
-module.exports = function initAgentWebSockets(app) {
-  // Only the WebSocket handler needs the WS server. The REST routes mounted
-  // below (/api/agent/*) must work regardless of the WS server state -- gating
-  // them on `app.wss` made them 404 whenever it wasn't initialized.
-  if (app.wss) {
-    app.wss.on('connection', (ws, req) => {
+// ── REST API (mounted synchronously in app.js, BEFORE the 404 catch-all) ──
+// This is a plain Express Router exported directly so app.js can
+// `app.use('/api/agent', require('./routes/api_agent'))` at require time. It
+// must NOT be mounted from the onListen hook (which runs after the 404
+// catch-all is already on the stack): a router registered behind that terminal
+// handler would make every /api/agent/* request 404, no matter the WS server
+// state. The WebSocket handler is separate (initAgentWebSockets below) and is
+// the only part that needs the post-listen onListen hook.
+const router = express.Router();
+
+// The agent WebSocket (/api/agent/ws) is handled by the raw `wss` upgrade server
+// in bin/www with its own ?token= auth — unaffected by the express middleware
+// here. These REST routes are admin-facing, so they're auth + admin gated.
+router.use(middleware.auth);
+router.use(async (req, res, next) => {
+  try {
+    await permission.byGroup(req.user, ADMIN_GROUPS);
+    next();
+  } catch (err) {
+    if (err && (err.status === 401 || err.name === 'Insufficient Permission')) {
+      return res.status(403).json({ status: 'error', message: 'admin only' });
+    }
+    next(err);
+  }
+});
+
+router.get('/nodes', (req, res) => {
+  res.json({
+    status: 'ok',
+    agents: agentManager.getConnectedAgents(),
+    publicKey: agentManager.publicKeyPem
+  });
+});
+
+router.post('/nodes/:token/command', (req, res) => {
+  const { token } = req.params;
+  const { command, payload, isHighRisk } = req.body;
+
+  if (!command) {
+    return res.status(400).json({ status: 'error', message: 'Command type is required' });
+  }
+
+  try {
+    const HIGH_RISK_COMMANDS = ['reboot', 'service_restart', 'configure_ldap', 'arbitrary_bash', 'update_binary'];
+    const requiresSigning = isHighRisk || HIGH_RISK_COMMANDS.includes(command);
+
+    const msg = agentManager.sendCommand(token, command, payload || {}, requiresSigning);
+    res.json({ status: 'ok', sentMessage: msg });
+  } catch (err) {
+    res.status(400).json({ status: 'error', message: err.message });
+  }
+});
+
+module.exports = router;
+module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
+  // WebSocket handler only needs the WS server; runs from the onListen hook.
+  if (!app.wss) return;
+  app.wss.on('connection', (ws, req) => {
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
     const token = url.searchParams.get('token') || req.headers['authorization'];
 
@@ -73,52 +125,4 @@ module.exports = function initAgentWebSockets(app) {
       }));
     } catch (e) {}
   });
-  } // end if (app.wss)
-
-  // REST API routes for Agent Management (mounted under /api/agent). The agent
-  // WebSocket (/api/agent/ws) is handled by the raw `wss` upgrade server in
-  // bin/www with its own ?token= auth — unaffected by the express middleware
-  // here. These REST routes are admin-facing, so they're auth + admin gated.
-  const router = express.Router();
-  router.use(middleware.auth);
-  router.use(async (req, res, next) => {
-    try {
-      await permission.byGroup(req.user, ADMIN_GROUPS);
-      next();
-    } catch (err) {
-      if (err && (err.status === 401 || err.name === 'Insufficient Permission')) {
-        return res.status(403).json({ status: 'error', message: 'admin only' });
-      }
-      next(err);
-    }
-  });
-
-  router.get('/nodes', (req, res) => {
-    res.json({
-      status: 'ok',
-      agents: agentManager.getConnectedAgents(),
-      publicKey: agentManager.publicKeyPem
-    });
-  });
-
-  router.post('/nodes/:token/command', (req, res) => {
-    const { token } = req.params;
-    const { command, payload, isHighRisk } = req.body;
-
-    if (!command) {
-      return res.status(400).json({ status: 'error', message: 'Command type is required' });
-    }
-
-    try {
-      const HIGH_RISK_COMMANDS = ['reboot', 'service_restart', 'configure_ldap', 'arbitrary_bash', 'update_binary'];
-      const requiresSigning = isHighRisk || HIGH_RISK_COMMANDS.includes(command);
-
-      const msg = agentManager.sendCommand(token, command, payload || {}, requiresSigning);
-      res.json({ status: 'ok', sentMessage: msg });
-    } catch (err) {
-      res.status(400).json({ status: 'error', message: err.message });
-    }
-  });
-
-  app.use('/api/agent', router);
 };

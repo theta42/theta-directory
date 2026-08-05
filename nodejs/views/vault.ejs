@@ -4,12 +4,13 @@
   <div class="row">
     <div class="col-12">
       <div class="card shadow">
-        <div class="card-header">
+        <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
           <ul class="nav nav-tabs card-header-tabs" id="vault-tabs" role="tablist">
             <li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-secrets" type="button"><i class="fa-solid fa-lock"></i> Secrets</button></li>
             <li class="nav-item" id="vault-apps-tab" style="display:none"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-apps" type="button"><i class="fa-solid fa-key"></i> Apps</button></li>
             <li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-shared" type="button"><i class="fa-solid fa-share-nodes"></i> Shared</button></li>
           </ul>
+          <span class="small text-muted"><i class="fa-solid fa-database me-1"></i>Powered by <a href="https://openbao.org" target="_blank" rel="noopener">OpenBao</a></span>
         </div>
         <div class="card-body p-0">
           <div class="tab-content">

@@ -515,6 +515,9 @@
   var rawResources = [];
   // resourceId -> { groups: [{cn, accessLevel, exists, memberCount}], memberCount }
   var accessSummary = {};
+  // When set, the resource modal's Save promotes this discovered slug (review
+  // the pre-filled form, then confirm) instead of a normal resource save.
+  var promoteSlug = null;
 
   $(document).ready(async function() {
     await loadResources();
@@ -1179,6 +1182,29 @@
   }
   
   async function saveResource() {
+    // Promote path: the modal was opened from a discovered inventory row, so
+    // Save confirms promotion (creates LDAP groups + marks managed) rather than
+    // a normal resource create/update.
+    if (promoteSlug) {
+      const slug = promoteSlug;
+      promoteSlug = null;
+      try {
+        const res = await new Promise((resolve, reject) => {
+          app.api.post('discovery/promote/' + slug, {}, function(err, r) {
+            if (err) reject(err); else resolve(r);
+          });
+        });
+        await loadResources();
+        loadDiscoveryResources();
+        app.modal.close();
+        app.messages.toast('Promoted ' + slug + (res && res.groups ? ' — created groups: ' + res.groups.join(', ') : ''), 'success');
+      } catch (err) {
+        promoteSlug = slug;
+        app.messages.action('Failed to promote: ' + (err.message || err), app.modal.body(), 'danger');
+      }
+      return;
+    }
+
     const id = $('#res-id').val();
     const data = {
       name: $('#res-name').val(),
@@ -1277,6 +1303,7 @@
       allGroups.push(res.results);
       refreshGroupsUI(resourceId);
       $('#new-group-cn').val('');
+      await loadResources(); // keep the Access column in sync
     } catch (err) {
       console.error(err);
       app.messages.action('Failed to add group', app.modal.body(), 'danger');
@@ -1288,6 +1315,7 @@
       await app.api.delete('directory-admin/groups/' + id);
       allGroups = allGroups.filter(g => g.id !== id);
       refreshGroupsUI($('#res-id').val());
+      await loadResources(); // keep the Access column in sync
     } catch (err) {
       console.error(err);
       app.messages.action('Failed to remove group', app.modal.body(), 'danger');
@@ -1316,7 +1344,7 @@
       allEdges.push(res.results);
       refreshEdgesUI(resourceId);
       $('#new-edge-target').val('');
-      await loadData();
+      await loadResources();
     } catch (err) {
       console.error(err);
       app.messages.action('Failed to add edge', app.modal.body(), 'danger');
@@ -1328,7 +1356,7 @@
       await app.api.delete('directory-admin/edges/' + id);
       allEdges = allEdges.filter(e => e.id !== id);
       refreshEdgesUI($('#res-id').val());
-      await loadData();
+      await loadResources();
     } catch (err) {
       console.error(err);
       app.messages.action('Failed to remove edge', app.modal.body(), 'danger');
@@ -1389,21 +1417,31 @@
     }
   }
 
+  // Promoting a discovered resource opens the resource form pre-filled with the
+  // discovered data so it can be reviewed before the resource is marked managed
+  // (and its LDAP groups created). The modal's Save (saveResource) sees
+  // promoteSlug set and calls the promote endpoint instead of a normal save.
   function promoteResource(slug) {
-    app.api.post('discovery/promote/' + slug, {}, function(err, res) {
-      if(err) {
-        app.messages.toast("Error promoting resource: " + (err.message || err), 'danger');
-        return;
-      }
-      const resource = allDiscoveryResources.find(r => r.slug === slug);
-      if(resource) {
-        resource.metadata = resource.metadata || {};
-        resource.metadata.managed = true;
-      }
-      $('.actionMessage').html('<div class="alert alert-success alert-dismissible"><button type="button" class="btn-close" data-bs-dismiss="alert"></button>Successfully promoted! Created groups: ' + res.groups.join(', ') + '</div>').show();
-      renderDiscoveryTable();
-      loadResources(); // Also update directory tab
-    });
+    const r = allDiscoveryResources.find(x => x.slug === slug);
+    if (!r) { app.messages.toast('Discovered resource not found', 'danger'); return; }
+    promoteSlug = slug;
+    openResourceModal('Promote Resource', null); // add-mode: groups/children tabs hidden
+    const m = r.metadata || {};
+    $('#res-name').val(r.name || '');
+    $('#res-slug').val(r.slug || '');
+    $('#res-kind').val(r.kind || 'host');
+    $('#res-description').val(r.description || '');
+    $('#res-ip').val(m.ip || '');
+    $('#res-address').val(m.address || '');
+    $('#res-subtype').val(m.subType || '');
+    $('#res-mac').val(m.macAddress || '');
+    $('#res-port').val(m.port || '');
+    $('#res-external-port').val(m.externalPort || '');
+    $('#res-icon').val(m.icon || '');
+    $('#res-tagline').val(m.tagline || '');
+    updateIconPreview();
+    toggleFormFields();
+    loadLdapGroups();
   }
 
   // --- THETA AGENT INSTALL MODAL & WIZARD ---
