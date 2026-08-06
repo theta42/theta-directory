@@ -1,3 +1,19 @@
+# v1.30.1
+
+### Fixed
+
+- **Test Email always failed with `Email.send is not a function`.** `models/email.js` exports `{Mail}`; the handler required the module and called `.send` on it directly. Every other caller destructures it. The button could never have worked.
+- **Test SMS failed with `Unexpected token '<', "<!DOCTYPE "...`.** It POSTed to `https://api.voip.ms/v1.0/sms/send` with Basic auth — an endpoint that does not exist. VoIP.ms's REST API is a GET against `https://voip.ms/api/v1/rest.php` with `api_username`/`api_password` and `method=sendSMS`, so the fabricated URL returned an HTML page and `response.json()` threw. It could never have sent anything.
+- **All SMS delivery was broken, not just the test button.** `models/sms.js` called `PluginInstance.find({…})`, but @simpleworkjs/orm has no `find` — the query method is `list({where})`. It threw "is not a function" on every send, before it could even fall back to the direct VoIP.ms path, so OTP-by-SMS and notifications were dead too.
+- Both test endpoints now send through the **same senders every real message uses** (`Mail.send`, `SMS.send`). A test that reimplements delivery proves nothing about whether real delivery works — which is exactly how two broken paths went unnoticed.
+- The SMS credential check no longer demands `conf.voipms` when a messaging plugin is loaded; the plugin supplies its own credentials, and requiring both blocked a working setup from testing itself.
+- Both endpoints report a failure as a `400` with the underlying reason (`VoIP.ms error: invalid_credentials`, `connect ECONNREFUSED …:587`) instead of an opaque `500`. A misconfiguration is the operator's to fix and the UI should be able to show it.
+- test: a guard suite that fails the build on any call to a non-existent ORM static (`find`/`findOne`/`findAll`/`where`), on requiring `models/email` without destructuring `{Mail}`, and on any reference to the bogus `api.voip.ms` host.
+
+### Added
+
+- **Install Agent offers the join-key flow.** The modal now leads with "Join key" — mint one, copy a single install command, and the host enrolls itself. Pre-registering a specific host moved to a second tab. v1.30.0 shipped join keys in the API and documented the modal as the place to get one, but the modal itself still only did the pre-register flow.
+
 # v1.30.0
 
 Adds **join keys**: installing the agent with one key is now all it takes to add a host. Fixes a set of Directory/discovery defects found on a fresh `setup.sh` install.

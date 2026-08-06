@@ -1640,6 +1640,21 @@
     // public_key must reach the host: without it the agent refuses every
     // high-risk command. It was never emitted before, which is why signed
     // commands only ever "worked" while verification was being skipped.
+    // Join-key command. Only a key we just minted can appear here -- the list
+    // endpoint deliberately never returns key values.
+    const joinUrl = ($('#agent-quick-url').val() || window.location.origin).replace(/\/+$/, '');
+    const selectedKeyId = $('#agent-join-key-select').val();
+    let joinCmd;
+    if (mintedJoinKey) {
+      joinCmd = `curl -fsSL ${joinUrl}/resources/theta-agent/install.sh | sh -s -- --url "${joinUrl}" --join-key "${mintedJoinKey}"`;
+    } else if (selectedKeyId) {
+      const k = agentJoinKeys.find(x => x.id === selectedKeyId);
+      joinCmd = `curl -fsSL ${joinUrl}/resources/theta-agent/install.sh | sh -s -- --url "${joinUrl}" --join-key "${k ? k.keyPrefix : ''}…"\n\n# Paste the full value of this key -- it was only shown when created.\n# If you no longer have it, create a new key above.`;
+    } else {
+      joinCmd = '# Create a join key above, or select one you already have the value for.';
+    }
+    $('#agent-join-command').text(joinCmd);
+
     const pubKey = (pendingEnrollment && pendingEnrollment.publicKey) || '';
     const quickCmd = `curl -fsSL ${quickUrl}/resources/theta-agent/install.sh | sh -s -- --url "${quickUrl}" --token "${quickToken}"`
       + (pubKey ? ` --public-key "${pubKey}"` : '');
@@ -1719,14 +1734,67 @@
         </div>
       </div>
 
+      <ul class="nav nav-tabs mb-3" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="agent-mode-join-btn" data-bs-toggle="tab" data-bs-target="#agent-mode-join" type="button" role="tab">
+            <i class="fa-solid fa-key me-1"></i> Join key <span class="badge bg-success ms-1">easiest</span>
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="agent-mode-pre-btn" data-bs-toggle="tab" data-bs-target="#agent-mode-pre" type="button" role="tab">
+            <i class="fa-solid fa-id-badge me-1"></i> Pre-register this host
+          </button>
+        </li>
+      </ul>
+
+      <div class="tab-content mb-3">
+        <!-- ── Join key: one credential, host enrolls itself ────────────── -->
+        <div class="tab-pane fade show active" id="agent-mode-join" role="tabpanel">
+          <div class="card border-success">
+            <div class="card-header py-2 fw-bold small bg-success-subtle">
+              <i class="fa-solid fa-key me-1"></i> Install with a join key
+            </div>
+            <div class="card-body py-3">
+              <p class="small text-muted mb-3">
+                Run this on any host and it enrolls itself. The SSO issues that host its own
+                token and public key on first connect, and the agent writes both into its
+                <code>agent.yml</code> — nothing to copy back and forth. One key works for as
+                many hosts as you like; each still gets its own revocable identity.
+              </p>
+              <div class="d-flex gap-2 align-items-end mb-3">
+                <div class="flex-grow-1">
+                  <label class="form-label small fw-bold mb-1">Existing join keys</label>
+                  <select id="agent-join-key-select" class="form-select form-select-sm" onchange="updateAgentCommands()"></select>
+                  <div class="form-text small">A key's value is shown only when it is created — mint a new one if you don't have it saved.</div>
+                </div>
+                <button class="btn btn-sm btn-success" onclick="mintAgentJoinKey()">
+                  <i class="fa-solid fa-plus me-1"></i> New join key
+                </button>
+              </div>
+              <div id="agent-join-key-result" style="display:none"></div>
+
+              <label class="form-label small fw-bold mb-1">Run on the target host (as root):</label>
+              <pre class="bg-dark text-light p-3 rounded font-monospace small mb-2 text-wrap text-break" id="agent-join-command" style="user-select: all;"></pre>
+              <div class="d-flex justify-content-end">
+                <button class="btn btn-sm btn-success" id="btn-copy-join" onclick="copyAgentCommand('agent-join-command', 'btn-copy-join')">
+                  <i class="fa-solid fa-copy me-1"></i> Copy install command
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Pre-register: bind to a host resource up front ───────────── -->
+        <div class="tab-pane fade" id="agent-mode-pre" role="tabpanel">
+
       <div class="card border-primary mb-3" id="agent-enroll-card">
         <div class="card-header py-2 fw-bold small bg-primary-subtle">
           <i class="fa-solid fa-id-badge me-1"></i> 1. Enroll this host
         </div>
         <div class="card-body py-3">
           <p class="small text-muted mb-3">
-            The SSO issues the agent's token and records it. Tokens it did not issue are rejected,
-            so enroll the host first — the install command below is built from the result.
+            Use this when you want the agent bound to a specific Directory host from the start.
+            The SSO issues the token here and you copy it onto the machine yourself.
           </p>
           <div class="row g-2 align-items-end">
             <div class="col-md-4">
@@ -1870,6 +1938,8 @@
         </div>
       </div>
       </div>
+        </div><!-- /pre-register pane -->
+      </div><!-- /tab-content -->
     `;
 
     app.modal.open({
@@ -1877,6 +1947,8 @@
       bodyHtml: bodyHtml,
       size: 'lg'
     });
+
+    loadAgentJoinKeys();
 
     // Only hosts can carry an agent -- the API rejects anything else, so don't
     // offer it here.
@@ -1896,6 +1968,55 @@
     });
 
     updateAgentCommands();
+  }
+
+  // Join keys the operator can reuse. Values are never returned by the list
+  // endpoint -- only a prefix -- so the dropdown identifies a key without being
+  // able to rebuild an install command from it. Minting is the only way to see
+  // a key's value, and only once.
+  var agentJoinKeys = [];
+  var mintedJoinKey = null;   // in-memory, for the command shown right now
+
+  function loadAgentJoinKeys() {
+    app.api.get('agent/join-keys', function(err, res) {
+      agentJoinKeys = (res && res.joinKeys ? res.joinKeys : []).filter(k => !k.revoked);
+      const $sel = $('#agent-join-key-select').empty();
+      if (!agentJoinKeys.length) {
+        $sel.append('<option value="">No join keys yet — create one</option>');
+      } else {
+        $sel.append('<option value="">Select a key…</option>');
+        agentJoinKeys.forEach(k => {
+          const used = k.use_count ? `${k.use_count} host${k.use_count === 1 ? '' : 's'}` : 'unused';
+          $sel.append($('<option>').val(k.id).text(`${k.label} (${k.keyPrefix}…, ${used})`));
+        });
+      }
+      updateAgentCommands();
+    });
+  }
+
+  async function mintAgentJoinKey() {
+    try {
+      const res = await app.api.post('agent/join-keys', { label: 'ui' });
+      const body = (res && (res.results || res)) || {};
+      if (!body.key) throw new Error(body.message || 'no key returned');
+      mintedJoinKey = body.key;
+      $('#agent-join-key-result').show().html(
+        '<div class="alert alert-success py-2 small mb-3">'
+        + '<i class="fa-solid fa-circle-check me-1"></i><strong>Join key created.</strong> '
+        + 'It is shown <strong>once</strong> — only its hash is stored. It is already in the command below.'
+        + '</div>'
+        + '<label class="form-label small fw-bold mb-1">Join key</label>'
+        + '<div class="input-group input-group-sm mb-3">'
+        + '<input type="text" class="form-control font-monospace" readonly value="' + esc(body.key) + '">'
+        + '<button class="btn btn-outline-secondary" type="button" id="btn-copy-jk" onclick="copyAgentCommand(\'agent-jk-copy\', \'btn-copy-jk\')"><i class="fa-solid fa-copy"></i></button>'
+        + '</div>'
+        + '<span id="agent-jk-copy" class="d-none">' + esc(body.key) + '</span>'
+      );
+      loadAgentJoinKeys();
+      updateAgentCommands();
+    } catch (err) {
+      app.messages.toast('Could not create a join key: ' + (err.message || err), 'danger');
+    }
   }
 
   // Mint the token server-side, then reveal the install steps built from it.
