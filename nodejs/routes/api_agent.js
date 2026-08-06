@@ -5,7 +5,7 @@ const middleware = require('../middleware/auth');
 const permission = require('../utils/permission');
 const agentManager = require('../utils/agent_manager');
 const agentKeys = require('../utils/agent_keys');
-const { Agent } = require('../models/agent');
+const { Agent, AgentJoinKey } = require('../models/agent');
 
 const ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_admin'];
 
@@ -172,6 +172,54 @@ router.delete('/nodes/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// --- Join keys ---
+// One key an operator hands out; hosts that present it enroll themselves and
+// are immediately issued their own per-agent token. Listing never returns the
+// key itself -- only its prefix and usage.
+router.get('/join-keys', async (req, res, next) => {
+  try {
+    const keys = await AgentJoinKey.list();
+    res.json({ status: 'ok', joinKeys: keys.map(k => k.toPublic()) });
+  } catch (err) { next(err); }
+});
+
+router.post('/join-keys', async (req, res, next) => {
+  try {
+    const { label, expiresInDays } = req.body || {};
+    const { key, raw } = await AgentJoinKey.issue({
+      label: (label && String(label).trim()) || 'default',
+      createdBy: req.user.uid,
+      expiresInDays: expiresInDays ? Number(expiresInDays) : null
+    });
+    logAgentAudit('join_key_issued', { actor: req.user.uid, label: key.label, keyPrefix: key.keyPrefix });
+    // Shown once; only the hash is stored.
+    res.json({ status: 'ok', joinKey: key.toPublic(), key: raw });
+  } catch (err) { next(err); }
+});
+
+router.post('/join-keys/:id/revoke', async (req, res, next) => {
+  try {
+    const key = await AgentJoinKey.get(req.params.id);
+    if (!key) return res.status(404).json({ status: 'error', message: 'join key not found' });
+    await key.update({ revoked: true });
+    logAgentAudit('join_key_revoked', { actor: req.user.uid, label: key.label, keyPrefix: key.keyPrefix });
+    // Agents already enrolled keep working -- they hold their own tokens now,
+    // which is the whole point of exchanging the join key rather than using it
+    // as the long-term credential.
+    res.json({ status: 'ok' });
+  } catch (err) { next(err); }
+});
+
+router.delete('/join-keys/:id', async (req, res, next) => {
+  try {
+    const key = await AgentJoinKey.get(req.params.id);
+    if (!key) return res.status(404).json({ status: 'error', message: 'join key not found' });
+    await key.delete();
+    logAgentAudit('join_key_deleted', { actor: req.user.uid, label: key.label, keyPrefix: key.keyPrefix });
+    res.json({ status: 'ok' });
+  } catch (err) { next(err); }
+});
+
 // --- Commands ---
 // Addressed by agent id, not by token: a token is a credential and has no
 // business travelling in a URL, being logged, or sitting in browser history.
@@ -227,8 +275,37 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
     // the peer is an anonymous stranger, and the old code treated it as a
     // trusted node purely for presenting a non-empty string.
     let agent = null;
+    let issuedToken = null;   // set when this connection auto-enrolled
     try {
       agent = await Agent.authenticate(token);
+
+      // Not a known agent token -- try it as a join key. This is what makes
+      // "install the agent with a key and the host appears" work without an
+      // admin pre-registering every machine. The join key is exchanged for a
+      // per-agent token below, so it never becomes the host's long-term
+      // credential.
+      if (!agent) {
+        const joinKey = await AgentJoinKey.authenticate(token);
+        if (joinKey) {
+          const hostname = (url.searchParams.get('hostname') || '').trim();
+          const enrolled = await Agent.enroll({
+            name: hostname || `agent-${Date.now().toString(36)}`,
+            description: `Self-enrolled with join key ${joinKey.keyPrefix}`,
+            enrolledBy: `join-key:${joinKey.label}`
+          });
+          agent = enrolled.agent;
+          issuedToken = enrolled.token;
+          await joinKey.update({
+            use_count: (joinKey.use_count || 0) + 1,
+            last_used_on: Math.floor(Date.now() / 1000)
+          }).catch(() => {});
+          logAgentAudit('join', {
+            agentId: agent.id, agentName: agent.name, remoteAddr,
+            joinKeyLabel: joinKey.label, joinKeyPrefix: joinKey.keyPrefix
+          });
+          console.log(`[Theta Agent] "${agent.name}" self-enrolled with join key ${joinKey.keyPrefix}`);
+        }
+      }
     } catch (err) {
       console.error('[Theta Agent] authentication lookup failed:', err.message);
       try { ws.close(1011, 'Authentication unavailable'); } catch (e) {}
@@ -294,16 +371,24 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
       agentManager.unregisterAgent(agent.id, ws);
     });
 
-    // Send initial welcome/config payload
+    // Send initial welcome/config payload. When this connection enrolled via a
+    // join key it also carries the credentials the agent should persist and use
+    // from now on: its own token, and the public key it must pin to verify
+    // signed commands. Handing the public key over here is what removes the
+    // last manual step -- an agent installed with only a join key ends up fully
+    // configured without anyone copying values between two machines.
     try {
-      ws.send(JSON.stringify({
-        type: 'config',
-        payload: {
-          message: 'Connected to SSO Manager C2',
-          protocol_version: '1.2.0',
-          agent_id: agent.id
-        }
-      }));
+      const payload = {
+        message: 'Connected to SSO Manager C2',
+        protocol_version: '1.2.0',
+        agent_id: agent.id
+      };
+      if (issuedToken) {
+        payload.enrolled = true;
+        payload.auth_token = issuedToken;
+        payload.public_key = await agentManager.publicKeyBase64();
+      }
+      ws.send(JSON.stringify({ type: 'config', payload }));
     } catch (e) {}
   });
 };

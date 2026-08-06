@@ -10,19 +10,58 @@ The **Theta Agent** (`theta-agent`) is a unified, 2-way Command & Control (C2) e
 
 ---
 
-## Enrollment (required)
+## Enrollment
 
-An agent is only real if the SSO issued its token. **Tokens the server did not
-issue are rejected** at the WebSocket handshake.
+An agent is only real if the SSO issued its credential. **Tokens the server did
+not issue are rejected** at the WebSocket handshake.
 
-Enroll from **Directory → Install Agent**:
+There are two ways to get a host enrolled, and the first is the normal one.
 
-1. Give the agent a name and, ideally, **bind it to a host resource**. The
-   binding is what links telemetry, status and commands to a Directory entry.
+### Join key — install the agent and the host appears
+
+Hand the machine a **join key** and nothing else. On first connect the SSO
+enrolls the host, issues it its own per-agent token plus the public key it must
+pin, and the agent **writes both into its own `agent.yml`** and blanks the join
+key. From then on it authenticates as itself.
+
+```bash
+curl -fsSL https://<SSO_HOST>/resources/theta-agent/install.sh | sh -s -- \
+  --url "https://<SSO_HOST>" --join-key "tjk_..."
+```
+
+That is the whole procedure — no pre-registering the machine, no copying a
+public key by hand. `setup.sh` mints a key and configures the stack's own host
+this way automatically.
+
+The join key is a *bootstrap* credential, not the host's identity. That
+distinction is what keeps one key convenient without making it a fleet-wide
+skeleton key: every host still ends up individually revocable, and a compromised
+host does not yield a credential that works anywhere else.
+
+| Endpoint | Purpose |
+| :--- | :--- |
+| `GET /api/agent/join-keys` | List keys (prefix + usage only; never the key) |
+| `POST /api/agent/join-keys` | Mint one — returned **once** |
+| `POST /api/agent/join-keys/:id/revoke` | Stop it enrolling new hosts |
+| `DELETE /api/agent/join-keys/:id` | Remove it |
+
+Revoking a join key does **not** disconnect hosts that already joined; they hold
+their own tokens by then. Revoke the agent itself to cut a specific host off.
+
+### Pre-registering a host
+
+When you want the agent bound to a specific Directory host up front, enroll it
+from **Directory → Install Agent**:
+
+1. Give the agent a name and **bind it to a host resource**. The binding is what
+   links telemetry, status and commands to a Directory entry.
 2. Press **Enroll & issue token**. The SSO mints a 256-bit token, stores only its
    SHA-256, and shows the raw value **once**.
 3. Copy the generated install command — it already carries the token and the
    server's public key.
+
+A host that self-enrolls with a join key arrives unbound; bind it afterwards with
+`PUT /api/agent/nodes/:id` or from the Directory.
 
 Or via the API:
 
@@ -186,8 +225,12 @@ curl -fsSL https://<SSO_HOST>/resources/theta-agent/install.sh | sh -s -- "<BASE
 ```yaml
 # /etc/theta42/agent.yml
 server_url: "wss://sso.example.com"
-# Issued by the SSO at enrollment. A token the server did not issue is rejected.
+# Issued by the SSO. Left empty when installing with a join key -- the agent
+# fills it in itself once the server enrolls it.
 auth_token: "c8181ce0e55bf7302b11d719a7ae39adcd7604de461e6e363f8bb4fadf126acb"
+# Bootstrap credential. Used only while auth_token is empty, and blanked by the
+# agent once it has its own token.
+join_key: ""
 location: "dc-01-rack-12"
 # Base64 of the RAW 32-byte Ed25519 public key -- exactly the `publicKey` value
 # from enrollment or GET /api/agent/nodes. Not a PEM body: a base64-decoded
@@ -224,7 +267,9 @@ the SSO only floods its audit log.
 
 An agent installed before protocol v1.2.0 carries a token generated in the
 browser that the server never recorded, so it will be rejected with `4001` until
-re-enrolled.
+re-enrolled. The quickest fix is to put a **join key** in its `agent.yml` as
+`join_key` and blank `auth_token` — it will re-enroll itself on the next
+reconnect.
 
 ---
 
