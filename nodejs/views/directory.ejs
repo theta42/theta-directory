@@ -1,5 +1,16 @@
 <%- include('top') %>
 
+<style>
+  /* The caret's rotation is driven by a class on the BUTTON, not by swapping
+     icon classes on its child: Font Awesome's SVG-with-JS mode replaces the
+     <i> with an <svg>, so anything keyed to the child element stops working
+     the moment its observer runs. Targeting both covers either state. */
+  .tree-caret > i,
+  .tree-caret > svg { transition: transform .12s ease-in-out; }
+  .tree-caret.tree-caret-collapsed > i,
+  .tree-caret.tree-caret-collapsed > svg { transform: rotate(-90deg); }
+</style>
+
 <div class="container mt-4">
   <div class="row">
     <div class="col-12">
@@ -230,6 +241,13 @@
               <button class="btn btn-sm btn-primary shadow-sm" onclick="openNewDiscoveryPluginModal()"><i class="fas fa-plus me-1"></i> New Plugin</button>
             </div>
           </div>
+          <!-- app.messages confirmations render into a `.actionMessage` inside
+               the target and do NOTHING without one: the returned promise never
+               settles, so an awaited confirmation hangs forever and the action
+               it gates silently never happens. This pane had no such element,
+               which is why Delete appeared dead. Any pane that asks the
+               operator to confirm something needs this. -->
+          <div class="actionMessage" style="display:none"></div>
           <div id="discovery-plugins-list" class="mt-3"></div>
         </div>
       </div>
@@ -914,13 +932,23 @@
       hideBelowDepth = null;
       $row.show();
 
-      const $icon = $row.find('.tree-caret i');
-      if (!$icon.length) return;
+      // Visual state lives on the .tree-caret BUTTON, rotated by CSS, and the
+      // hide decision is made from `collapsed` alone.
+      //
+      // This used to read `.tree-caret i` and bail out when it found nothing.
+      // Font Awesome runs in SVG-with-JS mode here: its mutation observer
+      // rewrites every <i class="fa-..."> into an <svg>, so moments after a
+      // render that selector matches nothing, the function returned early
+      // WITHOUT setting hideBelowDepth, and collapsing silently did nothing at
+      // all. Never make the collapse logic depend on an element another library
+      // is free to replace.
+      const $caret = $row.find('.tree-caret');
+      if (!$caret.length) return;   // leaf row: nothing to collapse
       if (collapsed.has(id)) {
-        $icon.removeClass('fa-chevron-down').addClass('fa-chevron-right');
+        $caret.addClass('tree-caret-collapsed');
         hideBelowDepth = depth;
       } else {
-        $icon.removeClass('fa-chevron-right').addClass('fa-chevron-down');
+        $caret.removeClass('tree-caret-collapsed');
       }
     });
   }
@@ -1963,6 +1991,7 @@
             <div class="d-flex align-items-center gap-2">
               <span class="badge ${badgeClass} me-2">${statusText}</span>
               ${logsBtn}
+              <button class="btn btn-sm btn-outline-secondary" title="Edit" onclick="openEditDiscoveryPluginModal('${p.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
               <button class="btn btn-sm btn-outline-primary" onclick="toggleDiscoveryPlugin('${p.id}', ${!p.enabled})">${p.enabled ? 'Unload' : 'Load'}</button>
               <button class="btn btn-sm btn-success" title="Run now" onclick="runDiscoveryPluginNow('${p.id}')"><i class="fa-solid fa-play"></i> Run</button>
               <button class="btn btn-sm btn-outline-danger" onclick="deleteDiscoveryPlugin('${p.id}')"><i class="fas fa-trash"></i></button>
@@ -2066,18 +2095,27 @@
     var raw = document.getElementById(prefix + 'cron');
     return (raw && raw.value.trim()) || '0 * * * *';
   }
-  function dpConfigFormHtml(type, prefix) {
+  // `values` pre-fills the form for edit mode. Secret fields are never returned
+  // by the API in the clear (they live in OpenBao and come back masked), so
+  // they are rendered EMPTY with a "leave blank to keep" hint rather than
+  // prefilled with `********` -- submitting the mask back would otherwise store
+  // the literal asterisks as the secret.
+  function dpConfigFormHtml(type, prefix, values) {
     var t = discoveryPluginTypes.filter(function(x){ return x.type === type; })[0];
     var schema = t && t.configSchema;
     if (!schema || !schema.length) return '<p class="text-muted">No configuration fields for this plugin.</p>';
+    values = values || {};
     var html = '';
     schema.forEach(function(f) {
       var inputType = f.type === 'password' ? 'password' : (f.type === 'url' ? 'url' : 'text');
-      var req = f.required ? ' required' : '';
-      var ph = f.placeholder ? (' placeholder="' + f.placeholder + '"') : '';
+      var req = (f.required && !f.secret) ? ' required' : '';
+      var ph = f.placeholder ? (' placeholder="' + esc(f.placeholder) + '"') : '';
+      var val = '';
+      if (!f.secret && values[f.key] != null) val = ' value="' + esc(values[f.key]) + '"';
+      if (f.secret && values.__isEdit) ph = ' placeholder="unchanged — type a new value to replace"';
       var label = f.label + (f.secret ? ' <span class="text-warning" title="stored in OpenBao"><i class="fa-solid fa-key"></i></span>' : '') + (f.required ? ' <span class="text-danger">*</span>' : '');
       html += '<div class="mb-3"><label class="form-label">' + label + '</label>' +
-        '<input type="' + inputType + '" class="form-control" id="' + prefix + f.key + '"' + req + ph + '></div>';
+        '<input type="' + inputType + '" class="form-control" id="' + prefix + f.key + '"' + req + ph + val + '></div>';
     });
     return html;
   }
@@ -2135,6 +2173,102 @@
         size: 'lg'
       });
     });
+  }
+
+  // Edit an existing instance. Non-secret config goes to PUT /plugins/:id;
+  // secrets go to PUT /plugins/:id/secrets and only when the operator actually
+  // typed a new value -- they are two endpoints because the DB row must never
+  // hold a secret (see routes/api_plugins.js).
+  function openEditDiscoveryPluginModal(id) {
+    const p = discoveryPlugins.find(x => x.id === id);
+    if (!p) return;
+    app.api.get('plugins/types', function(err, res) {
+      if (err) { app.messages.toast('Error loading plugin types: ' + err.message, 'danger'); return; }
+      discoveryPluginTypes = (res.results || []).filter(t => t.category === 'discovery');
+      const values = Object.assign({}, p.config || {}, { __isEdit: true });
+      const bodyHtml = `
+        <div class="mb-3">
+          <label class="form-label fw-bold">Plugin Type</label>
+          <input type="text" class="form-control" value="${esc(p.pluginType)}" disabled>
+          <div class="form-text">The type is fixed once an instance exists — create a new instance to use a different one.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold">Instance Name</label>
+          <input type="text" id="edit-plugin-name" class="form-control shadow-sm" value="${esc(p.name)}">
+          <div class="form-text">Slug <code>${esc(p.slug)}</code> is stable and does not change.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold">Schedule</label>
+          ${dpCronSelectHtml('ep-', p.cron)}
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="edit-plugin-enabled" ${p.enabled ? 'checked' : ''}>
+          <label class="form-check-label fw-semibold" for="edit-plugin-enabled">Loaded (runs on its schedule)</label>
+        </div>
+        <hr><h6 class="fw-bold">Configuration</h6>
+        <div id="edit-plugin-config-fields">${dpConfigFormHtml(p.pluginType, 'ep-', values)}</div>
+        <div class="d-flex justify-content-end gap-2">
+          <button class="btn btn-secondary" onclick="app.modal.close()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveEditedDiscoveryPlugin('${p.id}')">Save changes</button>
+        </div>
+      `;
+      app.modal.open({ title: 'Edit Discovery Plugin — ' + p.name, bodyHtml: bodyHtml, size: 'lg' });
+    });
+  }
+
+  async function saveEditedDiscoveryPlugin(id) {
+    const p = discoveryPlugins.find(x => x.id === id);
+    if (!p) return;
+    const name = ($('#edit-plugin-name').val() || '').trim();
+    if (!name) { app.messages.toast('Name is required', 'warning'); return; }
+
+    const flat = dpCollectConfig(p.pluginType, 'ep-');
+    const type = discoveryPluginTypes.find(t => t.type === p.pluginType);
+    const schema = (type && type.configSchema) || [];
+
+    // Split by the schema so a secret never rides along in the DB payload, and
+    // an untouched secret field is not sent at all.
+    const config = {};
+    const secrets = {};
+    schema.forEach(f => {
+      const v = flat[f.key];
+      if (f.secret) { if (v) secrets[f.key] = v; }
+      else config[f.key] = v;
+    });
+
+    try {
+      await app.api.put(`plugins/${id}`, {
+        name,
+        cron: dpCronFromForm('ep-'),
+        enabled: $('#edit-plugin-enabled').is(':checked'),
+        config
+      });
+      if (Object.keys(secrets).length) await app.api.put(`plugins/${id}/secrets`, secrets);
+      app.modal.close();
+      app.messages.toast('Plugin updated', 'success');
+      loadDiscoveryPlugins();
+    } catch (e) {
+      app.messages.toast('Error saving plugin: ' + (e.message || e), 'danger');
+    }
+  }
+
+  // Was referenced by the card's trash button but never defined, so clicking it
+  // only threw a ReferenceError -- delete appeared to do nothing.
+  async function deleteDiscoveryPlugin(id) {
+    const p = discoveryPlugins.find(x => x.id === id);
+    const label = p ? (p.name || p.slug) : 'this plugin';
+    const $card = $('#plugins-tab-pane');
+    const confirmed = await app.messages.confirm(
+      `Delete discovery plugin "${label}"? Its schedule stops and its stored secrets are removed. Resources it already discovered stay in the Directory.`,
+      $card, 'warning');
+    if (!confirmed) return;
+    try {
+      await app.api.delete(`plugins/${id}`);
+      app.messages.toast('Plugin deleted', 'success');
+      loadDiscoveryPlugins();
+    } catch (e) {
+      app.messages.toast('Error deleting plugin: ' + (e.message || e), 'danger');
+    }
   }
 
   async function saveNewDiscoveryPlugin() {

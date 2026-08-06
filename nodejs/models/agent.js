@@ -108,4 +108,75 @@ class Agent extends Model {
 	}
 }
 
-module.exports = { Agent };
+// A join key: the one credential an operator hands out so a host can enroll
+// itself. Requiring an admin to pre-register every machine before the agent
+// would talk to them made adding a host a two-system chore -- installing the
+// agent should be enough.
+//
+// A join key is NOT the agent's long-term credential. On first connect the
+// server auto-enrolls the host and issues it a unique per-agent token, which
+// the agent persists and uses from then on (PROTOCOL.md 1.2). That keeps the
+// operator experience to "one key" while still giving every host its own
+// revocable identity -- revoking a single agent means something, and a host
+// that is compromised does not hand over the credential for the whole fleet.
+class AgentJoinKey extends Model {
+	static hashKey(raw) {
+		return crypto.createHash('sha256').update(String(raw || ''), 'utf8').digest('hex');
+	}
+
+	static generateKey() {
+		// `tjk_` so an operator can tell a join key from an agent token at a
+		// glance -- they are handled very differently.
+		return 'tjk_' + crypto.randomBytes(32).toString('hex');
+	}
+
+	// Resolve a presented key to a usable join key, or null. Expiry and
+	// revocation are both enforced here so no caller can forget one.
+	static async authenticate(rawKey) {
+		if (!rawKey || typeof rawKey !== 'string') return null;
+		const keyHash = this.hashKey(rawKey);
+		const matches = await this.list({ where: { keyHash } });
+		const key = matches && matches[0];
+		if (!key) return null;
+		if (key.revoked) return null;
+		if (key.expires_on && key.expires_on < Math.floor(Date.now() / 1000)) return null;
+		return key;
+	}
+
+	static async issue({ label, createdBy, expiresInDays }) {
+		const raw = this.generateKey();
+		const key = await this.create({
+			id: crypto.randomUUID(),
+			label: label || 'default',
+			keyHash: this.hashKey(raw),
+			keyPrefix: raw.slice(0, 12),
+			revoked: false,
+			created_by: createdBy || null,
+			created_on: Math.floor(Date.now() / 1000),
+			expires_on: expiresInDays ? Math.floor(Date.now() / 1000) + expiresInDays * 86400 : null,
+			use_count: 0
+		});
+		return { key, raw };
+	}
+
+	static fields = {
+		id: { type: 'uuid', primaryKey: true },
+		label: { type: 'string', isRequired: true },
+		keyHash: { type: 'string', isRequired: true },
+		keyPrefix: { type: 'string' },
+		revoked: { type: 'boolean', default: false },
+		created_by: { type: 'string' },
+		created_on: { type: 'integer' },
+		expires_on: { type: 'integer' },
+		use_count: { type: 'integer', default: 0 },
+		last_used_on: { type: 'integer' }
+	};
+
+	toPublic() {
+		const data = this.toJSON ? this.toJSON() : { ...this };
+		delete data.keyHash;
+		return data;
+	}
+}
+
+module.exports = { Agent, AgentJoinKey };

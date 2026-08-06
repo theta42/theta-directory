@@ -1,3 +1,31 @@
+# v1.30.0
+
+Adds **join keys**: installing the agent with one key is now all it takes to add a host. Fixes a set of Directory/discovery defects found on a fresh `setup.sh` install.
+
+### theta-agent — enrollment without pre-registering
+
+- feat: **join keys.** `POST /api/agent/join-keys` mints one credential an operator hands out. A host presenting it is enrolled automatically and immediately issued **its own** per-agent token plus the public key it must pin, delivered in the `config` frame; the agent persists both and blanks the join key. v1.29.0 required an admin to pre-register every machine before its agent would be spoken to, which made adding a host a two-system chore — the security model was right, the workflow was not.
+- feat: a join key is a bootstrap credential, never the host's identity, so one key stays convenient without becoming a fleet-wide skeleton key: every host remains individually revocable and a compromised host yields nothing that works elsewhere. Revoking a join key stops new hosts joining and leaves already-enrolled agents alone.
+- feat: join keys support a label and optional expiry, record their use count, and are stored as a SHA-256 (`AgentJoinKey`). Issue/revoke/delete and every self-enrollment are audited.
+
+### Directory
+
+- fix: **collapsing the tree did nothing.** `applyTreeCollapse` located the caret with `$row.find('.tree-caret i')` and returned early when it found nothing. Font Awesome runs in SVG-with-JS mode and its mutation observer rewrites every `<i class="fa-…">` into an `<svg>`, so moments after a render that selector matched nothing — and the early return skipped setting `hideBelowDepth`, so no row was ever hidden. Collapse state now lives on the caret *button* and is rotated by CSS, and the hide decision is made from the collapsed set alone. Never key behaviour to an element another library is free to replace.
+- fix: **the Discovery Plugins delete button did nothing.** It called `deleteDiscoveryPlugin()`, which was never defined — clicking it only threw a `ReferenceError`.
+- fix: the plugins pane had no `.actionMessage` element, and `app.messages` confirmations render into one. Without it the returned promise **never settles**, so an awaited confirmation hangs forever and the action it gates silently never happens. Added, along with a note that any pane asking for confirmation needs it.
+- feat: **discovery plugin instances can be edited.** Name, schedule, loaded state and configuration, with secrets on their own endpoint and left blank ("unchanged") rather than prefilled with the mask — submitting `********` back would otherwise store the asterisks as the secret.
+
+### Discovery
+
+- fix: **a fresh install no longer presents its own containers as things to triage.** The Docker plugin recognises containers belonging to the stack's own compose project, records them as managed, and attaches each to the service it implements. `setup.sh` deploys `sso-manager`, `proxy`, `jump-host`, `openbao` and `bao-renewer`; all five arrived as unmanaged discoveries awaiting promotion.
+- fix: **Docker container slugs were derived from the container id**, which changes on every recreate — so each `docker compose up` minted a brand-new resource and orphaned the previous one. Slugs now come from compose project + service, falling back to the container name.
+- feat: discovered containers carry `composeProject`, `composeService`, `containerName` and `sourceId`.
+
+### Docs
+
+- fix: `/docs/discovery` 404'd — the slug had no entry, though the Discovery tab's help icon linked to it. New `docs/discovery.md` covering the catalog/discovered distinction, how sources are matched and merged, naming precedence, promotion and garbage collection.
+- fix: the `agents` slug pointed at `plugins.md`, so `docs/agents.md` was unreachable in the app.
+
 # v1.29.0
 
 **Breaking:** theta-agent enrollment is now mandatory. Agents installed before this release carry a browser-generated token the server never recorded and will be rejected until re-enrolled. Requires theta-suite ≥ v1.42.0 (the `sso-broker` OpenBao policy must grant `secret/agent/*`); re-run `./setup.sh`.
