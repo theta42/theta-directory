@@ -17,11 +17,25 @@ needs theta-suite ≥ v1.30.1 (which grants the `sso-broker` OpenBao policy
 
 A plugin type is a module under `nodejs/plugins/<category>/<type>.js`. The
 filename basename (without `.js`) is the `type`; the parent directory is the
-`category`. The built-ins ship under `plugins/discovery/`:
+`category`. Two built-in categories ship today:
+
+**`discovery`** — scheduled scans that sync external assets into the
+directory catalog:
 
 - `proxmox` — Proxmox VE (URL + API token)
 - `unifi` — UniFi Network controller (URL + username/password)
 - `nmap` — nmap OS + port scan (a target range; no credentials)
+- `docker` — Docker daemon discovery (containers as directory resources)
+
+**`messaging`** — on-demand delivery for alerts, 2FA codes, and
+notifications:
+
+- `twilio` — Twilio SMS
+- `webhook` — universal REST webhook (custom JSON payload to Slack, Teams,
+  Discord, or any HTTP endpoint)
+
+If no messaging plugin instance is enabled, the system falls back to the
+legacy `voipms` integration configured directly in the SSO secrets.
 
 ### What the Proxmox plugin produces
 

@@ -16,12 +16,26 @@ deep-merges, in order (later wins):
    `localhost`, `SSO Manager`).
 2. `conf/<NODE_ENV>.js` — optional, environment-specific.
 3. `conf/secrets.js` — gitignored; secrets + per-deployment values.
-4. **`app_*` environment variables** — the highest-precedence layer.
+4. **`app_*` environment variables** — the highest-precedence layer among these
+   four.
 
 Any env var whose name starts with `app_` overrides the merged config. The rest
 of the name splits on **double-underscore** (`__`) into a nested path. Values are
 `JSON.parse`-coerced when possible (numbers, booleans, null, JSON) and kept as
 raw strings otherwise.
+
+### A fifth, higher-precedence layer: OpenBao + the Configuration UI
+
+In a theta-suite deployment, `@simpleworkjs/bao-conf`'s `init()` deep-merges
+`secret/sso-manager/conf` (from OpenBao) over the four layers above at boot —
+this is the layer `setup.sh`/theta-suite actually manages, and it wins over
+everything else here. On top of that, the admin **Configuration** page in the
+UI writes straight to `secret/sso-manager/conf` (via `routes/api_conf.js`)
+and applies the change to the live `conf` object immediately
+(`applyToLiveConf`) — no restart, and it bypasses `conf/secrets.js` entirely.
+If a value isn't behaving the way `conf/secrets.js` says it should, check the
+Configuration UI / OpenBao before assuming a file edit didn't take — it's
+almost certainly OpenBao (or a live UI edit) winning the merge.
 
 ## Examples
 

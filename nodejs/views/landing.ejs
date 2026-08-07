@@ -206,8 +206,8 @@
         return '<div class="card shadow-sm service-card ' + (accessible ? 'border-success' : '') + '">'
             + '<div class="card-body">'
             +   '<h5 class="card-title d-flex align-items-start gap-2">'
-            +     iconHtml
             +     '<span>' + esc(r.name) + '</span>'
+            +     iconHtml
             +   '</h5>'
             +   '<div class="mb-2"><span class="badge bg-secondary">' + esc(r.kind)
             +     (md.subType ? ' · ' + esc(md.subType) : '') + '</span>' + badges + '</div>'

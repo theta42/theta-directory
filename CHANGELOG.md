@@ -1,3 +1,18 @@
+# v1.30.2
+
+### Fixed
+
+- **Outbound mail (test email, invites, password resets, OTP-by-email, notifications) could be rejected by the SMTP relay with `554 5.7.1 ... Sender is not same as SMTP authenticate username`.** Many authenticated relays require the `From` address to match the authenticated account or they refuse the send outright. `models/email.js` fell back to a hardcoded `noreply@theta42.com` when `smtp.from` wasn't set, which no relay ever authorized this account to send as. It now falls back to `smtp.user` first — the address the account can actually prove it owns — before the hardcoded placeholder.
+- **Catalog page card titles read icon-then-name.** Swapped to name-then-icon so the resource name leads.
+
+### Docs
+
+- `docs/configuration.md` didn't mention that OpenBao + the live Configuration UI sit above the four file/env config layers and win the merge — added.
+- `docs/plugins.md` listed 3 of 4 discovery plugin types (missing `docker`) and didn't mention the `messaging` plugin category (`twilio`, `webhook`) at all — added both.
+- `docs/vault.md` had no navigation (no frontmatter, no back-link, unreachable from the docs index) and described OpenBao as running in dev mode with API access via the root token — both wrong for a real deployment. Fixed navigation and corrected to describe the actual production setup (unsealed OpenBao, server-side scoped-token injection, personal API tokens for programmatic access).
+- `docs/discovery.md` was unreachable from the docs index and missing its back-link — both fixed.
+- `README.md`'s required-groups list was missing `app_sso_directory_admin` (gates Directory/Plugins/Agent admin).
+
 # v1.30.1
 
 ### Fixed
