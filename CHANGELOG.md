@@ -1,3 +1,45 @@
+# Unreleased — LDAP-over-HTTPS API + agent LDAP byte-pump relay
+
+### Added
+
+- **`POST /api/v1/ldap/bind` and `POST /api/v1/ldap/search`** — an LDAP-over-HTTPS
+  API (DESIGN.md §3). A client stops speaking LDAP and instead does an HTTPS call
+  to the SSO, which performs the real bind/search against its own OpenLDAP. This
+  kills the hostname / cross-network / LDAPS-cert-chain pain. Caller auth is a
+  Bearer token: an agent token or a self-service API token (PAT). `/search` is
+  restricted to agent callers (the SSSD user/group-resolution use case) and runs
+  under the admin bind — see DESIGN.md §9.5 for the scoped-service-account
+  follow-up.
+- **LDAP byte-pump relay** (`utils/ldap_tunnel.js`) — the SSO relays raw LDAP
+  bytes from an agent's local socket into its real OpenLDAP and pipes the
+  response back, over the existing agent WSS channel (`ldap_tunnel` messages).
+  The SSO does not parse LDAP; it is a transparent socket relay. See DESIGN.md §4.
+- **`POST /api/v1/agent/secrets`** — an agent fetches its own node-scoped OpenBao
+  secrets (DESIGN.md §5). The agent may only read under `secret/data/nodes/<id>/*`;
+  the SSO fetches with its own OpenBao access, so the agent never holds a Vault
+  token. Agent-token authed (not admin-gated).
+- **`iam_apply` command** — the SSO pushes node-scoped IAM config (sudo rules,
+  SSH keys, access control, revocation) to an agent as a signed high-risk
+  command (DESIGN.md §6). Added to `HIGH_RISK_COMMANDS`.
+- **Agent capabilities in the Directory UI** — the agent reports its enabled
+  capabilities in its `discovery` frame; the SSO stores them and the host's
+  Metrics tab renders them as green/gray badges, so an operator can see at a
+  glance what each agent is allowed to do.
+- **`GET /api/agent/join-keys/:id/agents`** — which hosts enrolled through a
+  given join key. Matches on the trace `Agent.enroll` already leaves in
+  `description` ("Self-enrolled with join key `<prefix>`") rather than a stored
+  relation.
+- **Join key management in the Install Agent modal** — a table (label, prefix,
+  created date, hosts joined, status) alongside the existing mint/select
+  dropdown, with **Revoke** and **Delete** actions and a click-through to see
+  which hosts joined via a given key. Previously these were API-only. Revoke
+  and Delete confirm inline within the row ("Revoke? Yes/No") rather than a
+  blocking native `confirm()` (freezes the whole tab) or the shared
+  `app.messages.confirm()` banner (a single `.actionMessage` shared by the
+  whole card, so a second click before the first resolves leaves a dangling
+  `$('body').one('click', ...)` handler from the first call and desyncs which
+  row the banner is actually confirming for).
+
 # v1.30.2
 
 ### Fixed

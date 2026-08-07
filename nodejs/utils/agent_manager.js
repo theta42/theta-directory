@@ -120,7 +120,10 @@ class AgentManager {
       cpu: payload.cpu || '',
       ram_total_gb: payload.ram_total_gb || 0,
       disk_total_gb: payload.disk_total_gb || 0,
-      location: payload.location || 'default'
+      location: payload.location || 'default',
+      // The agent's enabled capabilities (from its local agent.yml). The agent
+      // is the authoritative source for what it will actually do.
+      capabilities: payload.capabilities || {}
     };
     await this.touch(agent, { lastDiscovery: discovery });
     await this.applyDiscoveryToDirectory(agent, discovery);

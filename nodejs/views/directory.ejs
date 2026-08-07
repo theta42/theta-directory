@@ -724,7 +724,30 @@
         <div class="col-6">IPs: ${esc((d.ip_addresses || []).join(', '))}</div>
         <div class="col-6">Location: ${esc(d.location || '')}</div>
       </div>
+      <hr><h6>Capabilities</h6>
+      <div class="small">${capabilitiesHtml(d.capabilities)}</div>
     </div>`;
+  }
+
+  // Render the agent's enabled capabilities (reported in its discovery frame) as
+  // green/gray badges. service_control is a list, so it renders as its own line.
+  function capabilitiesHtml(caps) {
+    caps = caps || {};
+    const badge = (name, on) => `<span class="badge ${on ? 'bg-success' : 'bg-secondary'} me-1 mb-1">${esc(name)}</span>`;
+    const bools = [
+      ['Telemetry', caps.telemetry],
+      ['LDAP config', caps.configure_ldap],
+      ['LDAP tunnel', caps.ldap_tunnel],
+      ['Secrets', caps.secrets],
+      ['IAM', caps.iam],
+      ['Reboot', caps.reboot],
+      ['Bash', caps.arbitrary_bash],
+    ];
+    const sc = Array.isArray(caps.service_control) ? caps.service_control : [];
+    const scLine = sc.length
+      ? `<div class="mt-1 text-muted">Service control: ${esc(sc.join(', '))}</div>`
+      : '';
+    return bools.map(([n, on]) => badge(n, !!on)).join('') + scLine;
   }
 
   // Re-fetch agents (every 30s + on socket events) so status dots stay live.
@@ -1782,6 +1805,28 @@
               </div>
             </div>
           </div>
+
+          <div class="card mt-3">
+            <div class="card-header py-2 fw-bold small">
+              <i class="fa-solid fa-list-check me-1"></i> Manage join keys
+            </div>
+            <div class="card-body py-2">
+              <table class="table table-sm table-hover mb-0 small" id="agent-join-key-table">
+                <thead>
+                  <tr>
+                    <th>Label</th>
+                    <th>Prefix</th>
+                    <th>Created</th>
+                    <th>Hosts joined</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="agent-join-key-tbody"></tbody>
+              </table>
+              <div id="agent-join-key-hosts" style="display:none" class="mt-2"></div>
+            </div>
+          </div>
         </div>
 
         <!-- ── Pre-register: bind to a host resource up front ───────────── -->
@@ -1974,12 +2019,15 @@
   // endpoint -- only a prefix -- so the dropdown identifies a key without being
   // able to rebuild an install command from it. Minting is the only way to see
   // a key's value, and only once.
-  var agentJoinKeys = [];
+  var agentJoinKeys = [];        // non-revoked, for the install-command dropdown
+  var agentJoinKeysAll = [];     // every key, for the management table
   var mintedJoinKey = null;   // in-memory, for the command shown right now
 
   function loadAgentJoinKeys() {
     app.api.get('agent/join-keys', function(err, res) {
-      agentJoinKeys = (res && res.joinKeys ? res.joinKeys : []).filter(k => !k.revoked);
+      agentJoinKeysAll = (res && res.joinKeys ? res.joinKeys : []);
+      agentJoinKeys = agentJoinKeysAll.filter(k => !k.revoked);
+
       const $sel = $('#agent-join-key-select').empty();
       if (!agentJoinKeys.length) {
         $sel.append('<option value="">No join keys yet — create one</option>');
@@ -1990,8 +2038,95 @@
           $sel.append($('<option>').val(k.id).text(`${k.label} (${k.keyPrefix}…, ${used})`));
         });
       }
+
+      const $tbody = $('#agent-join-key-tbody').empty();
+      $('#agent-join-key-hosts').hide().empty();
+      if (!agentJoinKeysAll.length) {
+        $tbody.append('<tr><td colspan="6" class="text-muted">No join keys yet.</td></tr>');
+      } else {
+        agentJoinKeysAll.forEach(k => {
+          const created = k.created_on ? new Date(k.created_on * 1000).toLocaleDateString() : '—';
+          const used = k.use_count ? `${k.use_count} host${k.use_count === 1 ? '' : 's'}` : '0 hosts';
+          const status = k.revoked
+            ? '<span class="badge bg-secondary">Revoked</span>'
+            : '<span class="badge bg-success">Active</span>';
+          const revokeBtn = k.revoked ? '' :
+            `<button class="btn btn-outline-warning btn-sm" title="Revoke -- stops it enrolling new hosts; already-joined hosts are unaffected" onclick="confirmAgentJoinKeyAction(this, '${k.id}', 'revoke')"><i class="fa-solid fa-ban"></i></button>`;
+          const $row = $('<tr>').attr('data-join-key-row', k.id).append(
+            $('<td>').text(k.label),
+            $('<td>').append($('<code>').text(k.keyPrefix + '…')),
+            $('<td>').text(created),
+            $('<td>').append($('<a href="#">').text(used).on('click', function(e) { e.preventDefault(); viewAgentJoinKeyHosts(k.id, k.label); })),
+            $('<td>').html(status),
+            $('<td class="text-end agent-join-key-actions">').html(
+              '<div class="btn-group btn-group-sm">' + revokeBtn +
+              `<button class="btn btn-outline-danger btn-sm" title="Delete the key record itself; already-joined hosts keep working" onclick="confirmAgentJoinKeyAction(this, '${k.id}', 'delete')"><i class="fa-solid fa-trash"></i></button>` +
+              '</div>'
+            )
+          );
+          $tbody.append($row);
+        });
+      }
+
       updateAgentCommands();
     });
+  }
+
+  async function viewAgentJoinKeyHosts(id, label) {
+    const $out = $('#agent-join-key-hosts').show().html('<i class="fa-solid fa-spinner fa-spin"></i> Loading…');
+    try {
+      const res = await app.api.get(`agent/join-keys/${id}/agents`);
+      const body = (res && (res.results || res)) || {};
+      const agents = body.agents || [];
+      if (!agents.length) {
+        $out.html(`<div class="alert alert-secondary py-2 small mb-0">No hosts have joined with <strong>${esc(label)}</strong> yet.</div>`);
+        return;
+      }
+      const rows = agents.map(a => {
+        const dot = a.isOnline ? 'text-success' : 'text-muted';
+        const seen = a.last_seen ? new Date(a.last_seen * 1000).toLocaleString() : 'never';
+        return `<tr><td><i class="fa-solid fa-circle ${dot}" style="font-size:8px"></i> ${esc(a.name)}</td><td>${esc(a.enrolled_on ? new Date(a.enrolled_on * 1000).toLocaleDateString() : '—')}</td><td>${esc(seen)}</td></tr>`;
+      }).join('');
+      $out.html(
+        `<div class="small fw-bold mb-1">Hosts joined with ${esc(label)}:</div>` +
+        '<table class="table table-sm mb-0"><thead><tr><th>Host</th><th>Joined</th><th>Last seen</th></tr></thead><tbody>' + rows + '</tbody></table>'
+      );
+    } catch (err) {
+      $out.html('<div class="alert alert-danger py-2 small mb-0">Could not load hosts: ' + esc(err.message || err) + '</div>');
+    }
+  }
+
+  // Inline, row-scoped confirm -- swaps the row's action buttons for
+  // "Revoke/Delete this key? Yes/No" in place. Deliberately not
+  // app.messages.confirm(): that renders into a single shared .actionMessage
+  // banner, so a second click before the first resolves leaves a dangling
+  // `$('body').one('click', ...)` handler from the first call and the banner
+  // can end up out of sync with which row it's actually confirming for.
+  // Scoping state to the row itself sidesteps that entirely.
+  function confirmAgentJoinKeyAction(btn, id, action) {
+    const isDelete = action === 'delete';
+    const label = isDelete ? 'Delete' : 'Revoke';
+    const cls = isDelete ? 'btn-danger' : 'btn-warning';
+    $(btn).closest('td').html(
+      `<span class="small me-1">${label}?</span>` +
+      `<button class="btn ${cls} btn-sm me-1" onclick="reallyDoAgentJoinKeyAction('${id}', '${action}')">Yes</button>` +
+      `<button class="btn btn-outline-secondary btn-sm" onclick="loadAgentJoinKeys()">No</button>`
+    );
+  }
+
+  async function reallyDoAgentJoinKeyAction(id, action) {
+    try {
+      if (action === 'delete') {
+        await app.api.delete(`agent/join-keys/${id}`);
+        app.messages.toast('Join key deleted.', 'success');
+      } else {
+        await app.api.post(`agent/join-keys/${id}/revoke`, {});
+        app.messages.toast('Join key revoked.', 'success');
+      }
+    } catch (err) {
+      app.messages.toast(`Could not ${action}: ` + (err.message || err), 'danger');
+    }
+    loadAgentJoinKeys();
   }
 
   async function mintAgentJoinKey() {

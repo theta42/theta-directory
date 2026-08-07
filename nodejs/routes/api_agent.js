@@ -5,6 +5,7 @@ const middleware = require('../middleware/auth');
 const permission = require('../utils/permission');
 const agentManager = require('../utils/agent_manager');
 const agentKeys = require('../utils/agent_keys');
+const ldapTunnel = require('../utils/ldap_tunnel');
 const { Agent, AgentJoinKey } = require('../models/agent');
 
 const ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_admin'];
@@ -12,7 +13,7 @@ const ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_adm
 // Commands that can change or run code on the host. They are signed with the
 // SSO's persisted Ed25519 key and the agent verifies against the key pinned in
 // its agent.yml.
-const HIGH_RISK_COMMANDS = ['reboot', 'service_restart', 'configure_ldap', 'arbitrary_bash', 'update_binary'];
+const HIGH_RISK_COMMANDS = ['reboot', 'service_restart', 'configure_ldap', 'arbitrary_bash', 'update_binary', 'render_secrets', 'iam_apply'];
 
 // ── REST API (mounted synchronously in app.js, BEFORE the 404 catch-all) ──
 // This is a plain Express Router exported directly so app.js can
@@ -180,6 +181,23 @@ router.get('/join-keys', async (req, res, next) => {
   try {
     const keys = await AgentJoinKey.list();
     res.json({ status: 'ok', joinKeys: keys.map(k => k.toPublic()) });
+  } catch (err) { next(err); }
+});
+
+// Which hosts enrolled through a given key. There is no stored relation --
+// join keys are exchanged for a per-agent token immediately, and from then on
+// the agent's own identity is what matters -- so this matches on the
+// human-readable trace `Agent.enroll` already leaves in `description`
+// ("Self-enrolled with join key <prefix>") rather than a foreign key. Prefixes
+// are 12 random hex chars, so a collision is not a practical concern.
+router.get('/join-keys/:id/agents', async (req, res, next) => {
+  try {
+    const key = await AgentJoinKey.get(req.params.id);
+    if (!key) return res.status(404).json({ status: 'error', message: 'join key not found' });
+    const marker = `join key ${key.keyPrefix}`;
+    const agents = await Agent.list();
+    const matches = agents.filter(a => (a.description || '').includes(marker));
+    res.json({ status: 'ok', agents: matches.map(a => a.toPublic(agentManager.liveState(a.id))) });
   } catch (err) { next(err); }
 });
 
@@ -358,6 +376,11 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
             await agentManager.handleResponse(current, payload);
             if (app.io) app.io.emit('agent.response', { agentId: current.id, payload });
             break;
+          case 'ldap_tunnel':
+            // Raw LDAP bytes from the agent's local socket → relay into OpenLDAP
+            // and pipe the response back (DESIGN.md §4).
+            ldapTunnel.handleTunnel(current.id, ws, payload);
+            break;
           default:
             console.log(`[Theta Agent] Received message type '${data.type}' from ${current.id}`);
         }
@@ -369,6 +392,7 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
     ws.on('close', () => {
       console.log(`[Theta Agent] "${agent.name}" (${agent.id}) disconnected`);
       agentManager.unregisterAgent(agent.id, ws);
+      ldapTunnel.cleanup(agent.id);
     });
 
     // Send initial welcome/config payload. When this connection enrolled via a

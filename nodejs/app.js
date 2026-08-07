@@ -112,6 +112,16 @@ app.use('/api/api-token', middleware.auth, require('./routes/api_token'));
 // WebSocket handler (routes/api_agent.initAgentWebSockets) still runs on onListen.
 app.use('/api/agent', require('./routes/api_agent'));
 
+// LDAP-over-HTTPS API (DESIGN.md §3). Bearer-authed (agent token or PAT); the
+// SSO performs the real LDAP bind/search against its own OpenLDAP. Mounted
+// synchronously for the same reason as /api/agent — it must sit before the 404
+// catch-all.
+app.use('/api/v1/ldap', require('./routes/api_ldap'));
+
+// Agent-facing operations (DESIGN.md §5, §6): node-scoped secrets, IAM. The
+// caller is the agent itself (Bearer agent token), not an admin session.
+app.use('/api/v1/agent', require('./routes/api_agent_ops'));
+
 // OAuth 2.0 / OpenID Connect
 app.use('/oauth', oauthRouter);
 app.use('/api/oauth', middleware.auth, oauthApiRouter);
