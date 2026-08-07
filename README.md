@@ -200,7 +200,8 @@ If you are pointing the app at your own existing LDAP server, see
 `pw-sha2`, `ppolicy`, `memberof`, and `refint` modules plus a small custom
 schema. The bundled Docker image and `install.sh` set all of that up for you.
 Required groups: `app_sso_admin` (full admin), `app_sso_oauth_admin` (manage
-OAuth clients only), `app_sso_invite` (invitation management) — see
+OAuth clients only), `app_sso_invite` (invitation management),
+`app_sso_directory_admin` (Directory/Plugins/Agent admin) — see
 DEPLOYMENT.md for the full setup.
 
 ## Development

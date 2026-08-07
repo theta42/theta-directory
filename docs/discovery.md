@@ -6,6 +6,8 @@ nav_order: 6
 
 # Discovery & Inventory
 
+[← Back to Home](index.html)
+
 The Directory holds two different kinds of thing, and the distinction matters
 for every consumer of the directory:
 

@@ -60,7 +60,10 @@ backend, that's the niche.
   run the pieces separately via `app_*` env config.
 - **Geo-Location Scaling** — built-in support for N-Way Multi-Master OpenLDAP [replication](replication.html) across physical sites.
 - **[Directory & Inventory](directory.html)** — map sites, hosts, and services as a graph with rich metadata (IP/MAC, OS/kernel, ports, git repos), auto-provisioned access groups, and automatic registration from theta-env and ldap-client. Drives directory-aware tools like the [SSH jump host](https://theta42.github.io/jump-host/).
+- **[Discovery](discovery.html)** — the catalog-vs-discovered distinction, how scanned assets are matched/merged into existing resources, and how a discovery gets promoted into the catalog (and becomes reachable through the jump host).
 - **[Theta Agent & Endpoint C2](agents.html)** — 2-way Go daemon (`theta-agent`) for real-time telemetry (CPU, RAM, Disk, ZFS, GPU), automated host discovery, SSSD/LDAP configuration, and local capability-controlled management operations.
+- **[Vault secrets](vault.html)** — an OpenBao-backed key-value store built into the UI, for stashing passwords/API keys/credentials with encryption and access control.
+- **[API tokens](concepts-api-tokens.html)** — self-service personal access tokens for calling the management API from scripts/CI without a browser session.
 
 ## Get it
 
