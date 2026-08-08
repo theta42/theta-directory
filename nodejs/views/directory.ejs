@@ -49,10 +49,10 @@
                             <button type="button" class="btn btn-outline-secondary" onclick="collapseAllTree()" title="Collapse all"><i class="fa-solid fa-angles-up"></i></button>
                         </div>
                         <div class="form-check form-switch form-check-inline ms-1 me-1">
-                            <input class="form-check-input" type="checkbox" id="toggle-plumbing" onchange="renderTable()">
-                            <label class="form-check-label small text-muted" for="toggle-plumbing" title="Show containers, oauth clients, and sidecars">Plumbing</label>
+                            <input class="form-check-input" type="checkbox" id="toggle-secrets-only" onchange="renderTable()">
+                            <label class="form-check-label small text-muted" for="toggle-secrets-only" title="Filter tree to show only resources with stored secrets"><i class="fa-solid fa-key text-warning me-1"></i>With Secrets</label>
                         </div>
-                        <input type="text" id="search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search..." onkeyup="renderTable()" style="width: 200px;">
+                        <input type="text" id="search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search resources or keys..." onkeyup="renderTable()" style="width: 210px;">
                         <select id="sort-by" class="form-select form-select-sm shadow-sm" onchange="renderTable()" style="width: 150px;">
                           <option value="name">Name (A-Z)</option>
                           <option value="kind">Kind</option>
@@ -68,8 +68,8 @@
                         <button class="btn btn-sm btn-outline-primary ms-1 shadow-sm" onclick="openAgentInstallModal()">
                             <i class="fa-solid fa-shield-halved me-1"></i> Install Agent
                         </button>
-					    <button class="btn btn-sm btn-primary ms-1 shadow-sm" onclick="openAddModal()">
-					        <i class="fas fa-plus"></i> Add Resource
+					    <button class="btn btn-sm btn-primary ms-1 shadow-sm" onclick="openAddSiteModal()">
+					        <i class="fas fa-plus"></i> Add Site
 					    </button>
 					</div>
 				</div>
@@ -98,6 +98,7 @@
                     <strong>{{name}}</strong>
                   </a>
                   <span class="badge bg-secondary me-1">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
+                  {{#hasSecret}}<span class="badge bg-warning text-dark me-1" title="Has stored secrets in OpenBao"><i class="fa-solid fa-key me-1"></i>Secret</span>{{/hasSecret}}
                   {{#metadata.isProduction}}<span class="badge bg-danger me-1">Prod</span>{{/metadata.isProduction}}
                   {{^metadata.isProduction}}<span class="badge bg-info me-1">Dev</span>{{/metadata.isProduction}}
                 </td>
@@ -206,8 +207,14 @@
                   </td>
                   <td class="text-end pe-3">
                     {{^metadata.managed}}
-                      <button class="btn btn-sm btn-outline-primary" onclick="promoteResource('{{slug}}')" title="Promote to Managed">
+                      <button class="btn btn-sm btn-outline-primary me-1" onclick="promoteResource('{{slug}}')" title="Promote to Managed Directory Host">
                         <i class="fa-solid fa-arrow-up-right-dots"></i> Promote
+                      </button>
+                      <button class="btn btn-sm btn-outline-success me-1" onclick="openMergeModal('{{id}}', '{{name}}')" title="Merge into Existing Resource">
+                        <i class="fa-solid fa-code-merge"></i> Merge
+                      </button>
+                      <button class="btn btn-sm btn-outline-danger" onclick="ignoreDiscoveredResource('{{id}}')" title="Ignore / Dismiss">
+                        <i class="fa-solid fa-eye-slash"></i> Ignore
                       </button>
                     {{/metadata.managed}}
                     {{#metadata.managed}}
@@ -809,9 +816,29 @@
       disksHtml = `<div class="small">Disk Usage: <strong>${fmtNum(t.disk_usage_percent ?? 0)}%</strong> ${bar(t.disk_usage_percent)}</div>`;
     }
 
+    const agentVer = d.version || t.version || agent.version || 'v1.7.0';
+    const loggedUsers = t.logged_users || d.logged_users || agent.loggedUsers || [];
+
+    let loggedUsersHtml = '';
+    if (loggedUsers.length > 0) {
+      loggedUsersHtml = `<div class="table-responsive"><table class="table table-sm small mb-0 align-middle">
+        <thead><tr><th>User</th><th>Terminal</th><th>Host / IP</th><th>Session Time</th></tr></thead><tbody>` +
+        loggedUsers.map(u => `<tr>
+          <td><i class="fa-solid fa-user text-primary me-1"></i><strong>${esc(u.user)}</strong></td>
+          <td><code class="text-muted">${esc(u.terminal || 'tty')}</code></td>
+          <td>${esc(u.host || 'local')}</td>
+          <td class="text-muted">${u.started ? moment(u.started * 1000).fromNow() : 'active'}</td>
+        </tr>`).join('') + `</tbody></table></div>`;
+    } else {
+      loggedUsersHtml = `<div class="small text-muted p-2"><i class="fa-solid fa-user-slash me-1"></i>No active logged-in user sessions.</div>`;
+    }
+
     return `<div class="p-3">
       <div class="mb-3 d-flex justify-content-between align-items-center">
-        <h5 class="mb-0">${esc(agent.name || agent.hostname || 'unknown')} ${online}</h5>
+        <h5 class="mb-0">
+          ${esc(agent.name || agent.hostname || 'unknown')} ${online}
+          <span class="badge bg-dark ms-2 font-monospace" title="Theta Agent Binary Version"><i class="fa-solid fa-code-branch me-1"></i>${esc(agentVer)}</span>
+        </h5>
         <small class="text-muted">Last seen ${lastSeenStr}</small>
       </div>
 
@@ -856,16 +883,39 @@
       <!-- Disks Card -->
       <div class="card mb-3 shadow-sm border">
         <div class="card-header bg-light py-2">
-          <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-hard-drive me-1"></i> Disks & Storage</h6>
+          <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-hard-drive me-1"></i> Physical Disks & Filesystems</h6>
         </div>
         <div class="card-body p-2">
           ${disksHtml}
         </div>
       </div>
 
+      <!-- Logged-in Users Card -->
+      <div class="card mb-3 shadow-sm border">
+        <div class="card-header bg-light py-2">
+          <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-users me-1"></i> Active Logged-in Users</h6>
+        </div>
+        <div class="card-body p-2">
+          ${loggedUsersHtml}
+        </div>
+      </div>
+
       <div class="row g-3 mb-3">
         <div class="col-6">GPU <strong>${gpu}</strong></div>
         <div class="col-6">ZFS <strong>${esc(t.zfs_health || 'N/A')}</strong></div>
+      </div>
+
+      <!-- Desktop Controls Card -->
+      <div class="card mb-3 border-info shadow-sm">
+        <div class="card-header bg-info text-dark py-2">
+          <h6 class="mb-0 fw-bold"><i class="fa-solid fa-desktop me-1"></i> Desktop Session & Power Controls</h6>
+        </div>
+        <div class="card-body p-3 d-flex flex-wrap gap-2">
+          <button class="btn btn-outline-dark btn-sm" onclick="agentDesktopControl('${agent.id}', 'lock')"><i class="fa-solid fa-lock me-1"></i> Lock Session</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="agentDesktopControl('${agent.id}', 'display_off')"><i class="fa-solid fa-tv me-1"></i> Display Off</button>
+          <button class="btn btn-outline-warning btn-sm" onclick="agentDesktopControl('${agent.id}', 'logout')"><i class="fa-solid fa-right-from-bracket me-1"></i> Log Out User</button>
+          <button class="btn btn-outline-primary btn-sm" onclick="agentDesktopControl('${agent.id}', 'sleep')"><i class="fa-solid fa-moon me-1"></i> Sleep Host</button>
+        </div>
       </div>
 
       <!-- Host Power Controls -->
@@ -1041,22 +1091,21 @@
   function renderTable() {
     const filter = $('#search-filter').val().toLowerCase();
     const sort = $('#sort-by').val();
-    const showPlumbing = $('#toggle-plumbing').is(':checked');
+    const secretsOnly = $('#toggle-secrets-only').is(':checked');
 
     let filtered = rawResources.filter(r => {
-      if (!showPlumbing && !filter) {
-        const sub = (r.metadata?.subType || '').toLowerCase();
-        if (r.kind === 'container' || r.kind === 'oauth' || sub === 'sidecar' || sub === 'container' || sub === 'openresty') {
-          return false;
-        }
+      if (secretsOnly && !r.hasSecret) {
+        return false;
       }
       if (!filter) return true;
+      const secretKeysStr = (r.secretKeys || []).join(' ').toLowerCase();
       return (r.name || '').toLowerCase().includes(filter) ||
              (r.slug || '').toLowerCase().includes(filter) ||
              (r.kind || '').toLowerCase().includes(filter) ||
              (r.metadata?.subType || '').toLowerCase().includes(filter) ||
              (r.metadata?.ip || '').toLowerCase().includes(filter) ||
-             (r.hostName || '').toLowerCase().includes(filter);
+             (r.hostName || '').toLowerCase().includes(filter) ||
+             secretKeysStr.includes(filter);
     });
     
     // Sort
@@ -1351,6 +1400,96 @@
 
     populateHostDropdown(parentId || '');
     toggleFormFields();
+  }
+
+  function openAddSiteModal() {
+    openAddModal(null, null);
+    $('#res-kind').val('site');
+    toggleFormFields();
+  }
+
+  function openAddHostModal(parentId) {
+    openAddModal(parentId, 'site');
+    $('#res-kind').val('host');
+    toggleFormFields();
+  }
+
+  function openAddServiceModal(parentId) {
+    openAddModal(parentId, 'host');
+    $('#res-kind').val('service');
+    toggleFormFields();
+  }
+
+  async function openMergeModal(discoveredId, discName) {
+    const targets = rawResources.filter(r => r.kind === 'host' || r.kind === 'site' || r.kind === 'service');
+    let optionsHtml = targets.map(r => `<option value="${r.id}">${esc(r.name)} (${esc(r.kind)}${r.metadata?.subType ? ' - ' + esc(r.metadata.subType) : ''})</option>`).join('');
+
+    app.modal.open({
+      title: `Merge '${esc(discName)}' into Existing Resource`,
+      size: 'md',
+      bodyHtml: `
+        <div class="p-3">
+          <p class="small text-muted">Select an existing Directory resource to merge IP addresses, network interfaces, and OS telemetry into:</p>
+          <div class="mb-3">
+            <label class="form-label font-weight-bold">Target Directory Resource</label>
+            <select class="form-select" id="merge-target-id">
+              ${optionsHtml}
+            </select>
+          </div>
+        </div>
+      `,
+      footer: {
+        buttonsHtml: `
+          <button class="btn btn-secondary btn-sm" onclick="app.modal.close()">Cancel</button>
+          <button class="btn btn-success btn-sm" onclick="submitMergeResource('${discoveredId}')"><i class="fa-solid fa-code-merge me-1"></i> Confirm Merge</button>
+        `
+      }
+    });
+  }
+
+  async function submitMergeResource(discoveredId) {
+    const targetId = $('#merge-target-id').val();
+    if (!targetId) return;
+    try {
+      app.messages.action('Merging discovered resource...', $('#app-modal-body'), 'info');
+      await app.api.post('directory-admin/discovered/merge', { discoveredId, targetId });
+      app.messages.action('Resource merged successfully!', null, 'success');
+      app.modal.close();
+      loadData();
+    } catch (err) {
+      app.messages.action(err.message || 'Failed to merge resource', $('#app-modal-body'), 'danger');
+    }
+  }
+
+  async function ignoreDiscoveredResource(resourceId) {
+    const confirmed = await app.messages.confirm('Ignore and dismiss this discovered device?', null, 'warning');
+    if (!confirmed) return;
+    try {
+      await app.api.post('directory-admin/discovered/ignore', { resourceId });
+      app.messages.action('Discovered device ignored.', null, 'info');
+      loadData();
+    } catch (err) {
+      app.messages.action(err.message || 'Failed to ignore device', null, 'danger');
+    }
+  }
+
+  async function agentDesktopControl(agentId, action, username = '') {
+    const confirmed = await app.messages.confirm(`Execute '${action}' desktop control action?`, $('#res-modal'), 'warning');
+    if (!confirmed) return;
+    const resourceId = $('#res-id').val();
+    if (!resourceId) return;
+
+    try {
+      app.messages.action(`Sending '${action}' desktop command to agent...`, $('#res-modal'), 'info');
+      const res = await app.api.post(`directory-admin/resources/${resourceId}/driver-action`, {
+        action: 'desktop_control',
+        subAction: action,
+        user: username
+      });
+      app.messages.action(`Desktop action '${action}' completed successfully!`, $('#res-modal'), 'success');
+    } catch (err) {
+      app.messages.action(err.message || 'Desktop action failed', $('#res-modal'), 'danger');
+    }
   }
   
   var ldapGroupsCache = null;
@@ -1753,20 +1892,22 @@
   }
 
   async function inheritParentSecret() {
-    const childKey = $('#inherit-child-key').val().trim();
+    let childKey = $('#inherit-child-key').val().trim();
     const inheritVal = $('#inherit-parent-select').val();
     const resourceId = $('#res-id').val();
 
-    if (!childKey) {
-      app.messages.action('Please enter a child secret key name (e.g. DB_HOST).', $('#secrets-tab-container'), 'warning');
-      return;
-    }
-    if (!SECRET_KEY_REGEX.test(childKey)) {
-      app.messages.action('Invalid child key name. Only letters, numbers, and underscores allowed.', $('#secrets-tab-container'), 'danger');
-      return;
-    }
     if (!inheritVal) {
       app.messages.action('Select a parent secret to inherit from.', $('#secrets-tab-container'), 'warning');
+      return;
+    }
+
+    if (!childKey) {
+      const parts = inheritVal.split(':');
+      childKey = parts[parts.length - 1];
+    }
+
+    if (!SECRET_KEY_REGEX.test(childKey)) {
+      app.messages.action('Invalid child key name. Only letters, numbers, and underscores allowed.', $('#secrets-tab-container'), 'danger');
       return;
     }
     if (!resourceId) return;

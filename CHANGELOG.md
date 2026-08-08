@@ -1,3 +1,13 @@
+# v1.33.0 - 2026-08-08
+
+### Added
+- **Directory Key Badges & Secret Filtering.** Added a gold `🔑 Secret` badge next to resources with stored OpenBao secrets and a `With Secrets` filter checkbox to filter the directory tree by secret presence.
+- **Kind-Specific Resource Creation Modals.** Added dedicated `openAddSiteModal()`, `openAddHostModal()`, and `openAddServiceModal()` modal handlers for Site, Host, and Service resources.
+- **Top Toolbar Reorganization.** Updated top tree button to **"+ Add Site"** and removed legacy `Plumbing` slider.
+- **Optional Child Secret Key Name on Inheritance.** Made key name optional when inheriting parent secrets — automatically defaulting to the original parent secret key name if left blank.
+- **Discovered Inventory Merge & Ignore Actions.** Added `Merge` (merge IP/interfaces/OS metadata into target resource) and `Ignore` (dismiss discovered item) endpoints (`/api/directory-admin/discovered/merge` & `/api/directory-admin/discovered/ignore`) and table action buttons.
+- **Agent Tab Telemetry & Desktop Controls.** Rendered Agent Binary Version badge (`v1.8.0`), all physical disks and filesystems table, Active Logged-in Users card, and Desktop Session & Power Operations card (Lock, Display Off, Log Out, Sleep Host).
+
 # v1.32.0 - 2026-08-08
 
 ### Added
