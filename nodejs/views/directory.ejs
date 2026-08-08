@@ -94,11 +94,11 @@
                   {{{indentHtml}}}
                   {{{caretHtml}}}
                   {{#isHost}}<span class="d-inline-block rounded-circle me-1" style="width:10px;height:10px;background:{{agentColor}};" title="{{agentStatusTitle}}"></span>{{/isHost}}
-                  <a href="#" class="text-reset text-decoration-none me-2" onclick="openEditModal('{{id}}'); return false;" title="View details">
-                    <strong>{{name}}</strong>
+                  <a href="#" class="text-reset text-decoration-none me-1" onclick="openEditModal('{{id}}'); return false;" title="{{name}}">
+                    <strong>{{displayName}}</strong>
                   </a>
-                  <span class="badge bg-secondary me-1">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
                   {{#hasSecret}}<span class="badge bg-warning text-dark me-1" title="Has stored secrets in OpenBao"><i class="fa-solid fa-key me-1"></i>Secret</span>{{/hasSecret}}
+                  <span class="badge bg-secondary me-1">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
                   {{#metadata.isProduction}}<span class="badge bg-danger me-1">Prod</span>{{/metadata.isProduction}}
                   {{^metadata.isProduction}}<span class="badge bg-info me-1">Dev</span>{{/metadata.isProduction}}
                 </td>
@@ -304,8 +304,20 @@
         </select>
       </div>
       <div class="col-6">
+        <label class="form-label font-weight-bold"><i class="fa-solid fa-wand-magic-sparkles me-1 text-primary"></i>Preset Subtype Template</label>
+        <select id="res-subtype-template" class="form-select shadow-sm me-2 mb-2" onchange="applySubtypeTemplate()">
+          <option value="">-- Custom / Manual --</option>
+          <option value="docker">📦 Docker Engine / Container</option>
+          <option value="systemd">⚙️ Linux Systemd Service</option>
+          <option value="postgresql">🗄️ PostgreSQL Database</option>
+          <option value="redis">🔴 Redis In-Memory Cache</option>
+          <option value="proxmox">🖥️ Proxmox VE Hypervisor</option>
+          <option value="wireguard">🛡️ WireGuard VPN Tunnel</option>
+          <option value="unifi">📶 UniFi Network Controller</option>
+          <option value="k8s">☸️ Kubernetes Cluster Node</option>
+        </select>
         <label class="form-label">Sub Type</label>
-        <input type="text" id="res-subtype" class="form-control shadow-sm" placeholder="e.g. proxmox_node, web, etc.">
+        <input type="text" id="res-subtype" class="form-control shadow-sm" placeholder="e.g. docker, systemd, postgresql...">
       </div>
     </div>
 
@@ -804,19 +816,48 @@
 
     let disksHtml = '';
     if (disks.length > 0) {
-      disksHtml = `<div class="table-responsive"><table class="table table-sm text-center small mb-0"><thead><tr><th>Mount</th><th>Type</th><th>FS</th><th>Usage</th><th>Total</th></tr></thead><tbody>` +
+      disksHtml = `<div class="table-responsive"><table class="table table-sm text-center small mb-0 align-middle"><thead><tr><th>Device</th><th>Mount</th><th>Type</th><th>FS</th><th>Usage</th><th>Used / Total</th></tr></thead><tbody>` +
         disks.map(dk => `<tr>
+          <td><code class="text-dark fw-bold">${esc(dk.device || dk.mountpoint)}</code></td>
           <td><code>${esc(dk.mountpoint)}</code></td>
           <td><span class="badge bg-outline-secondary border text-dark">${esc(dk.drivetype || 'Disk')}</span></td>
           <td><span class="badge bg-light text-dark border">${esc(dk.fstype || 'N/A')}</span></td>
-          <td>${fmtNum(dk.usage_percent)}%</td>
-          <td>${fmtSize(dk.total_bytes)}</td>
+          <td style="min-width: 120px;">
+            <div class="d-flex align-items-center gap-1">
+              <span class="small font-monospace me-1">${fmtNum(dk.usage_percent)}%</span>
+              <div class="progress flex-grow-1" style="height:6px"><div class="progress-bar ${dk.usage_percent > 85 ? 'bg-danger' : 'bg-primary'}" style="width:${Math.max(0, Math.min(100, dk.usage_percent))}%"></div></div>
+            </div>
+          </td>
+          <td>${fmtSize(dk.used_bytes || (dk.total_bytes * (dk.usage_percent || 0) / 100))} / ${fmtSize(dk.total_bytes)}</td>
         </tr>`).join('') + `</tbody></table></div>`;
     } else {
       disksHtml = `<div class="small">Disk Usage: <strong>${fmtNum(t.disk_usage_percent ?? 0)}%</strong> ${bar(t.disk_usage_percent)}</div>`;
     }
 
-    const agentVer = d.version || t.version || agent.version || 'v1.7.0';
+    const hd = t.host_details || d.host_details || agent.hostDetails || {};
+    let hostDetailsHtml = '';
+    if (hd.os || hd.kernel || hd.hardware_model || hd.static_hostname) {
+      hostDetailsHtml = `
+      <div class="card mb-3 shadow-sm border">
+        <div class="card-header bg-light py-2">
+          <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-server me-1"></i> System & Hardware Details</h6>
+        </div>
+        <div class="card-body p-3 small">
+          <div class="row g-2">
+            <div class="col-md-6"><strong>Static Hostname:</strong> ${esc(hd.static_hostname || d.hostname || 'N/A')}</div>
+            <div class="col-md-6"><strong>Operating System:</strong> ${esc(hd.os || d.os || 'N/A')}</div>
+            <div class="col-md-6"><strong>Kernel / Arch:</strong> ${esc(hd.kernel || d.kernel || 'N/A')} (${esc(hd.arch || 'x86_64')})</div>
+            <div class="col-md-6"><strong>Hardware Model:</strong> ${esc(hd.hardware_vendor || '')} ${esc(hd.hardware_model || 'N/A')}</div>
+            <div class="col-md-6"><strong>Chassis:</strong> ${esc(hd.chassis || 'N/A')}</div>
+            <div class="col-md-6"><strong>Firmware:</strong> ${esc(hd.firmware_version || 'N/A')} ${hd.firmware_date ? '(' + esc(hd.firmware_date) + ')' : ''}</div>
+            <div class="col-md-6"><strong>Machine ID:</strong> <code class="text-muted">${esc(hd.machine_id || 'N/A')}</code></div>
+            <div class="col-md-6"><strong>Boot ID:</strong> <code class="text-muted">${esc(hd.boot_id || 'N/A')}</code></div>
+          </div>
+        </div>
+      </div>`;
+    }
+
+    const agentVer = d.version || t.version || agent.version || 'v1.8.0';
     const loggedUsers = t.logged_users || d.logged_users || agent.loggedUsers || [];
 
     let loggedUsersHtml = '';
@@ -841,6 +882,8 @@
         </h5>
         <small class="text-muted">Last seen ${lastSeenStr}</small>
       </div>
+
+      ${hostDetailsHtml}      </div>
 
       <!-- Memory Card (Matching user screenshot design) -->
       <div class="card mb-3 shadow-sm border">
@@ -1150,6 +1193,7 @@
          }
          n.indentHtml = indentHtml;
          n.depth = depth;
+         n.displayName = (n.name && n.name.length > 16) ? n.name.substring(0, 16) + '…' : (n.name || '');
          // A leaf gets a spacer of the same width, so names stay aligned down
          // the column instead of jittering by whether a row has children.
          n.caretHtml = n.children.length
@@ -1420,21 +1464,52 @@
     toggleFormFields();
   }
 
+  function applySubtypeTemplate() {
+    const tmpl = $('#res-subtype-template').val();
+    if (!tmpl) return;
+    $('#res-subtype').val(tmpl);
+    const presets = {
+      docker: { icon: 'fa-brands fa-docker', tagline: 'Docker Engine Container Workload', port: '2375' },
+      systemd: { icon: 'fa-solid fa-gears', tagline: 'Linux Systemd Daemon Service' },
+      postgresql: { icon: 'fa-solid fa-database', tagline: 'PostgreSQL Relational Database', port: '5432' },
+      redis: { icon: 'fa-solid fa-cubes', tagline: 'Redis In-Memory Key-Value Cache', port: '6379' },
+      proxmox: { icon: 'fa-solid fa-server', tagline: 'Proxmox VE Hypervisor Host', port: '8006' },
+      wireguard: { icon: 'fa-solid fa-shield-halved', tagline: 'WireGuard VPN Encrypted Tunnel', port: '51820' },
+      unifi: { icon: 'fa-solid fa-wifi', tagline: 'UniFi Network Controller', port: '8443' },
+      k8s: { icon: 'fa-solid fa-dharmachakra', tagline: 'Kubernetes Cluster Worker Node', port: '6443' }
+    };
+    if (presets[tmpl]) {
+      const p = presets[tmpl];
+      if (p.icon) $('#res-icon').val(p.icon);
+      if (p.tagline) $('#res-tagline').val(p.tagline);
+      if (p.port && !$('#res-port').val()) $('#res-port').val(p.port);
+      updateIconPreview();
+    }
+  }
+
   async function openMergeModal(discoveredId, discName) {
     const targets = rawResources.filter(r => r.kind === 'host' || r.kind === 'site' || r.kind === 'service');
-    let optionsHtml = targets.map(r => `<option value="${r.id}">${esc(r.name)} (${esc(r.kind)}${r.metadata?.subType ? ' - ' + esc(r.metadata.subType) : ''})</option>`).join('');
 
     app.modal.open({
       title: `Merge '${esc(discName)}' into Existing Resource`,
       size: 'md',
       bodyHtml: `
         <div class="p-3">
-          <p class="small text-muted">Select an existing Directory resource to merge IP addresses, network interfaces, and OS telemetry into:</p>
+          <p class="small text-muted mb-2">Search and select an existing Directory resource to merge IP addresses, network interfaces, and OS telemetry into:</p>
           <div class="mb-3">
-            <label class="form-label font-weight-bold">Target Directory Resource</label>
-            <select class="form-select" id="merge-target-id">
-              ${optionsHtml}
-            </select>
+            <input type="text" class="form-control mb-2 shadow-sm" id="merge-search-input" placeholder="🔍 Type to filter resources..." oninput="filterMergeTargets()">
+            <input type="hidden" id="merge-target-id" value="${targets[0] ? targets[0].id : ''}">
+            <div class="list-group overflow-auto border rounded shadow-sm" id="merge-targets-list" style="max-height: 240px;">
+              ${targets.map((r, i) => `
+                <button type="button" class="list-group-item list-group-item-action p-2 merge-item-btn ${i===0 ? 'active' : ''}" data-id="${r.id}" onclick="selectMergeTarget(this)">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <strong>${esc(r.name)}</strong>
+                    <span class="badge bg-secondary">${esc(r.kind)}${r.metadata?.subType ? ' · ' + esc(r.metadata.subType) : ''}</span>
+                  </div>
+                  ${r.metadata?.ip ? `<small class="font-monospace text-muted d-block">${esc(r.metadata.ip)}</small>` : ''}
+                </button>
+              `).join('')}
+            </div>
           </div>
         </div>
       `,
@@ -1445,6 +1520,24 @@
         `
       }
     });
+  }
+
+  function filterMergeTargets() {
+    const q = ($('#merge-search-input').val() || '').toLowerCase();
+    $('#merge-targets-list button').each(function() {
+      const text = $(this).text().toLowerCase();
+      if (text.includes(q)) {
+        $(this).removeClass('d-none');
+      } else {
+        $(this).addClass('d-none');
+      }
+    });
+  }
+
+  function selectMergeTarget(btn) {
+    $('#merge-targets-list button').removeClass('active');
+    $(btn).addClass('active');
+    $('#merge-target-id').val($(btn).data('id'));
   }
 
   async function submitMergeResource(discoveredId) {
