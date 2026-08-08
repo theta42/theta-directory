@@ -21,12 +21,17 @@ class AgentManager {
    * Sort keys alphabetically, remove whitespace, omit 'signature' key.
    */
   canonicalize(payload) {
-    const cleanObj = {};
-    const sortedKeys = Object.keys(payload).filter(k => k !== 'signature').sort();
-    for (const key of sortedKeys) {
-      cleanObj[key] = payload[key];
-    }
-    return JSON.stringify(cleanObj);
+    const sortObj = (val) => {
+      if (val === null || typeof val !== 'object') return val;
+      if (Array.isArray(val)) return val.map(sortObj);
+      const sorted = {};
+      const keys = Object.keys(val).filter(k => k !== 'signature').sort();
+      for (const k of keys) {
+        sorted[k] = sortObj(val[k]);
+      }
+      return sorted;
+    };
+    return JSON.stringify(sortObj(payload));
   }
 
   /**
@@ -148,6 +153,7 @@ class AgentManager {
         ram_total_gb: discovery.ram_total_gb || undefined,
         disk_total_gb: discovery.disk_total_gb || undefined,
         ip: (discovery.ip_addresses || [])[0] || undefined,
+        public_ip: discovery.public_ip || undefined,
         agentId: agent.id,
         last_seen: Date.now()
       };
@@ -168,15 +174,54 @@ class AgentManager {
 
       if (!discovery.hostname) return;
       const { DiscoveryReconciler } = require('../services/discovery_reconciler');
+      const { ResourceEdge } = require('../models/resource');
+
+      const hostSlug = `host-${discovery.hostname.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`;
       await DiscoveryReconciler.reconcile('theta-agent', {
         resources: [{
           kind: 'host',
           name: discovery.hostname,
-          slug: `agent-${agent.id.slice(0, 8)}`,
-          metadata: { ...metadata, subType: 'linux' }
+          slug: hostSlug,
+          metadata: { ...metadata, subType: 'linux', managed: true }
         }],
         edges: []
       });
+
+      // Find the matched or created host resource
+      const allHosts = await Resource.list({ where: { kind: 'host' } });
+      const hostRes = allHosts.find(r => 
+        r.name.toLowerCase() === discovery.hostname.toLowerCase() || 
+        r.slug === hostSlug || 
+        r.metadata?.agentId === agent.id
+      );
+
+      if (hostRes) {
+        // Bind the agent to its Host resource
+        await agent.update({ resourceId: hostRes.id }).catch(() => {});
+
+        // Attach host to matching Site by Public IP if not already parented
+        const existingEdges = await ResourceEdge.list({ where: { childId: hostRes.id } });
+        if (existingEdges.length === 0) {
+          const sites = await Resource.list({ where: { kind: 'site' } });
+          let targetSite = null;
+          if (discovery.public_ip) {
+            targetSite = sites.find(s => {
+              const siteIp = (s.metadata?.public_ip || s.metadata?.ip || s.metadata?.address || '').trim();
+              return siteIp && (siteIp === discovery.public_ip || siteIp.includes(discovery.public_ip));
+            });
+          }
+          if (!targetSite) targetSite = sites[0];
+
+          if (targetSite) {
+            await ResourceEdge.create({
+              id: crypto.randomUUID(),
+              parentId: targetSite.id,
+              childId: hostRes.id,
+              relation: 'hosts'
+            }).catch(() => {});
+          }
+        }
+      }
     } catch (err) {
       // Never let a directory write break the agent connection.
       console.error(`[AgentManager] discovery -> directory failed for agent ${agent.id}:`, err.message);

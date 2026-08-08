@@ -1,3 +1,16 @@
+# v1.31.0 - 2026-08-07
+
+### Added
+- **Resource Secrets Engine & Zero-View Security.** OpenBao KV-v2 encrypted secrets for directory resources (`secret/data/resources/<slug>/conf`). Zero-View UI & API model — secret values are never returned to admin browsers or UI templates, and delivered exclusively to authenticated `theta-agent` instances.
+- **Strict Secret Key Regex Validation.** Secret keys are validated against `^[A-Za-z0-9_]+$` (Standard Environment Variable format, e.g. `DB_PASSWORD`).
+- **Field-Populating Password Generator.** Cryptographic secret generator (`window.crypto.getRandomValues`) with length selector dropdown (8–128 chars) populating input fields with security notices.
+- **Multi-Level Secret Inheritance.** Dynamic secret resolution across any depth of the resource tree (`Services / Apps -> Hosts / Nodes -> Global Sites`).
+- **Non-Blocking UI Confirmations.** Replaced browser blocking dialogs with async `app.messages.confirm()` banners.
+- **UI Directory Layout Improvements.** Fixed Directory table resource name and badge order for enhanced readability.
+
+### Fixed
+- **SSSD `sshPublicKey` Mapping.** Included `ldap_user_ssh_public_key = sshPublicKey` in generated agent `sssd.conf` template.
+
 # Unreleased — LDAP-over-HTTPS API + agent LDAP byte-pump relay
 
 ### Added

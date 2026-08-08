@@ -306,13 +306,24 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
         const joinKey = await AgentJoinKey.authenticate(token);
         if (joinKey) {
           const hostname = (url.searchParams.get('hostname') || '').trim();
-          const enrolled = await Agent.enroll({
-            name: hostname || `agent-${Date.now().toString(36)}`,
-            description: `Self-enrolled with join key ${joinKey.keyPrefix}`,
-            enrolledBy: `join-key:${joinKey.label}`
-          });
-          agent = enrolled.agent;
-          issuedToken = enrolled.token;
+          let existingAgent = null;
+          if (hostname) {
+            const matches = await Agent.list({ where: { name: hostname } });
+            existingAgent = matches && matches.find(a => !a.revoked);
+          }
+          if (existingAgent) {
+            const newToken = await existingAgent.rotateToken();
+            agent = existingAgent;
+            issuedToken = newToken;
+          } else {
+            const enrolled = await Agent.enroll({
+              name: hostname || `agent-${Date.now().toString(36)}`,
+              description: `Self-enrolled with join key ${joinKey.keyPrefix}`,
+              enrolledBy: `join-key:${joinKey.label}`
+            });
+            agent = enrolled.agent;
+            issuedToken = enrolled.token;
+          }
           await joinKey.update({
             use_count: (joinKey.use_count || 0) + 1,
             last_used_on: Math.floor(Date.now() / 1000)
@@ -345,6 +356,23 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
     // `ws` discards messages emitted while no listener is attached.
     agentManager.registerAgent(agent, ws, remoteAddr);
 
+    if (issuedToken) {
+      const publicKey = await agentManager.publicKeyBase64();
+      try {
+        ws.send(JSON.stringify({
+          type: 'config',
+          payload: {
+            enrolled: true,
+            auth_token: issuedToken,
+            public_key: publicKey
+          }
+        }));
+        console.log(`[Theta Agent] Sent auto-enrollment credentials to "${agent.name}"`);
+      } catch (err) {
+        console.error(`[Theta Agent] Failed to send auto-enrollment config to "${agent.name}":`, err.message);
+      }
+    }
+
     ws.on('message', async (message) => {
       try {
         const data = JSON.parse(message);
@@ -364,6 +392,65 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
           case 'discovery':
             await agentManager.handleDiscovery(current, payload);
             if (app.io) app.io.emit('agent.discovery', { agentId: current.id, payload });
+            if (payload.capabilities && payload.capabilities.configure_ldap) {
+              const conf = require('@simpleworkjs/conf');
+              const os = require('os');
+              const ssoHost = (conf.stack && conf.stack.ssoHost) || 'sso.laptop-dev.vm42.us';
+              const ldapBaseDn = (conf.stack && conf.stack.ldapBaseDn) || 'dc=laptop-dev,dc=vm42,dc=us';
+              
+              const lanIps = [];
+              const ifaces = os.networkInterfaces();
+              for (const dev in ifaces) {
+                for (const details of ifaces[dev]) {
+                  if (!details.internal && details.family === 'IPv4') lanIps.push(details.address);
+                }
+              }
+              const uriList = [
+                `ldapi://%2frun%2ftheta%2fldap.sock`,
+                `ldap://127.0.0.1:3890`,
+                `ldap://127.0.0.1:389`,
+                `ldap://${ssoHost}:389`,
+                `ldaps://${ssoHost}:636`,
+                ...lanIps.map(ip => `ldap://${ip}:389`)
+              ];
+              const ldapUris = [...new Set(uriList)].join(', ');
+
+              const sssdConfig = `[sssd]
+config_file_version = 2
+domains = default
+
+[domain/default]
+id_provider = ldap
+auth_provider = ldap
+chpass_provider = ldap
+sudo_provider = ldap
+ldap_uri = ${ldapUris}
+ldap_search_base = ${ldapBaseDn}
+ldap_user_search_base = ou=people,${ldapBaseDn}
+ldap_group_search_base = ou=groups,${ldapBaseDn}
+ldap_sudo_search_base = ou=people,${ldapBaseDn}
+ldap_schema = rfc2307bis
+ldap_user_object_class = posixAccount
+ldap_user_name = uid
+ldap_user_ssh_public_key = sshPublicKey
+ldap_group_object_class = groupOfNames
+ldap_group_member = member
+ldap_id_mapping = false
+ldap_id_use_start_tls = false
+ldap_tls_reqcert = never
+cache_credentials = true
+entry_cache_timeout = 600
+entry_cache_user_timeout = 600
+entry_cache_group_timeout = 600
+entry_cache_sudo_timeout = 600
+refresh_expired_interval = 300
+`;
+              agentManager.sendCommand(current, 'configure_ldap', { config: sssdConfig }, true).then(() => {
+                console.log(`[Theta Agent] Pushed auto configure_ldap to "${current.name}"`);
+              }).catch(err => {
+                console.error(`[Theta Agent] Auto push configure_ldap to "${current.name}" failed:`, err.message);
+              });
+            }
             break;
           case 'telemetry':
             await agentManager.handleTelemetry(current, payload);
