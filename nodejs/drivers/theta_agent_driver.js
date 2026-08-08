@@ -42,12 +42,14 @@ class ThetaAgentDriver extends BaseDriver {
       status: 'online',
       driver: this.name,
       agentId: agent.id,
-      agentVersion: agent.version,
+      agentVersion: agent.version || 'v1.7.0',
       lastSeen: agent.lastSeen,
       system: {
         cpu: telemetry.cpu || null,
         ram: telemetry.memory || null,
         disk: telemetry.disk || null,
+        disks: telemetry.disks || [],
+        loggedUsers: telemetry.loggedUsers || [],
         uptime: telemetry.uptime || null
       }
     };
@@ -80,6 +82,16 @@ class ThetaAgentDriver extends BaseDriver {
     if (action === 'reboot' || action === 'shutdown') {
       const result = await AgentManager.sendCommand(agent.id, action, { isHighRisk: true });
       return { status: 'ok', driver: this.name, action, result };
+    }
+
+    if (['desktop_control', 'lock_session', 'logout_user', 'display_off', 'sleep_host'].includes(action) || subType.startsWith('desktop')) {
+      const subAction = params.subAction || action;
+      const targetUser = params.user || '';
+      const result = await AgentManager.sendCommand(agent.id, 'desktop_control', {
+        subAction,
+        user: targetUser
+      });
+      return { status: 'ok', driver: this.name, action: subAction, result };
     }
 
     if (action === 'systemd_action' || subType === 'systemd') {
