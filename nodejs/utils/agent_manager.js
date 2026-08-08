@@ -290,11 +290,30 @@ class AgentManager {
     };
   }
 
-  // Find connected/enrolled agent bound to a resource ID.
+  // Find connected/enrolled agent bound to a resource ID (or inherited from parent Host).
   async getAgentForResource(resourceId) {
     if (!resourceId) return null;
     const rows = await Agent.list().catch(() => []);
-    const agent = rows.find(a => a.resourceId === resourceId);
+    let agent = rows.find(a => a.resourceId === resourceId);
+    if (!agent) {
+      try {
+        const { Resource } = require('../models/resource');
+        const { ResourceEdge } = require('../models/resource');
+        const res = await Resource.get(resourceId);
+        if (res && res.kind === 'service') {
+          const edges = await ResourceEdge.list({ where: { childId: resourceId } });
+          for (const edge of edges) {
+            const parentRes = await Resource.get(edge.parentId);
+            if (parentRes && parentRes.kind === 'host') {
+              agent = rows.find(a => a.resourceId === parentRes.id || (parentRes.metadata && parentRes.metadata.agentId === a.id));
+              if (agent) break;
+            }
+          }
+        }
+      } catch (err) {
+        console.error('[AgentManager] parent agent lookup error:', err.message);
+      }
+    }
     if (!agent) return null;
     return agent.toPublic(this.liveState(agent.id));
   }
