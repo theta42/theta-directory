@@ -46,7 +46,7 @@ describe('plugin_registry', () => {
     expect(registry.secretKeys('proxmox')).toEqual(['tokenSecret']);
     expect(registry.secretKeys('unifi')).toEqual(['password']);
     expect(registry.secretKeys('nmap')).toEqual([]);
-    expect(registry.publicKeys('nmap')).toEqual(['targetRange']);
+    expect(registry.publicKeys('nmap').sort()).toEqual(['autoPromote', 'location', 'targetRange']);
   });
 
   test('splitConfig separates secret from non-secret and drops undeclared keys', () => {

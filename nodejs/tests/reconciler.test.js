@@ -25,7 +25,7 @@ describe('DiscoveryReconciler', () => {
 
     await DiscoveryReconciler.reconcile('test-plugin', payload);
 
-    const all = await Resource.list();
+    const all = (await Resource.list()).filter(r => r.kind !== 'site');
     expect(all).toHaveLength(1);
     expect(all[0].name).toBe('New Host');
     expect(all[0].metadata.discovery_sources).toContain('test-plugin');
@@ -57,7 +57,7 @@ describe('DiscoveryReconciler', () => {
       }]
     });
 
-    const all = await Resource.list();
+    const all = (await Resource.list()).filter(r => r.kind !== 'site');
     expect(all).toHaveLength(1); // Should have merged, not created a new one
     
     const merged = all[0];
