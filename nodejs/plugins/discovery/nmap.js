@@ -11,7 +11,9 @@ module.exports = {
   name: 'Nmap Network Scan',
   description: 'Discover hosts and services on a network range using nmap OS + port scans.',
   configSchema: [
-    { key: 'targetRange', label: 'Target Range', type: 'text', required: true, placeholder: '192.168.1.0/24' }
+    { key: 'targetRange', label: 'Target Range', type: 'text', required: true, placeholder: '192.168.1.0/24' },
+    { key: 'location', label: 'Location / Site (optional)', type: 'site_select', required: false, placeholder: 'Default Site' },
+    { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: true }
   ],
 
   validate: async (config) => {

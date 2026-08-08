@@ -92,7 +92,9 @@ module.exports = {
   configSchema: [
     { key: 'url',         label: 'API URL',      type: 'url',      required: true, placeholder: 'https://pve.example:8006' },
     { key: 'tokenId',     label: 'Token ID',     type: 'text',     required: true, placeholder: 'user@pam!token' },
-    { key: 'tokenSecret', label: 'Token Secret', type: 'password', required: true, secret: true }
+    { key: 'tokenSecret', label: 'Token Secret', type: 'password', required: true, secret: true },
+    { key: 'location',    label: 'Location / Site (optional)', type: 'site_select', required: false, placeholder: 'Default Site' },
+    { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: true }
   ],
 
   // "Test" button in the UI: hit the unauthenticated version endpoint with the

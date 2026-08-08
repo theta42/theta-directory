@@ -367,3 +367,35 @@ Ordered by how much they unblock:
    conventions, not schema changes; the json column already holds them.
 5. **`updated_on` in graph output / graph etag** (blocks drift/DNS
    freshness; trivial once surfaced).
+
+---
+
+## 10. Subtype Management & Metrics Drivers Architecture
+
+The Directory incorporates a **4-tier Driver Resolution Engine** (`services/driver_registry.js`) that binds resource `subType` metadata to specific telemetry, log streaming, and operational management protocols.
+
+### Subtype Matrix & Drivers
+
+| Subtype Category | Supported Subtypes | Primary Driver | Management Capabilities | Telemetry & Metrics |
+| :--- | :--- | :--- | :--- | :--- |
+| **Service Managers** | `systemd`, `openrc`, `windows_service` | `ThetaAgentDriver` / Systemd | `start`, `stop`, `restart`, `reload` | CPU, Memory, Active PID, SubState |
+| **Containers & Stacks** | `docker`, `docker_compose` | `DockerSocketDriver` / Agent | `start`, `stop`, `restart`, `pause` | CPU %, Memory Limit/Usage, Net/Block I/O |
+| **Virtualization & Hypervisors** | `proxmox`, `lxc`, `kvm`, `esxi`, `libvirt_kvm`, `vps_generic` | `ProxmoxDriver` / Hypervisor | `start`, `stop`, `shutdown`, `reboot` | Guest VMID CPU/RAM/Disk, Parent Hypervisor status |
+| **Networking & Appliances** | `wireguard`, `unifi_ap`, `unifi_switch`, `pfsense` | `NetworkDriver` | `restart`, `locate`, `sync` | Connected Clients, Handshakes, Gateway RTT, Channels |
+| **Databases & Vaults** | `postgresql`, `redis`, `openbao_vault` | `DbDriver` | `flush`, `seal`, `unseal` | DB Size, Connections, Hit Rates, Active Leases |
+| **Orchestration** | `k8s_pod`, `k8s_deployment` | `K8sDriver` | `scale`, `restart`, `rollout_restart` | Desired/Ready Replicas, Pod Phase, IP |
+| **Workstations** | `desktop_linux`, `desktop_windows` | `ThetaAgentDriver` | `reboot`, `shutdown`, Display Manager | CPU, Memory, GPU, Active Sessions |
+
+*(Note: Reverse Proxy subtypes like Nginx/HAProxy/Caddy/Traefik are excluded per environment configuration).*
+
+### 4-Tier Driver Resolution Engine
+1. **Direct Agent Execution**: If `theta-agent` is connected directly to the target resource.
+2. **Subtype-Specific Driver**: Executes specialized protocol driver (e.g. Proxmox API, Docker Engine API, DB Driver).
+3. **Ancestor / Hypervisor Fallback**: If an LXC/KVM guest lacks a direct agent, queries its parent Proxmox hypervisor node for metrics and power controls.
+4. **Unmanaged Fallback**: Reports unmanaged status cleanly without breaking UI/API contracts.
+
+### Subtype Operations Endpoints
+- `GET /api/directory-admin/resources/:id/driver-metrics` — Real-time telemetry payload
+- `POST /api/directory-admin/resources/:id/driver-action` — Execute management action (`{ action, params }`)
+- `GET /api/directory-admin/resources/:id/driver-logs` — Tail log output (`?lines=100`)
+

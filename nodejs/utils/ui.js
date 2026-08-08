@@ -43,8 +43,6 @@ module.exports = {
 		{href: '/users', icon: 'fa-solid fa-users', label: 'Users', groups: ['app_sso_admin', 'admin']},
 		{href: '/conf', icon: 'fas fa-cogs', label: 'Configuration', groups: ['app_sso_admin']},
 		{href: '/directory', icon: 'fa-solid fa-server', label: 'Directory', groups: ['app_sso_admin', 'app_sso_directory_admin', 'admin']},
-		// Vault requires login - per-user secrets at secret/users/<uid>/*.
-		{href: '/vault', icon: 'fa-solid fa-vault', label: 'Vault', groups: ['login']},
 		{href: '/overview', icon: 'fa-solid fa-gauge-high', label: 'Overview', groups: ['app_sso_admin', 'admin']},
 	],
 };

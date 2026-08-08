@@ -11,6 +11,7 @@
 		loadProxyConf();
 		loadTos();
 		loadMessagingPlugins();
+		loadApps();
 	});
 
 	async function loadConf() {
@@ -302,6 +303,67 @@
 			app.messages.toast('Error deleting plugin: ' + e.message, 'danger');
 		}
 	}
+
+	async function mintApp() {
+		const errorEl = document.getElementById('app-error');
+		errorEl.classList.add('d-none');
+		const name = document.getElementById('app-name-input').value.trim();
+		if (!name) {
+			errorEl.textContent = 'App name is required';
+			errorEl.classList.remove('d-none');
+			return;
+		}
+		try {
+			const res = await fetch('/api/vault/apps', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json', 'auth-token': app.auth.getToken() },
+				body: JSON.stringify({ name })
+			});
+			if (!res.ok) {
+				const text = await res.text();
+				throw new Error(`${res.status} ${text}`);
+			}
+			const result = await res.json();
+			document.getElementById('app-token').textContent = result.token;
+			document.getElementById('app-result-card').classList.remove('d-none');
+			loadApps();
+		} catch (err) {
+			errorEl.textContent = err.message;
+			errorEl.classList.remove('d-none');
+		}
+	}
+
+	async function loadApps() {
+		const $list = document.getElementById('apps-list');
+		if (!$list) return;
+		$list.innerHTML = '<div class="text-muted small p-2">Loading apps…</div>';
+		try {
+			const res = await fetch('/api/vault/apps', {
+				headers: { 'auth-token': app.auth.getToken() }
+			});
+			if (!res.ok) { $list.innerHTML = '<div class="text-danger small p-2">Failed to load app tokens.</div>'; return; }
+			const { apps = [] } = await res.json();
+			if (!apps.length) { $list.innerHTML = '<div class="text-muted small p-2">No external app tokens minted yet.</div>'; return; }
+			$list.innerHTML = '<div class="list-group list-group-flush">' + apps.map(a => {
+				const ok = !a.lastError;
+				const renewed = a.lastRenewedAt ? ' · renewed ' + moment(a.lastRenewedAt).fromNow() : ' · never renewed';
+				return `<div class="list-group-item d-flex justify-content-between align-items-center">
+					<div>
+						<strong class="font-monospace">${app.util.escapeHtml(a.name)}</strong>
+						${ok ? '<span class="badge bg-success ms-1">renewing</span>' : '<span class="badge bg-danger ms-1" title="' + app.util.escapeHtml(a.lastError) + '">renewal error</span>'}
+						<div class="small text-muted">minted ${moment(a.createdOn).format('YYYY-MM-DD HH:mm')}${renewed}</div>
+					</div>
+					<span class="font-monospace small text-muted">secret/apps/${app.util.escapeHtml(a.name)}/</span>
+				</div>`;
+			}).join('') + '</div>';
+		} catch (err) {
+			$list.innerHTML = '<div class="text-danger small p-2">Failed to load apps: ' + app.util.escapeHtml(err.message) + '</div>';
+		}
+	}
+
+	function copyText(text) {
+		navigator.clipboard.writeText(text).then(() => app.messages.toast('Copied to clipboard', 'success'));
+	}
 </script>
 
 <div class="container mt-4">
@@ -329,6 +391,11 @@
 						<li class="nav-item" role="presentation">
 							<button class="nav-link" id="proxy-tab" data-bs-toggle="tab" data-bs-target="#pane-proxy" type="button" role="tab">
 								<i class="fas fa-shield-alt text-warning me-1"></i> Proxy Secrets
+							</button>
+						</li>
+						<li class="nav-item" role="presentation">
+							<button class="nav-link" id="apps-tab" data-bs-toggle="tab" data-bs-target="#pane-apps" type="button" role="tab">
+								<i class="fas fa-key text-warning me-1"></i> App Tokens
 							</button>
 						</li>
 						<li class="nav-item" role="presentation">
@@ -497,6 +564,50 @@
 							</div>
 
 							<button id="btn-save-proxy" class="btn btn-warning mt-2 text-dark fw-semibold" onclick="saveProxyConf()"><i class="fas fa-save me-1"></i> Save Proxy Secrets</button>
+						</div>
+
+						<!-- External App Tokens Tab -->
+						<div class="tab-pane fade" id="pane-apps" role="tabpanel">
+							<h5 class="fw-bold mb-3"><i class="fas fa-key text-warning me-2"></i> External App Tokens (OpenBao)</h5>
+							<p class="text-muted small">Mint scoped OpenBao tokens for external microservices, scripts, and third-party tools (scoped to <code>secret/apps/&lt;name&gt;/*</code>).</p>
+							<div class="row g-4">
+								<div class="col-md-5">
+									<div class="card border shadow-sm">
+										<div class="card-header bg-light py-2"><h6 class="mb-0 fw-bold"><i class="fas fa-plus me-1"></i> Mint New App Token</h6></div>
+										<div class="card-body p-3">
+											<p class="text-muted small">Mints a periodic OpenBao token. The token will be displayed <strong>once</strong>.</p>
+											<div class="mb-3">
+												<label class="form-label fw-semibold">App Name</label>
+												<input type="text" class="form-control" id="app-name-input" placeholder="e.g. build-agent">
+												<div class="form-text">Use lowercase letters, numbers, and hyphens.</div>
+											</div>
+											<button class="btn btn-primary btn-sm" onclick="mintApp()"><i class="fas fa-key me-1"></i> Mint Token</button>
+											<div class="alert alert-danger d-none mt-3 mb-0" id="app-error"></div>
+										</div>
+									</div>
+								</div>
+								<div class="col-md-7">
+									<div class="card border shadow-sm d-none mb-3" id="app-result-card">
+										<div class="card-header bg-light d-flex justify-content-between align-items-center py-2">
+											<h6 class="mb-0 fw-bold text-success"><i class="fas fa-check-circle me-1"></i> Generated Token</h6>
+											<button class="btn btn-sm btn-outline-primary" onclick="copyText(document.getElementById('app-token').textContent)"><i class="fas fa-copy me-1"></i> Copy</button>
+										</div>
+										<div class="card-body p-3">
+											<p class="small text-muted mb-2">Include this token in HTTP header <code>X-Vault-Token</code>:</p>
+											<pre id="app-token" class="bg-dark text-light p-3 rounded small font-monospace mb-0 select-all"></pre>
+										</div>
+									</div>
+									<div class="card border shadow-sm">
+										<div class="card-header bg-light d-flex justify-content-between align-items-center py-2">
+											<h6 class="mb-0 fw-bold"><i class="fa-solid fa-list me-1"></i> Active App Tokens</h6>
+											<button class="btn btn-sm btn-outline-secondary" onclick="loadApps()"><i class="fas fa-rotate me-1"></i> Refresh</button>
+										</div>
+										<div class="card-body p-0" id="apps-list">
+											<div class="text-muted small p-3">Loading apps…</div>
+										</div>
+									</div>
+								</div>
+							</div>
 						</div>
 
 						<!-- Terms of Service Tab -->

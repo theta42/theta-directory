@@ -13,9 +13,9 @@ module.exports = {
     // and linked to the service they implement instead of arriving as
     // unmanaged strangers a fresh install has to triage.
     { key: 'stackProject', label: 'Own compose project', type: 'text', required: false, placeholder: 'theta-suite' },
-    // The catalog host these containers run on, so they land in the tree
-    // instead of as roots.
-    { key: 'hostSlug', label: 'Parent host slug', type: 'text', required: false, placeholder: 'host_<hostname>' }
+    { key: 'hostSlug', label: 'Parent host slug', type: 'text', required: false, placeholder: 'host_<hostname>' },
+    { key: 'location', label: 'Location / Site (optional)', type: 'site_select', required: false, placeholder: 'Default Site' },
+    { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: true }
   ],
 
   validate: async (config) => {

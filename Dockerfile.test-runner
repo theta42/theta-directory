@@ -20,6 +20,7 @@ COPY nodejs/app.js ./
 COPY nodejs/bin ./bin
 COPY nodejs/conf ./conf
 COPY nodejs/controller ./controller
+COPY nodejs/drivers ./drivers
 COPY nodejs/middleware ./middleware
 COPY nodejs/models ./models
 # Without this the discovery/plugin suites cannot even load their subject and

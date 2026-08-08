@@ -47,8 +47,9 @@ phone-home, no hosted control plane, and no per-user pricing.
   same directory, so you don't maintain a second user database for them.
 - **Personal access tokens** — any user can mint a long-lived bearer token to
   drive the management API from scripts or CI, scoped to their own permissions.
-- **All-in-one Docker image** — app + OpenLDAP + Redis in one container, or run
-  the pieces separately against your own LDAP/Redis via `app_*` env config.
+- **Directory & Inventory Graph** — full host/service/site graph with resource metadata, automatic LDAP group provisioning (`_access` / `_admin`), and Access Request workflows.
+- **Subtype Management & Metrics Drivers Engine** — 4-tier resolution engine binding `subType` metadata (`systemd`, `docker`, `proxmox`, `wireguard`, `postgresql`, `redis`, `k8s`) to operational telemetry, log streaming, and remote lifecycle control.
+- **Explicit Secret Inheritance Mode** — OpenBao KV-v2 integration with strict upward ancestor lineage (`Resource -> Host -> Cluster -> Site`), preserving precise secret scoping across services and containers.
 - **Multi-Site Support (Geo-Location Scaling)** — built-in support for N-Way Multi-Master OpenLDAP replication across physical sites for HA and low latency.
 
 ## Why this over the alternatives

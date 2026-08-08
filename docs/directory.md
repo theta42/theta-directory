@@ -139,6 +139,32 @@ The inventory graph isn't just documentation — other components read it to mak
 
 Planned consumers (end-user catalog, firewall/DNS generation) and the model/API gaps they need are tracked in [`directory_spec.md`](https://github.com/theta42/sso-manager-node/blob/master/directory_spec.md) §9.
 
+## Subtype Management & Metrics Drivers Architecture
+
+The Directory includes a **4-tier Driver Resolution Engine** (`services/driver_registry.js`) that binds a resource's `subType` metadata to specific operational protocols for real-time telemetry, log streaming, and remote lifecycle management:
+
+1. **Direct Agent Execution** (`ThetaAgentDriver`): Used when a `theta-agent` daemon is connected to the resource (`systemd`, `docker`, `zfs_pool`, `desktop_linux`, `openrc`, `wireguard`).
+2. **Specialized Subtype Drivers**:
+   - `ProxmoxDriver`: Proxmox VE hypervisors & `lxc` / `kvm` guest controls.
+   - `DockerSocketDriver`: Docker Engine API & `docker_compose` stacks.
+   - `DbDriver`: `postgresql`, `redis`, `openbao_vault`.
+   - `NetworkDriver`: `wireguard`, `unifi_ap`, `unifi_switch`, `pfsense`.
+   - `K8sDriver`: `k8s_pod`, `k8s_deployment`.
+3. **Ancestor / Hypervisor Provider Fallback**: If an LXC/KVM guest lacks a direct agent, the engine automatically queries its parent Proxmox hypervisor node for VMID telemetry and power controls.
+4. **Unmanaged Fallback**: Reports unmanaged status cleanly.
+
+### Subtype Operations API
+- `GET /api/directory-admin/resources/:id/driver-metrics` — Real-time telemetry payload
+- `POST /api/directory-admin/resources/:id/driver-action` — Execute management actions (`{ action, params }`)
+- `GET /api/directory-admin/resources/:id/driver-logs` — Tail operational log output (`?lines=100`)
+
+## Explicit Secret Inheritance Mode
+
+Resource secrets stored in OpenBao (`secret/data/resources/<slug>/conf`) use **Explicit Secret Inheritance Mode** with strict upward ancestor lineage:
+
+- **Strict Ancestor Lineage**: When viewing candidate secrets for inheritance, the dropdown strictly filters to **direct upward ancestors** in the directory hierarchy (Resource $\rightarrow$ Parent Host $\rightarrow$ Cluster $\rightarrow$ Site). Sibling resources across the directory are never exposed.
+- **Explicit Assignment**: Secret pointers (`INHERIT:<parentSlug>:<parentKey>`) are explicitly saved per resource, guaranteeing precise secret scoping across hosts, LXC/KVM containers, and services.
+
 ## API
 
 All of the above uses the same admin API the UI does (group `app_sso_directory_admin` or `app_sso_admin`):

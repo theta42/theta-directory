@@ -1,3 +1,17 @@
+# v1.32.0 - 2026-08-08
+
+### Added
+- **Subtype Management & Metrics Drivers Engine.** Built a 4-tier driver resolution engine (`services/driver_registry.js`) binding resource `subType` metadata (`systemd`, `docker`, `proxmox`, `wireguard`, `postgresql`, `redis`, `unifi`, `k8s`) to operational telemetry, log streaming, and remote lifecycle control.
+- **Subtype Operations APIs.** Exposed `/api/directory-admin/resources/:id/driver-metrics`, `driver-action`, and `driver-logs` endpoints.
+- **Explicit Secret Inheritance Mode.** Enforced strict upward ancestor lineage (`Resource -> Host -> Cluster -> Site`) for secret inheritance, resolving explicit pointers (`INHERIT:<parentSlug>:<parentKey>`) without exposing sibling directory secrets.
+- **Consolidated External App Tokens.** Relocated external OpenBao App Token minting into the **Configuration** page (`/conf` -> External App Tokens tab) and deprecated standalone `/vault` navigation item.
+- **Multi-Secret Key Support.** Supported multiple secret keys per resource in OpenBao `secret/data/resources/<slug>/conf` with per-key merging and deletion.
+- **Cross-Platform Agent Packaging.** Built multi-architecture Dockerfile staging and documentation for Linux ARM (arm64, armv7), Windows (amd64, arm64), and macOS (Intel, Apple Silicon).
+
+### Fixed
+- **Ancestry Lineage Querying.** Fixed `Resource.findAllAncestors(id)` memory filtering over `ResourceEdge.list()` to resolve deep ancestor lineage across all graph depths.
+- **Dockerfile Module Inclusion.** Included `COPY nodejs/drivers ./drivers` in `Dockerfile.openldap` and `Dockerfile.test-runner` for clean container execution.
+
 # v1.31.0 - 2026-08-07
 
 ### Added

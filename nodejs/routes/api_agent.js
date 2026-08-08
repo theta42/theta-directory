@@ -13,7 +13,7 @@ const ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_adm
 // Commands that can change or run code on the host. They are signed with the
 // SSO's persisted Ed25519 key and the agent verifies against the key pinned in
 // its agent.yml.
-const HIGH_RISK_COMMANDS = ['reboot', 'service_restart', 'configure_ldap', 'arbitrary_bash', 'update_binary', 'render_secrets', 'iam_apply'];
+const HIGH_RISK_COMMANDS = ['reboot', 'shutdown', 'service_restart', 'systemd_action', 'configure_ldap', 'arbitrary_bash', 'update_binary', 'render_secrets', 'iam_apply'];
 
 // ── REST API (mounted synchronously in app.js, BEFORE the 404 catch-all) ──
 // This is a plain Express Router exported directly so app.js can

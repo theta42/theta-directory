@@ -82,7 +82,7 @@ async function runPluginJob(instanceId) {
     };
     const payload = await runFn(cfg);
     if (instance.category === 'discovery') {
-      await DiscoveryReconciler.reconcile(instance.slug, payload);
+      await DiscoveryReconciler.reconcile(instance.slug, payload, cfg);
     }
     await instance.update({ lastStatus: STATUS.OK, lastError: null, lastLog: logs.join('\n') });
   } catch (err) {

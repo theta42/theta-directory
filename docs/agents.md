@@ -6,12 +6,25 @@ nav_order: 5
 
 # Theta Agent & Endpoint Management
 
-The **Theta Agent** (`theta-agent`) is a unified, 2-way Command & Control (C2)
-endpoint management daemon written in Go for Linux hosts across your home lab,
-infrastructure, or data center. It connects outbound via a long-lived WebSocket
-connection to the central **SSO Manager** (`wss://<sso-host>/api/agent/ws`),
-  enabling real-time host telemetry, automated host discovery, and local-first
-  administrative management.
+The **Theta Agent** (`theta-agent`) is a unified, 2-way Command & Control (C2) endpoint management daemon written in Go with native cross-platform binaries for **Linux (x86_64, ARM64, ARMv7)**, **Windows (x86_64, ARM64)**, and **macOS (Intel, Apple Silicon M1/M2/M3/M4)**. It connects outbound via a long-lived WebSocket connection to the central **SSO Manager** (`wss://<sso-host>/api/agent/ws`), enabling real-time host telemetry, automated host discovery, and local-first administrative management.
+
+---
+
+## Supported Architectures & Operating Systems
+
+The agent is compiled for 7 target platform binaries with zero external runtime dependencies:
+
+| Operating System | Architecture | Binary Name | Typical Target Devices |
+| :--- | :--- | :--- | :--- |
+| **Linux** | `amd64` (x86_64) | `theta-agent-linux-amd64` | Intel/AMD Servers, Cloud VMs, Proxmox Hypervisors |
+| **Linux** | `arm64` (aarch64) | `theta-agent-linux-arm64` | Raspberry Pi 4/5, Graviton, Ampere Altra |
+| **Linux** | `armv7` (32-bit ARM) | `theta-agent-linux-armv7` | Raspberry Pi 2/3/Zero 2W, ARM IoT Gateways |
+| **Windows** | `amd64` (x86_64) | `theta-agent-windows-amd64.exe` | Windows Server, Windows 10/11 Desktop |
+| **Windows** | `arm64` | `theta-agent-windows-arm64.exe` | Windows on ARM, Surface Pro |
+| **macOS** | `amd64` | `theta-agent-darwin-amd64` | Intel Macs |
+| **macOS** | `arm64` | `theta-agent-darwin-arm64` | Apple Silicon Macs (M1/M2/M3/M4) |
+
+The `install.sh` script automatically detects `uname -s` and `uname -m` to download the exact binary for the host.
 
 ---
 
