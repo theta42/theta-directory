@@ -78,6 +78,8 @@ module.exports = {
               const ports = (c.Ports || []).map(p => p.PublicPort ? `${p.PublicPort}:${p.PrivatePort}` : `${p.PrivatePort}`).join(', ');
               const isOwnStack = !!(stackProject && composeProject === stackProject);
 
+              const isIgnored = name.includes('openbao') || name.includes('bao-renewer') || composeService.includes('openbao') || composeService.includes('bao-renewer');
+
               resources.push({
                 kind: 'container',
                 name: composeService || name,
@@ -87,13 +89,15 @@ module.exports = {
                   state: c.State,
                   status: c.Status,
                   ports: ports,
+                  subType: 'docker',
                   composeProject: composeProject || undefined,
                   composeService: composeService || undefined,
                   containerName: name,
                   sourceId: stableKey,
+                  ignored: isIgnored ? true : undefined,
                   // Part of the deployment we are running inside: already
                   // accounted for, not something to promote.
-                  managed: isOwnStack ? true : undefined
+                  managed: (isOwnStack || isIgnored) ? true : undefined
                 }
               });
 
