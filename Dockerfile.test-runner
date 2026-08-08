@@ -20,8 +20,13 @@ COPY nodejs/app.js ./
 COPY nodejs/bin ./bin
 COPY nodejs/conf ./conf
 COPY nodejs/controller ./controller
+COPY nodejs/drivers ./drivers
 COPY nodejs/middleware ./middleware
 COPY nodejs/models ./models
+# Without this the discovery/plugin suites cannot even load their subject and
+# fail as "Cannot find module ../plugins/discovery/..." -- plugin code was
+# effectively untested in CI.
+COPY nodejs/plugins ./plugins
 COPY nodejs/routes ./routes
 COPY nodejs/services ./services
 COPY nodejs/utils ./utils
@@ -43,6 +48,8 @@ COPY directory_spec.md /directory_spec.md
 COPY test_seed.js ./test_seed.js
 COPY test/seed-test-user.sh /usr/local/bin/seed-test-user
 RUN chmod +x /usr/local/bin/seed-test-user
+# End-to-end LDAP tunnel test client (docker-compose.e2e.yml)
+COPY test/tunnel_e2e.js ./test/tunnel_e2e.js
 
 # Default command: seed the test user, then run the test suite
 CMD ["sh", "-c", "seed-test-user && npm test"]

@@ -33,8 +33,15 @@ Mail.send = function(to, subject, message, from){
 
 		var transporter = nodemailer.createTransport(transportOpts);
 
+		// Most authenticated SMTP relays (and this bit the field: "554 5.7.1
+		// ...: Sender is not same as SMTP authenticate username") require the
+		// envelope/header From to equal the authenticated user, or reject the
+		// send outright. If the operator hasn't set an explicit smtp.from,
+		// defaulting to the SMTP username is far more likely to actually send
+		// than a made-up noreply@theta42.com address that no relay authorized
+		// this account to send as.
 		var mailOpts = {
-			from: from || conf.smtp.from || `${conf.name} Accounts <noreply@theta42.com>`,
+			from: from || conf.smtp.from || conf.smtp.user || `${conf.name} Accounts <noreply@theta42.com>`,
 			to: to,
 			subject: subject,
 			html: message

@@ -1336,6 +1336,78 @@ All endpoints require authentication and `app_sso_admin` membership. Runtime con
 
 **Response:** `{ "success": true }`
 
+---
+
+## Subtype Driver Operations Endpoints
+
+Base path: `/api/directory-admin/resources`
+
+All endpoints require authentication and `app_sso_admin`, `app_sso_directory_admin`, or `admin` permission.
+
+### Get Subtype Driver Metrics
+
+**`GET /api/directory-admin/resources/:id/driver-metrics`**
+
+Resolves the operational driver for the resource via the 4-tier engine (`theta-agent`, specialized subtype driver, parent hypervisor provider, or unmanaged fallback) and returns real-time telemetry.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "resourceId": "res-id",
+  "metrics": {
+    "status": "online",
+    "driver": "database",
+    "subType": "redis",
+    "redis": { "connectedClients": 4, "usedMemoryBytes": 12582912, "opsPerSec": 42 }
+  }
+}
+```
+
+---
+
+### Execute Subtype Driver Action
+
+**`POST /api/directory-admin/resources/:id/driver-action`**
+
+Executes a protocol action on the target resource (e.g. systemd restart, Proxmox power control, Redis flush, K8s scale).
+
+**Request:**
+```json
+{
+  "action": "restart",
+  "params": { "serviceName": "emby-server" }
+}
+```
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "resourceId": "res-id",
+  "result": { "status": "ok", "driver": "docker_socket", "action": "restart" }
+}
+```
+
+---
+
+### Get Subtype Driver Logs
+
+**`GET /api/directory-admin/resources/:id/driver-logs?lines=100`**
+
+Retrieves recent operational logs for the resource via the resolved driver (`journalctl`, `docker logs`, Proxmox task logs, K8s pod logs).
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "resourceId": "res-id",
+  "logs": "[docker logs --tail 100 emby-server]\nContainer initialized..."
+}
+```
+
+---
+
 ## Error Responses
 
 All endpoints return errors in this format:

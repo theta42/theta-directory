@@ -1,3 +1,238 @@
+# v1.32.0 - 2026-08-08
+
+### Added
+- **Subtype Management & Metrics Drivers Engine.** Built a 4-tier driver resolution engine (`services/driver_registry.js`) binding resource `subType` metadata (`systemd`, `docker`, `proxmox`, `wireguard`, `postgresql`, `redis`, `unifi`, `k8s`) to operational telemetry, log streaming, and remote lifecycle control.
+- **Subtype Operations APIs.** Exposed `/api/directory-admin/resources/:id/driver-metrics`, `driver-action`, and `driver-logs` endpoints.
+- **Explicit Secret Inheritance Mode.** Enforced strict upward ancestor lineage (`Resource -> Host -> Cluster -> Site`) for secret inheritance, resolving explicit pointers (`INHERIT:<parentSlug>:<parentKey>`) without exposing sibling directory secrets.
+- **Consolidated External App Tokens.** Relocated external OpenBao App Token minting into the **Configuration** page (`/conf` -> External App Tokens tab) and deprecated standalone `/vault` navigation item.
+- **Multi-Secret Key Support.** Supported multiple secret keys per resource in OpenBao `secret/data/resources/<slug>/conf` with per-key merging and deletion.
+- **Cross-Platform Agent Packaging.** Built multi-architecture Dockerfile staging and documentation for Linux ARM (arm64, armv7), Windows (amd64, arm64), and macOS (Intel, Apple Silicon).
+
+### Fixed
+- **Ancestry Lineage Querying.** Fixed `Resource.findAllAncestors(id)` memory filtering over `ResourceEdge.list()` to resolve deep ancestor lineage across all graph depths.
+- **Dockerfile Module Inclusion.** Included `COPY nodejs/drivers ./drivers` in `Dockerfile.openldap` and `Dockerfile.test-runner` for clean container execution.
+
+# v1.31.0 - 2026-08-07
+
+### Added
+- **Resource Secrets Engine & Zero-View Security.** OpenBao KV-v2 encrypted secrets for directory resources (`secret/data/resources/<slug>/conf`). Zero-View UI & API model — secret values are never returned to admin browsers or UI templates, and delivered exclusively to authenticated `theta-agent` instances.
+- **Strict Secret Key Regex Validation.** Secret keys are validated against `^[A-Za-z0-9_]+$` (Standard Environment Variable format, e.g. `DB_PASSWORD`).
+- **Field-Populating Password Generator.** Cryptographic secret generator (`window.crypto.getRandomValues`) with length selector dropdown (8–128 chars) populating input fields with security notices.
+- **Multi-Level Secret Inheritance.** Dynamic secret resolution across any depth of the resource tree (`Services / Apps -> Hosts / Nodes -> Global Sites`).
+- **Non-Blocking UI Confirmations.** Replaced browser blocking dialogs with async `app.messages.confirm()` banners.
+- **UI Directory Layout Improvements.** Fixed Directory table resource name and badge order for enhanced readability.
+
+### Fixed
+- **SSSD `sshPublicKey` Mapping.** Included `ldap_user_ssh_public_key = sshPublicKey` in generated agent `sssd.conf` template.
+
+# Unreleased — LDAP-over-HTTPS API + agent LDAP byte-pump relay
+
+### Added
+
+- **`POST /api/v1/ldap/bind` and `POST /api/v1/ldap/search`** — an LDAP-over-HTTPS
+  API (DESIGN.md §3). A client stops speaking LDAP and instead does an HTTPS call
+  to the SSO, which performs the real bind/search against its own OpenLDAP. This
+  kills the hostname / cross-network / LDAPS-cert-chain pain. Caller auth is a
+  Bearer token: an agent token or a self-service API token (PAT). `/search` is
+  restricted to agent callers (the SSSD user/group-resolution use case) and runs
+  under the admin bind — see DESIGN.md §9.5 for the scoped-service-account
+  follow-up.
+- **LDAP byte-pump relay** (`utils/ldap_tunnel.js`) — the SSO relays raw LDAP
+  bytes from an agent's local socket into its real OpenLDAP and pipes the
+  response back, over the existing agent WSS channel (`ldap_tunnel` messages).
+  The SSO does not parse LDAP; it is a transparent socket relay. See DESIGN.md §4.
+- **`POST /api/v1/agent/secrets`** — an agent fetches its own node-scoped OpenBao
+  secrets (DESIGN.md §5). The agent may only read under `secret/data/nodes/<id>/*`;
+  the SSO fetches with its own OpenBao access, so the agent never holds a Vault
+  token. Agent-token authed (not admin-gated).
+- **`iam_apply` command** — the SSO pushes node-scoped IAM config (sudo rules,
+  SSH keys, access control, revocation) to an agent as a signed high-risk
+  command (DESIGN.md §6). Added to `HIGH_RISK_COMMANDS`.
+- **Agent capabilities in the Directory UI** — the agent reports its enabled
+  capabilities in its `discovery` frame; the SSO stores them and the host's
+  Metrics tab renders them as green/gray badges, so an operator can see at a
+  glance what each agent is allowed to do.
+- **`GET /api/agent/join-keys/:id/agents`** — which hosts enrolled through a
+  given join key. Matches on the trace `Agent.enroll` already leaves in
+  `description` ("Self-enrolled with join key `<prefix>`") rather than a stored
+  relation.
+- **Join key management in the Install Agent modal** — a table (label, prefix,
+  created date, hosts joined, status) alongside the existing mint/select
+  dropdown, with **Revoke** and **Delete** actions and a click-through to see
+  which hosts joined via a given key. Previously these were API-only. Revoke
+  and Delete confirm inline within the row ("Revoke? Yes/No") rather than a
+  blocking native `confirm()` (freezes the whole tab) or the shared
+  `app.messages.confirm()` banner (a single `.actionMessage` shared by the
+  whole card, so a second click before the first resolves leaves a dangling
+  `$('body').one('click', ...)` handler from the first call and desyncs which
+  row the banner is actually confirming for).
+
+# v1.30.2
+
+### Fixed
+
+- **Outbound mail (test email, invites, password resets, OTP-by-email, notifications) could be rejected by the SMTP relay with `554 5.7.1 ... Sender is not same as SMTP authenticate username`.** Many authenticated relays require the `From` address to match the authenticated account or they refuse the send outright. `models/email.js` fell back to a hardcoded `noreply@theta42.com` when `smtp.from` wasn't set, which no relay ever authorized this account to send as. It now falls back to `smtp.user` first — the address the account can actually prove it owns — before the hardcoded placeholder.
+- **Catalog page card titles read icon-then-name.** Swapped to name-then-icon so the resource name leads.
+
+### Docs
+
+- `docs/configuration.md` didn't mention that OpenBao + the live Configuration UI sit above the four file/env config layers and win the merge — added.
+- `docs/plugins.md` listed 3 of 4 discovery plugin types (missing `docker`) and didn't mention the `messaging` plugin category (`twilio`, `webhook`) at all — added both.
+- `docs/vault.md` had no navigation (no frontmatter, no back-link, unreachable from the docs index) and described OpenBao as running in dev mode with API access via the root token — both wrong for a real deployment. Fixed navigation and corrected to describe the actual production setup (unsealed OpenBao, server-side scoped-token injection, personal API tokens for programmatic access).
+- `docs/discovery.md` was unreachable from the docs index and missing its back-link — both fixed.
+- `README.md`'s required-groups list was missing `app_sso_directory_admin` (gates Directory/Plugins/Agent admin).
+
+# v1.30.1
+
+### Fixed
+
+- **Test Email always failed with `Email.send is not a function`.** `models/email.js` exports `{Mail}`; the handler required the module and called `.send` on it directly. Every other caller destructures it. The button could never have worked.
+- **Test SMS failed with `Unexpected token '<', "<!DOCTYPE "...`.** It POSTed to `https://api.voip.ms/v1.0/sms/send` with Basic auth — an endpoint that does not exist. VoIP.ms's REST API is a GET against `https://voip.ms/api/v1/rest.php` with `api_username`/`api_password` and `method=sendSMS`, so the fabricated URL returned an HTML page and `response.json()` threw. It could never have sent anything.
+- **All SMS delivery was broken, not just the test button.** `models/sms.js` called `PluginInstance.find({…})`, but @simpleworkjs/orm has no `find` — the query method is `list({where})`. It threw "is not a function" on every send, before it could even fall back to the direct VoIP.ms path, so OTP-by-SMS and notifications were dead too.
+- Both test endpoints now send through the **same senders every real message uses** (`Mail.send`, `SMS.send`). A test that reimplements delivery proves nothing about whether real delivery works — which is exactly how two broken paths went unnoticed.
+- The SMS credential check no longer demands `conf.voipms` when a messaging plugin is loaded; the plugin supplies its own credentials, and requiring both blocked a working setup from testing itself.
+- Both endpoints report a failure as a `400` with the underlying reason (`VoIP.ms error: invalid_credentials`, `connect ECONNREFUSED …:587`) instead of an opaque `500`. A misconfiguration is the operator's to fix and the UI should be able to show it.
+- test: a guard suite that fails the build on any call to a non-existent ORM static (`find`/`findOne`/`findAll`/`where`), on requiring `models/email` without destructuring `{Mail}`, and on any reference to the bogus `api.voip.ms` host.
+
+### Added
+
+- **Install Agent offers the join-key flow.** The modal now leads with "Join key" — mint one, copy a single install command, and the host enrolls itself. Pre-registering a specific host moved to a second tab. v1.30.0 shipped join keys in the API and documented the modal as the place to get one, but the modal itself still only did the pre-register flow.
+
+# v1.30.0
+
+Adds **join keys**: installing the agent with one key is now all it takes to add a host. Fixes a set of Directory/discovery defects found on a fresh `setup.sh` install.
+
+### theta-agent — enrollment without pre-registering
+
+- feat: **join keys.** `POST /api/agent/join-keys` mints one credential an operator hands out. A host presenting it is enrolled automatically and immediately issued **its own** per-agent token plus the public key it must pin, delivered in the `config` frame; the agent persists both and blanks the join key. v1.29.0 required an admin to pre-register every machine before its agent would be spoken to, which made adding a host a two-system chore — the security model was right, the workflow was not.
+- feat: a join key is a bootstrap credential, never the host's identity, so one key stays convenient without becoming a fleet-wide skeleton key: every host remains individually revocable and a compromised host yields nothing that works elsewhere. Revoking a join key stops new hosts joining and leaves already-enrolled agents alone.
+- feat: join keys support a label and optional expiry, record their use count, and are stored as a SHA-256 (`AgentJoinKey`). Issue/revoke/delete and every self-enrollment are audited.
+
+### Directory
+
+- fix: **collapsing the tree did nothing.** `applyTreeCollapse` located the caret with `$row.find('.tree-caret i')` and returned early when it found nothing. Font Awesome runs in SVG-with-JS mode and its mutation observer rewrites every `<i class="fa-…">` into an `<svg>`, so moments after a render that selector matched nothing — and the early return skipped setting `hideBelowDepth`, so no row was ever hidden. Collapse state now lives on the caret *button* and is rotated by CSS, and the hide decision is made from the collapsed set alone. Never key behaviour to an element another library is free to replace.
+- fix: **the Discovery Plugins delete button did nothing.** It called `deleteDiscoveryPlugin()`, which was never defined — clicking it only threw a `ReferenceError`.
+- fix: the plugins pane had no `.actionMessage` element, and `app.messages` confirmations render into one. Without it the returned promise **never settles**, so an awaited confirmation hangs forever and the action it gates silently never happens. Added, along with a note that any pane asking for confirmation needs it.
+- feat: **discovery plugin instances can be edited.** Name, schedule, loaded state and configuration, with secrets on their own endpoint and left blank ("unchanged") rather than prefilled with the mask — submitting `********` back would otherwise store the asterisks as the secret.
+
+### Discovery
+
+- fix: **a fresh install no longer presents its own containers as things to triage.** The Docker plugin recognises containers belonging to the stack's own compose project, records them as managed, and attaches each to the service it implements. `setup.sh` deploys `sso-manager`, `proxy`, `jump-host`, `openbao` and `bao-renewer`; all five arrived as unmanaged discoveries awaiting promotion.
+- fix: **Docker container slugs were derived from the container id**, which changes on every recreate — so each `docker compose up` minted a brand-new resource and orphaned the previous one. Slugs now come from compose project + service, falling back to the container name.
+- feat: discovered containers carry `composeProject`, `composeService`, `containerName` and `sourceId`.
+
+### Docs
+
+- fix: `/docs/discovery` 404'd — the slug had no entry, though the Discovery tab's help icon linked to it. New `docs/discovery.md` covering the catalog/discovered distinction, how sources are matched and merged, naming precedence, promotion and garbage collection.
+- fix: the `agents` slug pointed at `plugins.md`, so `docs/agents.md` was unreachable in the app.
+
+# v1.29.0
+
+**Breaking:** theta-agent enrollment is now mandatory. Agents installed before this release carry a browser-generated token the server never recorded and will be rejected until re-enrolled. Requires theta-suite ≥ v1.42.0 (the `sso-broker` OpenBao policy must grant `secret/agent/*`); re-run `./setup.sh`.
+
+### Security — theta-agent channel
+
+- **sec: `/api/agent/ws` accepted any token.** There was no agent registry, so the endpoint authenticated nothing: any client that could reach the SSO could register as a node, publish discovery/telemetry into the admin view, and receive commands — including a signed `arbitrary_bash` — addressed to a token it guessed. Tokens were generated in the *browser* (`generateRandomHexToken`) and never recorded server-side, so there was nothing to validate against and no way to revoke one. Agents are now rows in a new `Agent` table, authenticated by SHA-256 token hash before the connection is registered or the welcome payload is sent; unknown or revoked tokens are closed with `4001` and audited.
+- **sec: the command signing key was ephemeral.** `AgentManager` generated an Ed25519 pair in its constructor, so it changed on every process start and the `public_key` an agent pinned in `agent.yml` stopped matching immediately. The key now lives in OpenBao at `secret/agent/signing-key` and survives restarts. If it cannot be loaded the SSO **refuses** to send high-risk commands rather than signing with a key no agent has seen (`signingAvailable: false` on `GET /api/agent/nodes`).
+- **sec: commands are addressed by agent id, not token.** A credential has no business in a URL, an access log or browser history.
+- **sec: agent actions are audited.** Enroll, update, rotate, revoke, delete, every command (with `signed`), and every rejected connection are emitted as structured `"component":"agent"` log records carrying the acting user.
+
+### theta-agent — enrollment & resource binding
+
+- feat: `POST /api/agent/enroll` mints the token server-side and returns it **once**; only its SHA-256 is stored. Plus `PUT /nodes/:id` (rename/rebind), `POST /nodes/:id/rotate`, `POST /nodes/:id/revoke`, `DELETE /nodes/:id`. Rotate, revoke and delete drop the live socket immediately (`4004`/`4003`) instead of waiting for a reconnect.
+- feat: an agent binds to a **host resource** (`resourceId`). The Directory reads that link instead of guessing by hostname — the old `agentsByHost[name]` match silently failed whenever a Directory name differed from the machine's hostname, and aliased two hosts that shared one.
+- feat: **agent discovery reaches the Directory.** A bound agent's facts (`os`, `kernel`, `cpu`, `ram_total_gb`, `disk_total_gb`, `ip`) are written onto its host resource, tagged `discovery_sources: ["theta-agent"]` with an `agentId` back-reference. An unbound agent goes through the normal reconciler. Previously `handleDiscovery` wrote to an in-memory record and updated nothing — the one source actually running *on* the host contributed nothing to the directory.
+- feat: agent state is persisted, so an agent that is installed but **offline** is now distinguishable from one that never existed; enrollments survive a restart. The Directory status dot reflects this: red means "enrolled and not connected" (a fault), grey means no agent enrolled / revoked / service unreachable. Red previously covered both, making an ordinary directory of hosts look like an outage.
+- feat: the Install Agent modal enrolls first and builds the install command from the result, including `--public-key`. `public_key` was never emitted into the generated `agent.yml` before, so no installed agent could verify anything.
+- fix: `registerAgent` is synchronous. Awaiting a database write before attaching the WebSocket `message` listener lost every agent's first `discovery` frame, which it sends the instant the socket opens (`ws` drops events emitted with no listener attached).
+
+### Directory
+
+- feat: **the resource tree is collapsible.** Any row with children has a caret; the toolbar collapses/expands everything. State persists per browser, so the shape survives the self-heal reload that follows most edits. An active search overrides collapse so matches inside a folded subtree are never hidden.
+- fix: **the Proxmox plugin mismatched MAC addresses to IPs.** It collected MACs and IPs into two flat lists and zipped them by index, so on any multi-NIC guest — or any guest where one NIC had no address — the directory recorded an address against the wrong MAC. NICs are now keyed by MAC, so a pairing can only come from the source that observed both together.
+- feat: Proxmox discovery emits an **endpoint resource** (named from `/cluster/status`) with every node parented beneath it, so one endpoint is one subtree instead of several orphan roots. It deliberately carries no IP: giving it the address it is reached at made the reconciler merge it with the node answering on that address, producing a resource that was its own parent.
+- feat: discovered guests carry `sourceId` (`<node>/qemu/<vmid>`), `node`, `vmid` and `macAddress`, so a row traces back to the exact guest on the exact hypervisor. Against a live 3-node cluster this took MAC coverage to 53/54 resources and `sourceId` to 54/54.
+- fix: Proxmox interfaces belonging to something running *inside* a guest (`docker0`, `veth*`, `br-*`, VPN tunnels) are filtered out — one Home Assistant VM reported 16 of them alongside its single real NIC, and their 172.x addresses gave the reconciler spurious matches.
+- fix: a stopped VM still reports its MAC (read from the VM config), a DHCP-configured LXC gets its address from the running container's interface list, and Proxmox **nodes** report their own IP/MAC (recovered from `enx<mac>` predictable names, since `/nodes/*/network` carries no `hwaddr`). Offline nodes are recorded with `status` instead of skipped, so a hypervisor that is down no longer looks decommissioned and get garbage-collected after a week.
+- fix: **the reconciler could make a resource its own parent.** Two slugs in one payload can resolve to the same row once merged; the resulting self-edge renders as an infinitely nested tree and defeats every ancestor walk in the app. Self-edges and cycle-closing edges are now refused and logged.
+- fix: **hosts were named after their MAC address.** `bestName` preferred the *longer* name, so UniFi's `ac:16:2d:b3:da:80` (17 chars) beat Proxmox's real hostname `dl380-0` (7). Names are now ranked (hostname > IP > MAC) with length only as a tie-break within a rank.
+- fix: `isIp` never matched anything — `\\.` inside a regex literal matches a backslash, not a dot — so an IP-shaped placeholder name was never replaced by a real hostname a later source discovered.
+- fix: a discovered device can only merge into a resource of the same kind. A VM named `gitea-runner` could match a hand-created *service* of the same name on the name rule and overwrite it.
+- perf: the reconciler reads the inventory once per run instead of once per incoming resource — a ~55-resource Proxmox payload against a similar-sized inventory was doing quadratic full-table reads every run.
+- fix: the Discovered Inventory table showed "Unknown IP" for almost everything, because it read `metadata.ip` while any source that enumerates interfaces stores addresses per-NIC. It now falls back to the first NIC address, and shows `vmid`, slug, `sourceId` and per-interface MAC/name.
+
+### Profile
+
+- fix: the API Tokens card is no longer wider than every other card on the site — the section sat outside the page's `.container`.
+
+### Build & docs
+
+- fix: `Dockerfile.test-runner` never copied `nodejs/plugins`, so every plugin test suite failed in CI as "Cannot find module" and plugin code was effectively untested. Suite count goes 27 → 29.
+- docs: `docs/agents.md` rewritten for enrollment, the close-code table, resource binding, the persistent signing key, and a corrected `public_key` example (the documented `MCowBQYDK2VwAyEA...` was an SPKI PEM body — 44 bytes decoded — where the agent requires the raw 32).
+- docs: `docs/directory.md` covers the collapsible tree and the corrected seed hierarchy; `docs/plugins.md` documents what the Proxmox plugin produces and why the endpoint has no IP.
+
+# v1.28.0
+- fix: `/api/agent/nodes` no longer 404s — the previous "unconditional mount" was still inside the post-listen `onListen` hook, so the REST router landed *behind* app.js's terminal 404 catch-all and every `/api/agent/*` request 404'd. The router is now mounted synchronously in `app.js` before the 404 handler; only the agent WebSocket setup runs on `onListen`.
+- feat: promoting a discovered inventory resource now opens the resource form pre-filled with the discovered data (name, kind, IP, subtype, …) for review; the modal's Save confirms the promote (creates the LDAP groups + marks it managed) instead of silently promoting.
+- fix: Directory table no longer goes stale after add/remove edge — `addEdge`/`removeEdge` called an undefined `loadData()`, which threw and left the host/parent linkage stale until a manual refresh; they now call `loadResources()`. `addGroup`/`removeGroup` also refresh so the Access column stays accurate.
+- feat: Vault page states it's powered by OpenBao (header badge linking to openbao.org).
+
+# v1.27.0
+- fix: Directory group names now match `docs/GROUPS.md` exactly — per-resource groups are `{site}_{kind}_{name}_{level}` (`site_local_host_theta-env_access`, `site_local_app_sso-manager_access`), with the kind always present and the resource name slug stripped of its kind prefix. Services map to the `app` kind. The access-request + resolver tests were updated to the documented convention.
+- fix: a site resource now carries only `god_admin` + the site-wide groups (`{site}_super_admin`, `{site}_everyone`); the kind-scoped aggregates are still created for nesting but are no longer surfaced on the site's modal.
+- fix: groups no longer appear 3× under a resource — the Directory self-heal (which runs on every load) was creating duplicate `ResourceGroup` links; linking is now idempotent (check-then-create).
+- fix: `/api/agent/nodes` no longer 404s — the agent REST router is mounted unconditionally instead of being gated on the WebSocket server being up.
+- fix: `POST /api/shared-secrets/` rejected valid slugs — the slug regex now allows underscores (was hyphens-only).
+- fix: `GET /api/shared-secrets/` crashed with `s.path is not a function` — the list spread dropped the instance's `path()` method; now uses the static `SharedSecret.pathFor`.
+- fix: promoting a discovered inventory resource crashed with `Resource.update is not a function` — `update` is an instance method; the promote handler now loads an instance and calls `update()` on it.
+- feat: Vault → Apps tab now lists minted app tokens (the "Minted apps" list) — each is a scoped OpenBao credential for an external service; sso renews them and the list shows renewal state, so a minted credential no longer vanishes after its once-only token display. New `GET /api/vault/apps`.
+- feat: Vault page documents itself — a `/docs/vault` help icon in the header, and the doc now covers the Apps + Shared tabs.
+- feat: discovery plugin cards show last-run time + status (ok/error) and a Logs button that opens the captured run log.
+
+# v1.26.1
+- fix: the legacy `app_super_admin` group is gone — `SUPER_ADMIN_GROUP` (nested into every resource's `_admin` group by auto-provisioning) is now `god_admin`, and `docker-entrypoint.sh` no longer seeds or nests `app_super_admin` (god_admin is nested into the `app_sso_*` groups directly). `isSuperAdmin` still recognizes a pre-existing `app_super_admin` as a migration alias, so an old deployment isn't stripped of rights until it's rebuilt.
+
+# v1.26.0
+- feat: complete the group model (docs/GROUPS.md) — `god_admin` is now seeded into LDAP and nested into `app_super_admin`; every site auto-provisions `{site}_super_admin`, `{site}_hosts_*`/`{site}_apps_*` aggregates and `{site}_everyone`; per-resource `_admin`/`_access` groups (named `{site}_{slug}_{level}`, the kind carried in the resource slug) are nested into the site aggregates so the inheritance lattice exists in LDAP, not just in the resolver. Site/aggregate groups are self-healed idempotently on every Directory load, so a directory seeded by an older release picks them up without a rebuild.
+- feat: the naming convention is now enforced server-side — `POST /api/directory-admin/groups` rejects a group CN that isn't a valid group for the target resource (its own `_admin`/`_access`/capability, a site aggregate, a site-level group, or `god_admin`), so the free-text field can no longer mint `*_accessmember`-style names
+- feat: `god_admin` is managed from the Directory — the site resource modal surfaces `god_admin` + the site-level groups as associated groups, so its members (and the site's) are editable right there
+- fix: Directory agent status dots no longer paint every host red when the `/api/agent/nodes` endpoint is unreachable (older app or transient outage) — they now show a neutral grey "agent service unreachable" instead of a false alarm
+- fix: Profile + API Tokens cards are both full-width on the profile page (the API card was a narrower centered block)
+- fix: in-app `/docs/<slug>` pages returned 500 — `Dockerfile.openldap` never copied the `docs/` tree into the image (only the root README/CHANGELOG/API/directory_spec), so every page but those few hit a missing-file error; the whole `docs/` dir now ships, and doc images are served at `/docs/images`
+- test: group resolver tests now cover the prefixed site-slug convention (`site_local_...` is kept verbatim, not re-slugified to `site-local`)
+
+# v1.25.0
+- feat: hierarchical group & permission model (docs/GROUPS.md) — god_admin, {site}_super_admin, {site}_hosts_*/{site}_apps_* aggregates, and per-resource {site}_host_<slug>_admin/access/<capability>; inheritance resolver (admin implies access, capabilities explicit), meta everyone/{site}_everyone groups
+- feat: remove the standalone Groups page — group management is tied to adopted Directory resources (help link to the model in the Directory toolbar)
+- feat: console admin recognizes god_admin and site-scoped super/app-admin groups (legacy app_sso_admin/app_super_admin kept as migration aliases)
+
+# v1.24.0
+- feat: Agents merged into the Directory — removed the standalone Agents page. Host rows show a green/yellow/red theta-agent status dot (healthy / high-load / not connected) and the resource modal gained a Metrics tab with live telemetry + discovery
+- feat: Discovery Plugins New-plugin modal — slug is now derived from the name (field removed), the cron field is a dropdown (hourly/daily/weekly + custom), and per-plugin settings are collected from the configSchema (e.g. Proxmox url/tokenId/tokenSecret) instead of an empty config
+- feat: Directory resource slug is now read-only and derived from the name
+- feat: Vault page restyled to match the rest of the site (bounded container, card + nav-tabs header, h4)
+- feat: navbar — the username is no longer underlined; only the active nav link is bold + underlined
+
+# v1.23.0
+- fix: /api/vault proxy never injected X-Vault-Token — the true root cause of the recurring vault 403 "permission denied". The proxy declared its hook with http-proxy-middleware v3 syntax (`on: { proxyReq }`), which the installed HPM v2 silently ignores, so every request reached OpenBao unauthenticated (and the client's sso auth headers were never stripped). Rewritten as v2 `onProxyReq`.
+- fix: vault proxy header injection ordered before `fixRequestBody` — the body write flushes headers, so setting X-Vault-Token after it silently failed on every POST/PUT (writes would still 403 even with the hook fixed)
+- fix: initORM add-only schema heal — `sequelize.sync()` never ALTERs existing tables, so columns added by newer releases (e.g. `PluginInstance.lastLog`, which crashed the scheduler on every boot of an upgraded deployment) are now detected via describeTable and added with addColumn (additive only, per-column fail-soft)
+- feat: external-app vault tokens are long-lived and auto-renewed — minted via the new `sso-app` token role (periodic 768h, falls back to sso-broker's 24h role until theta-suite setup.sh is re-run); sso stores each token's accessor (new VaultAppToken model — an accessor can renew/revoke but not authenticate) and renews all of them at boot + every 6h via auth/token/renew-accessor, so a downstream app's credential stays valid as long as sso runs with zero renewal code in the app
+- feat: re-minting an app token revokes the app's previous token via its stored accessor — exactly one live credential per app, no zombies
+- test: wire-level tests for the vault proxy (real HTTP round-trip asserting token injection, auth-header stripping, path rewrite, and POST body integrity) + app-token accessor lifecycle tests
+
+# v1.22.0
+- feat: Agents page — live list of connected theta-agent hosts with telemetry (CPU/RAM/disk/ZFS/GPU) + online status, updating via socket.io
+- security: auth + admin-gate the /api/agent REST routes (previously unauthenticated)
+
+# v1.21.0
+- fix: always reconcile OpenBao policy content before serving a (possibly cached) token, so stale stored policies can no longer cause a recurring vault 403 "permission denied"
+- feat: shared secrets — users can publish secrets to secret/shared/<owner>/<slug> and grant read access to other users and downstream apps (OpenBao ACL policy edits, applied live)
+- feat: shared-secrets API + Shared tab in the vault UI
+
+# v1.20.0
+- fix: OpenBao 403 on vault secrets list (directory list grants + policy self-heal)
+
 ## v1.19.0
 - Added WebSocket endpoint for theta-agent C2
 

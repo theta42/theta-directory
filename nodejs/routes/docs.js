@@ -34,9 +34,14 @@ const DOCS = {
 	'oauth-apps':    {title: 'Connecting Apps (SSO)',   file: path.join(__dirname, '../../docs/concepts-oauth-apps.md')},
 	'api-tokens':    {title: 'API Tokens',              file: path.join(__dirname, '../../docs/concepts-api-tokens.md')},
 	directory:       {title: 'Directory & Inventory',   file: path.join(__dirname, '../../docs/directory.md')},
-	agents:          {title: 'Plugins',                file: path.join(__dirname, '../../docs/plugins.md')},
+	// `agents` pointed at plugins.md, so docs/agents.md -- the theta-agent
+	// guide the Directory links to -- was unreachable in the app.
+	agents:          {title: 'Theta Agent',            file: path.join(__dirname, '../../docs/agents.md')},
 	plugins:         {title: 'Plugins',                file: path.join(__dirname, '../../docs/plugins.md')},
+	// The Discovery tab's help icon links here; without an entry it 404'd.
+	discovery:       {title: 'Discovery & Inventory',  file: path.join(__dirname, '../../docs/discovery.md')},
 	vault:           {title: 'Vault Secrets',           file: path.join(__dirname, '../../docs/vault.md')},
+	groups:          {title: 'Groups & Permissions',   file: path.join(__dirname, '../../docs/groups.md')},
 
 	overview:        {title: 'Overview',        file: path.join(__dirname, '../../README.md')},
 	changelog:       {title: 'Changelog',       file: path.join(__dirname, '../../CHANGELOG.md')},
@@ -54,7 +59,7 @@ const docList = Object.entries(DOCS).map(([slug, d]) => ({slug, title: d.title})
 // only resolves correctly on GitHub. Serve that same folder here and rewrite
 // the rendered markup to point at it absolutely, so the images work when
 // read from /docs/overview too.
-router.use('/images', require('express').static(path.join(__dirname, '../../docs/images')));
+router.use('/docs/images', require('express').static(path.join(__dirname, '../../docs/images')));
 function fixImagePaths(html) {
 	return html.replace(/(["(])docs\/images\//g, '$1/docs/images/');
 }

@@ -84,30 +84,11 @@ router.get('/discovery', function(req, res, next) {
 });
 
 router.get('/plugins', function(req, res, next) {
-  // Plugin instances page — loadable/unloadable, configurable plugin copies
-  // with per-instance secrets in OpenBao. Renders the shell for anyone; the
-  // client gates with app.auth.forceLogin(['app_sso_admin',
-  // 'app_sso_directory_admin','admin']) and the /api/plugins endpoints enforce
-  // the same server-side. Same header-vs-navigation auth model as /conf and
-  // /vault (auth-token is a client-set header, not a cookie).
-  const registry = require('../services/plugin_registry');
-  res.render('plugins', {...values, pluginTypes: registry.types });
+  res.redirect('/directory');
 });
 
 router.get('/vault', function(req, res) {
-  // Personal per-user secrets (secret/users/<uid>/*) for everyone; admins get
-  // free-form access across all of secret/ plus an Apps tab to mint scoped
-  // tokens for external apps. The view renders the shell for any logged-in
-  // user; the client gates login via app.auth.forceLogin() and derives the
-  // admin/namespace scope from /api/user/me. The /api/vault proxy enforces the
-  // same scoping server-side (scopeGuard + the token's own OpenBao policy), so
-  // the client-derived scope is only cosmetic. vaultAddr is the only
-  // server-rendered value (it's a non-user-specific env var); uid + isAdmin
-  // are resolved client-side to avoid the header-vs-navigation auth mismatch.
-  res.render('vault', {
-    ...values,
-    vaultAddr: process.env.VAULT_ADDR || 'http://openbao:8200',
-  });
+  res.redirect('/conf');
 });
 
 // Linkable deep-link to a single resource's modal, e.g. from the resource
@@ -193,10 +174,6 @@ router.get('/api-tokens', (req, res) => res.redirect(301, '/'));
 
 router.get('/users/:uid', function(req, res, next) {
   res.render('profile', {...values});
-});
-
-router.get('/groups', function(req, res, next) {
-  res.render('groups', {...values});
 });
 
 router.get('/token', function(req, res, next) {

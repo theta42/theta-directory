@@ -17,11 +17,63 @@ needs theta-suite ≥ v1.30.1 (which grants the `sso-broker` OpenBao policy
 
 A plugin type is a module under `nodejs/plugins/<category>/<type>.js`. The
 filename basename (without `.js`) is the `type`; the parent directory is the
-`category`. The built-ins ship under `plugins/discovery/`:
+`category`. Two built-in categories ship today:
+
+**`discovery`** — scheduled scans that sync external assets into the
+directory catalog:
 
 - `proxmox` — Proxmox VE (URL + API token)
 - `unifi` — UniFi Network controller (URL + username/password)
 - `nmap` — nmap OS + port scan (a target range; no credentials)
+- `docker` — Docker daemon discovery (containers as directory resources)
+
+**`messaging`** — on-demand delivery for alerts, 2FA codes, and
+notifications:
+
+- `twilio` — Twilio SMS
+- `webhook` — universal REST webhook (custom JSON payload to Slack, Teams,
+  Discord, or any HTTP endpoint)
+
+If no messaging plugin instance is enabled, the system falls back to the
+legacy `voipms` integration configured directly in the SSO secrets.
+
+### What the Proxmox plugin produces
+
+One endpoint becomes one subtree:
+
+```
+Proxmox endpoint (cluster name, or the endpoint hostname)
+└── node (hypervisor)
+    ├── VM / template
+    └── LXC / template
+```
+
+The endpoint resource stands for the cluster, not a machine, so it carries the
+API URL and a `sourceId` but deliberately no IP — giving it the address it is
+reached at made the reconciler merge it with the node answering on that address,
+which produced a resource that was its own parent.
+
+Every guest carries:
+
+- `interfaces[]` — one entry per NIC with its own `mac`, `ip`/`ips` and `name`.
+  The MAC and the address on it are read from the same source, so they cannot be
+  mismatched (an earlier version collected MACs and IPs into two flat lists and
+  zipped them by index, which attributed addresses to the wrong NIC on any
+  multi-NIC guest).
+- `macAddress` / `ip` — the primary NIC's values, preferring one that actually
+  has an address.
+- `vmid`, `node` and `sourceId` (`<node>/qemu/<vmid>` or `<node>/lxc/<vmid>`), so
+  a directory row traces back to the exact guest on the exact node.
+
+Interfaces belonging to something running *inside* a guest — `docker0`, `veth*`,
+`br-*`, VPN tunnels — are filtered out. They are not NICs of the host, and their
+172.x addresses would otherwise give the reconciler spurious matches.
+
+A stopped VM still reports its MAC (read from the VM config rather than the
+guest agent), and a DHCP-configured LXC gets its address from the running
+container's interface list. Offline nodes are recorded with `status` rather than
+skipped, so a hypervisor that is down does not look decommissioned and get
+garbage-collected after a week.
 
 A module exports a **manifest**:
 

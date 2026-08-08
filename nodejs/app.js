@@ -44,9 +44,10 @@ app.onListen.push(function(){
     });
   });
   
-  // Initialize Theta Agent WebSockets
-  require('./routes/api_agent')(app);
-}); 
+  // Initialize Theta Agent WebSockets. The REST router is already mounted
+  // synchronously above (see the /api/agent mount); this hook only wires the WS.
+  require('./routes/api_agent').initAgentWebSockets(app);
+});
 
 // Gzip text responses (HTML/JS/CSS/JSON). The admin UI loads ~13 separate,
 // uncompressed vendor JS/CSS files on every full page navigation (a
@@ -105,6 +106,22 @@ app.use('/api/conf', middleware.auth, require('./routes/api_conf'));
 // Self-service API tokens (PATs) — owner-scoped, no admin group required.
 app.use('/api/api-token', middleware.auth, require('./routes/api_token'));
 
+// theta-agent REST API. Mounted SYNCHRONOUSLY (before the 404 catch-all below),
+// not from an onListen hook — a router registered post-listen would sit behind
+// the terminal 404 handler and make every /api/agent/* request 404. The agent
+// WebSocket handler (routes/api_agent.initAgentWebSockets) still runs on onListen.
+app.use('/api/agent', require('./routes/api_agent'));
+
+// LDAP-over-HTTPS API (DESIGN.md §3). Bearer-authed (agent token or PAT); the
+// SSO performs the real LDAP bind/search against its own OpenLDAP. Mounted
+// synchronously for the same reason as /api/agent — it must sit before the 404
+// catch-all.
+app.use('/api/v1/ldap', require('./routes/api_ldap'));
+
+// Agent-facing operations (DESIGN.md §5, §6): node-scoped secrets, IAM. The
+// caller is the agent itself (Bearer agent token), not an admin session.
+app.use('/api/v1/agent', require('./routes/api_agent_ops'));
+
 // OAuth 2.0 / OpenID Connect
 app.use('/oauth', oauthRouter);
 app.use('/api/oauth', middleware.auth, oauthApiRouter);
@@ -126,6 +143,8 @@ app.use('/api/plugins', middleware.auth, require('./routes/api_plugins'));
 const vaultBroker = require('./utils/vault_broker');
 app.use('/api/vault/apps', middleware.auth, vaultBroker.mintAppRouter);
 app.use('/api/vault', middleware.auth, vaultBroker.scopeGuard, vaultBroker.vaultProxy());
+// Shared secrets (metadata + grants; data reads go through /api/vault proxy).
+app.use('/api/shared-secrets', middleware.auth, require('./routes/api_shared_secrets'));
 
 // Catch 404 and forward to error handler. If none of the above routes are
 // used, this is what will be called.

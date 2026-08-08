@@ -163,6 +163,7 @@ COPY nodejs/app.js ./
 COPY nodejs/bin ./bin
 COPY nodejs/conf ./conf
 COPY nodejs/controller ./controller
+COPY nodejs/drivers ./drivers
 COPY nodejs/middleware ./middleware
 COPY nodejs/models ./models
 COPY nodejs/routes ./routes
@@ -184,6 +185,11 @@ COPY README.md /README.md
 COPY CHANGELOG.md /CHANGELOG.md
 COPY API.md /API.md
 COPY directory_spec.md /directory_spec.md
+# The docs/*.md tree (plus the images the docs link) is read at runtime too, so
+# the whole docs/ dir must land at /docs. Without this every in-app /docs/<slug>
+# page other than the root-level README/CHANGELOG/API/directory_spec 500s on the
+# fs.readFileSync in routes/docs.js (files missing from the image).
+COPY docs /docs
 
 # Baked commit hash from the gitinfo stage (see build_info.js).
 COPY --from=gitinfo /commit.txt ./.build_commit

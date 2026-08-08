@@ -78,7 +78,19 @@ Requests are decided by the resource's `owner`, or by any directory admin. Mark 
 
 ## Navigating the UI
 
-The Directory Management interface provides a **Tree View** toggle that visually nests your resources, making it easy to comprehend your network topography at a glance. You can also filter, search, and sort your entire infrastructure inventory. From the tree view, you can click the green `+` icon next to any resource to instantly add a child resource beneath it.
+The Directory Management interface nests your resources as a tree, making it easy
+to comprehend your network topography at a glance. You can filter, search, and
+sort your entire infrastructure inventory. Click the green `+` icon next to any
+resource to add a child resource beneath it.
+
+**Collapsing the tree.** Any resource with children carries a caret; click it to
+fold that subtree away. The toolbar's double-chevron buttons expand or collapse
+everything at once. Collapsed state is remembered per browser, so the shape you
+arrange survives a refresh (and the self-heal reload that follows most edits).
+
+While a search filter is active every match is shown regardless of collapsed
+ancestors — otherwise searching for something inside a folded subtree would
+silently return nothing. Clearing the box restores your saved shape.
 
 <a href="images/directory.png" target="_blank"><img src="images/directory.png" alt="Directory & inventory list view" width="80%"></a>
 
@@ -102,8 +114,16 @@ You don't have to build the graph by hand — the theta42 tooling registers itse
 
 - a **site** (name from `CFG_SITE_NAME` in `setup.env`, default `local` → slug `site_local`) marked as the current site
 - the **host** the stack runs on (`host_<hostname>`), with IP, MAC address, OS, and kernel collected from the machine
-- the **services** it composes — SSO Manager, Proxy (management UI), OpenLDAP Directory (the LDAPS endpoint Linux hosts and LDAP-native apps bind to), and OpenResty Edge (the 80/443 data plane) — each with its address, internal port, and git repo
+- the **hosts** for the proxy and jump host (`host_theta-proxy`, `host_theta-jump`)
+- the **services** it composes — SSO Manager, Proxy (management UI), OpenLDAP Directory (the LDAPS endpoint Linux hosts and LDAP-native apps bind to), OpenResty Edge (the 80/443 data plane), and the SSH Jump Host — each with its address, internal port, and git repo
 - the proxy's auto-registered **OAuth client**, linked under its service
+
+Services are parented to the host that actually runs them: Proxy and OpenResty
+Edge under `host_theta-proxy`, the SSH Jump Host under `host_theta-jump`, and the
+rest under the stack host. Installs seeded before this was fixed had all of them
+under the stack host, leaving the two purpose-made host resources childless; the
+seed re-parents those on its next run, and only when the current parent is the
+one the old code set, so a layout you arranged deliberately is left alone.
 
 The seed is idempotent and non-destructive: a resource whose slug already exists is considered operator-owned — the seed only fills in metadata fields you haven't set, and never overwrites your values.
 
@@ -118,6 +138,32 @@ The inventory graph isn't just documentation — other components read it to mak
 - **[Jump Host](https://theta42.github.io/jump-host/)** — an SSH jump host that resolves which downstream machines a user may reach from their LDAP groups × the directory's `host` resources (`GET /api/discovery/resources?group=<cn>`), then bridges them in. The `host_<hostname>` slugs and `host_<slug>_access` groups this directory creates are exactly what it keys off; a host's `metadata.ip` / `metadata.sshPort` tell it where to connect. So a machine registered here (by theta-env or ldap-client) becomes reachable through the jump host the moment a user is in its access group.
 
 Planned consumers (end-user catalog, firewall/DNS generation) and the model/API gaps they need are tracked in [`directory_spec.md`](https://github.com/theta42/sso-manager-node/blob/master/directory_spec.md) §9.
+
+## Subtype Management & Metrics Drivers Architecture
+
+The Directory includes a **4-tier Driver Resolution Engine** (`services/driver_registry.js`) that binds a resource's `subType` metadata to specific operational protocols for real-time telemetry, log streaming, and remote lifecycle management:
+
+1. **Direct Agent Execution** (`ThetaAgentDriver`): Used when a `theta-agent` daemon is connected to the resource (`systemd`, `docker`, `zfs_pool`, `desktop_linux`, `openrc`, `wireguard`).
+2. **Specialized Subtype Drivers**:
+   - `ProxmoxDriver`: Proxmox VE hypervisors & `lxc` / `kvm` guest controls.
+   - `DockerSocketDriver`: Docker Engine API & `docker_compose` stacks.
+   - `DbDriver`: `postgresql`, `redis`, `openbao_vault`.
+   - `NetworkDriver`: `wireguard`, `unifi_ap`, `unifi_switch`, `pfsense`.
+   - `K8sDriver`: `k8s_pod`, `k8s_deployment`.
+3. **Ancestor / Hypervisor Provider Fallback**: If an LXC/KVM guest lacks a direct agent, the engine automatically queries its parent Proxmox hypervisor node for VMID telemetry and power controls.
+4. **Unmanaged Fallback**: Reports unmanaged status cleanly.
+
+### Subtype Operations API
+- `GET /api/directory-admin/resources/:id/driver-metrics` — Real-time telemetry payload
+- `POST /api/directory-admin/resources/:id/driver-action` — Execute management actions (`{ action, params }`)
+- `GET /api/directory-admin/resources/:id/driver-logs` — Tail operational log output (`?lines=100`)
+
+## Explicit Secret Inheritance Mode
+
+Resource secrets stored in OpenBao (`secret/data/resources/<slug>/conf`) use **Explicit Secret Inheritance Mode** with strict upward ancestor lineage:
+
+- **Strict Ancestor Lineage**: When viewing candidate secrets for inheritance, the dropdown strictly filters to **direct upward ancestors** in the directory hierarchy (Resource $\rightarrow$ Parent Host $\rightarrow$ Cluster $\rightarrow$ Site). Sibling resources across the directory are never exposed.
+- **Explicit Assignment**: Secret pointers (`INHERIT:<parentSlug>:<parentKey>`) are explicitly saved per resource, guaranteeing precise secret scoping across hosts, LXC/KVM containers, and services.
 
 ## API
 

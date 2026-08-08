@@ -1,5 +1,16 @@
 <%- include('top') %>
 
+<style>
+  /* The caret's rotation is driven by a class on the BUTTON, not by swapping
+     icon classes on its child: Font Awesome's SVG-with-JS mode replaces the
+     <i> with an <svg>, so anything keyed to the child element stops working
+     the moment its observer runs. Targeting both covers either state. */
+  .tree-caret > i,
+  .tree-caret > svg { transition: transform .12s ease-in-out; }
+  .tree-caret.tree-caret-collapsed > i,
+  .tree-caret.tree-caret-collapsed > svg { transform: rotate(-90deg); }
+</style>
+
 <div class="container mt-4">
   <div class="row">
     <div class="col-12">
@@ -13,7 +24,12 @@
             </li>
             <li class="nav-item" role="presentation">
               <button class="nav-link" id="discovery-tab" data-bs-toggle="tab" data-bs-target="#discovery-tab-pane" type="button" role="tab" aria-controls="discovery-tab-pane" aria-selected="false">
-                <i class="fa-solid fa-network-wired"></i> Discovery
+                <i class="fa-solid fa-network-wired"></i> Discovered Inventory
+              </button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="plugins-tab" data-bs-toggle="tab" data-bs-target="#plugins-tab-pane" type="button" role="tab" aria-controls="plugins-tab-pane" aria-selected="false">
+                <i class="fa-solid fa-plug"></i> Discovery Plugins
               </button>
             </li>
           </ul>
@@ -25,8 +41,17 @@
 				<div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
 				    <div>
     					<i class="fa-solid fa-server"></i> Directory Management
+    					<a href="/docs/groups" class="text-reset ms-1" title="Group & permission model"><i class="fa-solid fa-circle-question"></i></a>
     				</div>
 					<div class="d-flex flex-wrap gap-2 align-items-center">
+                        <div class="btn-group btn-group-sm shadow-sm" role="group" aria-label="Expand or collapse the whole tree">
+                            <button type="button" class="btn btn-outline-secondary" onclick="expandAllTree()" title="Expand all"><i class="fa-solid fa-angles-down"></i></button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="collapseAllTree()" title="Collapse all"><i class="fa-solid fa-angles-up"></i></button>
+                        </div>
+                        <div class="form-check form-switch form-check-inline ms-1 me-1">
+                            <input class="form-check-input" type="checkbox" id="toggle-plumbing" onchange="renderTable()">
+                            <label class="form-check-label small text-muted" for="toggle-plumbing" title="Show containers, oauth clients, and sidecars">Plumbing</label>
+                        </div>
                         <input type="text" id="search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search..." onkeyup="renderTable()" style="width: 200px;">
                         <select id="sort-by" class="form-select form-select-sm shadow-sm" onchange="renderTable()" style="width: 150px;">
                           <option value="name">Name (A-Z)</option>
@@ -64,15 +89,17 @@
               </tr>
             </thead>
             <tbody id="resources-list" jq-repeat="resources">
-              <tr id="resource-row-{{id}}">
+              <tr id="resource-row-{{id}}" data-depth="{{depth}}">
                 <td class="ps-3">
                   {{{indentHtml}}}
-                  <span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
-                  {{#metadata.isProduction}}<span class="badge bg-danger">Prod</span>{{/metadata.isProduction}}
-                  {{^metadata.isProduction}}<span class="badge bg-info">Dev</span>{{/metadata.isProduction}}
-                  <a href="#" class="text-reset text-decoration-none ms-2" onclick="openEditModal('{{id}}'); return false;" title="View details">
+                  {{{caretHtml}}}
+                  {{#isHost}}<span class="d-inline-block rounded-circle me-1" style="width:10px;height:10px;background:{{agentColor}};" title="{{agentStatusTitle}}"></span>{{/isHost}}
+                  <a href="#" class="text-reset text-decoration-none me-2" onclick="openEditModal('{{id}}'); return false;" title="View details">
                     <strong>{{name}}</strong>
                   </a>
+                  <span class="badge bg-secondary me-1">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
+                  {{#metadata.isProduction}}<span class="badge bg-danger me-1">Prod</span>{{/metadata.isProduction}}
+                  {{^metadata.isProduction}}<span class="badge bg-info me-1">Dev</span>{{/metadata.isProduction}}
                 </td>
                 <td>
                   {{#metadata.ip}}<div><small>IP:</small> {{metadata.ip}}</div>{{/metadata.ip}}
@@ -131,6 +158,15 @@
                     <div class="text-muted small">
                       <i class="fa-solid fa-plug pe-1"></i> {{#metadata.source}}{{metadata.source}}{{/metadata.source}}{{^metadata.source}}Manual{{/metadata.source}}
                     </div>
+                    <div class="text-muted small font-monospace">
+                      {{#metadata.vmid}}<span class="me-2" title="Guest ID on the hypervisor">#{{metadata.vmid}}</span>{{/metadata.vmid}}
+                      <span title="Directory slug">{{slug}}</span>
+                    </div>
+                    {{#metadata.sourceId}}
+                    <div class="text-muted small font-monospace" title="Identifier at the discovery source">
+                      <i class="fa-solid fa-fingerprint pe-1"></i>{{metadata.sourceId}}
+                    </div>
+                    {{/metadata.sourceId}}
                   </td>
                   <td>
                     <span class="badge bg-secondary me-1">{{kind}}</span>
@@ -142,14 +178,22 @@
                     {{/metadata.subType}}
                   </td>
                   <td>
-                    {{#metadata.ip}}<div class="font-monospace small"><i class="fa-solid fa-network-wired pe-1"></i>{{metadata.ip}}</div>{{/metadata.ip}}
-                    {{^metadata.ip}}<span class="text-muted small fst-italic">Unknown IP</span>{{/metadata.ip}}
+                    {{#displayIp}}<div class="font-monospace small"><i class="fa-solid fa-network-wired pe-1"></i>{{displayIp}}</div>{{/displayIp}}
+                    {{^displayIp}}<span class="text-muted small fst-italic">Unknown IP</span>{{/displayIp}}
                     {{#metadata.interfaces.length}}
                     <div class="mt-1 small text-muted">
                       {{#metadata.interfaces}}
-                        <div><i class="fa-solid fa-microchip pe-1"></i> {{mac}} {{#ip}}<span class="text-black-50">({{ip}})</span>{{/ip}}</div>
+                        <div>
+                          <i class="fa-solid fa-microchip pe-1"></i>
+                          {{#mac}}<span class="font-monospace">{{mac}}</span>{{/mac}}{{^mac}}<span class="fst-italic">no MAC</span>{{/mac}}
+                          {{#ip}}<span class="text-black-50">({{ip}})</span>{{/ip}}
+                          {{#name}}<span class="text-black-50">{{name}}</span>{{/name}}
+                        </div>
                       {{/metadata.interfaces}}
                     </div>
+                    {{/metadata.interfaces.length}}
+                    {{^metadata.interfaces.length}}
+                      {{#metadata.macAddress}}<div class="mt-1 small text-muted"><i class="fa-solid fa-microchip pe-1"></i> <span class="font-monospace">{{metadata.macAddress}}</span></div>{{/metadata.macAddress}}
                     {{/metadata.interfaces.length}}
                   </td>
                   <td>
@@ -187,6 +231,30 @@
           </div>
         </div>
       </div>
+
+      <!-- Discovery Plugins Tab Pane -->
+      <div class="tab-pane fade" id="plugins-tab-pane" role="tabpanel" aria-labelledby="plugins-tab">
+        <div class="p-4 bg-white border-top">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+              <h5 class="fw-bold mb-1"><i class="fa-solid fa-plug text-primary me-2"></i> Discovery Plugins</h5>
+              <p class="text-muted small mb-0">Manage background discovery agents (Nmap, Docker, Proxmox, UniFi). Per-instance secrets are stored in OpenBao.</p>
+            </div>
+            <div>
+              <button class="btn btn-sm btn-outline-primary me-2" onclick="loadDiscoveryPlugins()"><i class="fas fa-rotate me-1"></i> Refresh</button>
+              <button class="btn btn-sm btn-primary shadow-sm" onclick="openNewDiscoveryPluginModal()"><i class="fas fa-plus me-1"></i> New Plugin</button>
+            </div>
+          </div>
+          <!-- app.messages confirmations render into a `.actionMessage` inside
+               the target and do NOTHING without one: the returned promise never
+               settles, so an awaited confirmation hangs forever and the action
+               it gates silently never happens. This pane had no such element,
+               which is why Delete appeared dead. Any pane that asks the
+               operator to confirm something needs this. -->
+          <div class="actionMessage" style="display:none"></div>
+          <div id="discovery-plugins-list" class="mt-3"></div>
+        </div>
+      </div>
           </div>
         </div>
       </div>
@@ -213,7 +281,8 @@
       </div>
       <div class="col-6">
         <label class="form-label">Slug</label>
-        <input type="text" id="res-slug" class="form-control shadow-sm font-monospace">
+        <input type="text" id="res-slug" class="form-control shadow-sm font-monospace" readonly>
+        <div class="form-text">Derived from the name; read-only.</div>
       </div>
     </div>
 
@@ -442,6 +511,95 @@
     </div>
   `;
 
+  var secretsTabHtml = `
+    <div class="mb-3" id="secrets-tab-container">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <h6 class="mb-0"><i class="fa-solid fa-vault text-warning me-2"></i>Resource Secrets (OpenBao KV Engine)</h6>
+          <small class="text-muted">Encrypted key-value secrets stored in OpenBao under <code>secret/data/resources/&lt;slug&gt;/conf</code></small>
+        </div>
+        <button class="btn btn-sm btn-outline-primary" onclick="refreshResourceSecrets()"><i class="fa-solid fa-sync me-1"></i> Refresh</button>
+      </div>
+
+      <div class="secrets-action-msg mb-2" style="display:none"></div>
+
+      <div class="table-responsive shadow-sm rounded border mb-3">
+        <table class="table table-hover align-middle mb-0" id="secrets-table">
+          <thead class="table-dark">
+            <tr>
+              <th style="width: 35%;">Secret Key</th>
+              <th>Status / Security</th>
+              <th style="width: 240px;" class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="secrets-table-body">
+            <tr><td colspan="3" class="text-center text-muted py-3">Loading secrets...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Add / Generate Secret Card -->
+      <div class="card bg-light border-0 shadow-sm p-3 mb-3">
+        <h6 class="card-title text-dark mb-2"><i class="fa-solid fa-plus-circle text-primary me-1"></i> Add or Generate Secret Key</h6>
+        <div class="row g-2 align-items-center mb-2">
+          <div class="col-md-5">
+            <label class="form-label small text-muted mb-1">Secret Key Name (e.g. <code>DB_PASSWORD</code>)</label>
+            <input type="text" class="form-control form-control-sm font-monospace" id="new-secret-key" placeholder="DB_PASSWORD" onkeyup="validateSecretKeyInput(this)">
+            <div class="invalid-feedback small">Only letters, numbers, and underscores allowed (e.g. DB_PASSWORD).</div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small text-muted mb-1">Secret Value</label>
+            <input type="text" class="form-control form-control-sm font-monospace" id="new-secret-val" placeholder="Enter value or click Generate">
+          </div>
+          <div class="col-md-3 pt-3">
+            <button class="btn btn-sm btn-primary w-100" id="btn-add-secret" onclick="addSecretRow()"><i class="fa-solid fa-save me-1"></i> Save Secret</button>
+          </div>
+        </div>
+
+        <div class="row g-2 align-items-center mt-1">
+          <div class="col-md-4">
+            <label class="form-label small text-muted mb-1">Generator Length</label>
+            <select class="form-select form-select-sm" id="gen-secret-length">
+              <option value="8">8 characters</option>
+              <option value="12">12 characters</option>
+              <option value="16">16 characters</option>
+              <option value="24">24 characters</option>
+              <option value="32" selected>32 characters (Default)</option>
+              <option value="48">48 characters</option>
+              <option value="64">64 characters</option>
+              <option value="128">128 characters</option>
+            </select>
+          </div>
+          <div class="col-md-8 text-end pt-3">
+            <button class="btn btn-sm btn-outline-success" onclick="generateSecretValue()"><i class="fa-solid fa-bolt me-1"></i> Generate Secret into Field</button>
+          </div>
+        </div>
+
+        <div class="alert alert-warning border-0 shadow-sm p-2 small mt-2 mb-0" id="gen-secret-notice" style="display:none">
+          <i class="fa-solid fa-shield-halved text-warning me-1"></i> Generated secret is shown in the field above. Click <strong>Save Secret</strong> to store in OpenBao — secret values will not be displayed again once saved.
+        </div>
+      </div>
+
+      <!-- Inherit Parent Secret Card -->
+      <div class="card bg-light border-0 shadow-sm p-3" id="inherit-secret-card">
+        <h6 class="card-title text-dark mb-2"><i class="fa-solid fa-diagram-project text-info me-1"></i> Inherit Secret from Parent Resource</h6>
+        <div class="row g-2 align-items-center">
+          <div class="col-md-4">
+            <label class="form-label small text-muted mb-1">Child Secret Key Name</label>
+            <input type="text" class="form-control form-control-sm font-monospace" id="inherit-child-key" placeholder="DB_HOST">
+          </div>
+          <div class="col-md-5">
+            <label class="form-label small text-muted mb-1">Parent Resource Secret</label>
+            <select class="form-select form-select-sm" id="inherit-parent-select"></select>
+          </div>
+          <div class="col-md-3 pt-3">
+            <button class="btn btn-sm btn-outline-info w-100" id="btn-inherit-secret" onclick="inheritParentSecret()"><i class="fa-solid fa-link me-1"></i> Inherit Secret</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
   // Shared by openAddModal/openEditModal: builds the tabbed/footer/(optionally
   // URL-tracked) modal DOM. Callers then populate fields via .val() and hide
   // the Groups/Children tabs in add-mode (no resource id to scope them to).
@@ -454,6 +612,8 @@
         {id: 'details', label: 'Details', bodyHtml: detailsTabHtml},
         {id: 'groups', label: 'Associated LDAP Groups', bodyHtml: groupsTabHtml},
         {id: 'children', label: 'Children', bodyHtml: childrenTabHtml},
+        {id: 'secrets', label: 'Secrets & OpenBao', bodyHtml: secretsTabHtml},
+        {id: 'agent', label: 'Agent', bodyHtml: agentTabHtml(resourcesById[id] && resourcesById[id].agent)},
       ],
       footer: {
         metaHtml: id ? app.modal.formatAudit(resourcesById[id], {formatDate: function(ms){ return moment(ms).format('YYYY-MM-DD HH:mm'); }}) : '',
@@ -461,7 +621,7 @@
       },
       url: id ? {path: '/directory/' + resourcesById[id].slug} : null,
     });
-    $('#sw-modal-tab-groups-btn, #sw-modal-tab-children-btn').closest('li').toggle(!!id);
+    $('#sw-modal-tab-groups-btn, #sw-modal-tab-children-btn, #sw-modal-tab-secrets-btn').closest('li').toggle(!!id);
   }
 
   function refreshChildrenUI(resourceId) {
@@ -487,8 +647,8 @@
   var allGroups = [];
   var allEdges = [];
   var rawResources = [];
-  // resourceId -> { groups: [{cn, accessLevel, exists, memberCount}], memberCount }
   var accessSummary = {};
+  var promoteSlug = null;
 
   $(document).ready(async function() {
     await loadResources();
@@ -499,31 +659,38 @@
     }
   });
   
+  var agentsByHost = {};
+  var agentsByResource = {};
+  var agentsById = {};
+  var agentsUnavailable = false;
+
   async function loadResources() {
     try {
-      const [resResources, resGroups, resEdges, resAccess] = await Promise.all([
+      const [resResources, resGroups, resEdges, resAccess, resAgents] = await Promise.all([
         app.api.get('directory-admin/resources'),
         app.api.get('directory-admin/groups'),
         app.api.get('directory-admin/edges'),
-        // Access counts are a nicety, not load-bearing: if the LDAP join fails
-        // the table still renders, just without the Access column populated.
-        app.api.get('directory-admin/access-summary').catch(function(){ return {results: {}}; })
+        app.api.get('directory-admin/access-summary').catch(function(){ return {results: {}}; }),
+        app.api.get('agent/nodes')
+          .then(function(res){ agentsUnavailable = false; return res; })
+          .catch(function(){ agentsUnavailable = true; return {agents: []}; })
       ]);
 
       accessSummary = (resAccess && resAccess.results) || {};
       resourcesById = {};
-      
+
       for (const r of resResources.results) {
         r.metadata = r.metadata || {};
         resourcesById[r.id] = r;
       }
+
+      indexAgents((resAgents && resAgents.agents) || []);
       
       allGroups = resGroups.results;
       allEdges = resEdges.results;
 
       rawResources = [];
       for (const r of resResources.results) {
-        // Compute hostName from edges
         r.hostName = '—';
         r.parentId = null;
         const parentEdge = allEdges.find(e => e.childId === r.id);
@@ -537,16 +704,282 @@
       
       renderTable();
 
-      // Type-ahead for the "what can this user reach" lookup. Non-blocking: the
-      // input accepts a free-typed uid whether or not the list ever arrives.
       loadDirectoryUsers().then(function(users) {
         $('#access-uid-list').html(users.map(function(u) {
           return '<option value="' + u.uid + '">' + (u.cn || u.uid) + '</option>';
         }).join(''));
-      }).catch(function(){ /* datalist is a convenience only */ });
+      }).catch(function(){});
     } catch (err) {
       console.error(err);
       app.messages.toast('Failed to load data', 'danger');
+    }
+  }
+
+  function indexAgents(agents) {
+    agentsByHost = {};
+    agentsByResource = {};
+    agentsById = {};
+    for (const a of agents || []) {
+      agentsById[a.id] = a;
+      if (a.resourceId) agentsByResource[a.resourceId] = a;
+      const hn = ((a.lastDiscovery && a.lastDiscovery.hostname) || a.name || '').toLowerCase();
+      if (hn && !agentsByHost[hn]) agentsByHost[hn] = a;
+    }
+  }
+
+  function esc(s) { return s == null ? '' : app.util.escapeHtml(String(s)); }
+  function timeAgo(iso) { if (!iso) return ''; var m = moment(iso); return m.isValid() ? m.fromNow() : ''; }
+
+  function attachAgentStatus(n) {
+    n.isHost = true;
+    const name = (n.name || '').toLowerCase();
+    const slug = (n.slug || '').replace(/^host_/, '').toLowerCase();
+    const a = agentsByResource[n.id] || agentsByHost[name] || (slug && agentsByHost[slug]);
+    n.agent = a || null;
+    if (resourcesById[n.id]) resourcesById[n.id].agent = a || null;
+    if (!a) {
+      if (agentsUnavailable) { n.agentColor = '#adb5bd'; n.agentStatusTitle = 'Agent service unreachable'; return; }
+      n.agentColor = '#adb5bd'; n.agentStatusTitle = 'No theta-agent enrolled'; return;
+    }
+    if (a.revoked) { n.agentColor = '#6c757d'; n.agentStatusTitle = 'Agent enrollment revoked'; return; }
+    if (!a.isOnline) {
+      const seen = (a.lastSeen || a.last_seen) ? ' — last seen ' + timeAgo(a.lastSeen || new Date(a.last_seen * 1000).toISOString()) : '';
+      n.agentColor = '#dc3545'; n.agentStatusTitle = 'Agent enrolled but offline' + seen; return;
+    }
+    const t = a.lastTelemetry || {};
+    const high = (t.cpu_usage_percent > 80) || (t.ram_usage_percent > 80) || (t.disk_usage_percent > 90);
+    n.agentColor = high ? '#ffc107' : '#198754';
+    n.agentStatusTitle = high ? 'Connected — high load' : 'Connected — healthy';
+  }
+
+  // Agent tab body for the resource modal.
+  function agentTabHtml(agent) {
+    if (!agent) {
+      return '<div class="p-3 text-center text-muted"><i class="fa-solid fa-microchip fa-3x mb-3"></i><h6>No theta-agent connected</h6><p class="small">Install the agent on this host to see live telemetry and issue control commands.</p></div>';
+    }
+    const d = agent.lastDiscovery || {};
+    const t = agent.lastTelemetry || {};
+    const fmtNum = (n) => (n == null || isNaN(n)) ? '0.00' : Number(n).toFixed(2);
+    const fmtSize = (bytes) => {
+      if (!bytes || bytes <= 0) return '0.00 B';
+      const gib = bytes / (1024 * 1024 * 1024);
+      if (gib >= 1) return fmtNum(gib) + ' GiB';
+      const mib = bytes / (1024 * 1024);
+      return fmtNum(mib) + ' MiB';
+    };
+
+    const bar = (val) => `<div class="progress" style="height:8px"><div class="progress-bar" style="width:${Math.max(0, Math.min(100, val || 0))}%"></div></div>`;
+    const online = agent.isOnline ? '<span class="badge bg-success">Online</span>' : '<span class="badge bg-secondary">Offline</span>';
+    const gpu = (t.gpu_usage_percent != null && t.gpu_usage_percent >= 0) ? fmtNum(t.gpu_usage_percent) + '%' : 'N/A';
+    const lastSeenIso = agent.lastSeen || (agent.last_seen ? new Date(agent.last_seen * 1000).toISOString() : '');
+    const lastSeenStr = timeAgo(lastSeenIso) || 'never';
+
+    // RAM details
+    const ram = t.ram_details || d.ram_details || {};
+    const totalRamBytes = ram.total_bytes || (d.ram_total_gb ? d.ram_total_gb * 1024 * 1024 * 1024 : 0);
+    const usedRamBytes = ram.used_bytes || (totalRamBytes * (t.ram_usage_percent || 0) / 100);
+    const bufRamBytes = ram.buffers_cache_bytes || 0;
+    const freeRamBytes = ram.free_bytes || Math.max(0, totalRamBytes - usedRamBytes - bufRamBytes);
+
+    const usedRamPct = ram.used_percent != null ? ram.used_percent : (t.ram_usage_percent || 0);
+    const bufRamPct = ram.buffers_cache_percent != null ? ram.buffers_cache_percent : 0;
+    const freeRamPct = ram.free_percent != null ? ram.free_percent : Math.max(0, 100 - usedRamPct - bufRamPct);
+
+    // CPU details
+    const cpuDet = t.cpu_details || d.cpu_details || {};
+    const cpuModel = cpuDet.model || d.cpu || 'Unknown CPU';
+    const cpuCores = cpuDet.cores || 'N/A';
+    const cpuThreads = cpuDet.threads || 'N/A';
+    const cpuSpeed = cpuDet.mhz ? (cpuDet.mhz >= 1000 ? (cpuDet.mhz / 1000).toFixed(2) + ' GHz' : cpuDet.mhz.toFixed(0) + ' MHz') : '';
+
+    // Disks
+    const disks = t.disks || d.disks || [];
+
+    let disksHtml = '';
+    if (disks.length > 0) {
+      disksHtml = `<div class="table-responsive"><table class="table table-sm text-center small mb-0"><thead><tr><th>Mount</th><th>Type</th><th>FS</th><th>Usage</th><th>Total</th></tr></thead><tbody>` +
+        disks.map(dk => `<tr>
+          <td><code>${esc(dk.mountpoint)}</code></td>
+          <td><span class="badge bg-outline-secondary border text-dark">${esc(dk.drivetype || 'Disk')}</span></td>
+          <td><span class="badge bg-light text-dark border">${esc(dk.fstype || 'N/A')}</span></td>
+          <td>${fmtNum(dk.usage_percent)}%</td>
+          <td>${fmtSize(dk.total_bytes)}</td>
+        </tr>`).join('') + `</tbody></table></div>`;
+    } else {
+      disksHtml = `<div class="small">Disk Usage: <strong>${fmtNum(t.disk_usage_percent ?? 0)}%</strong> ${bar(t.disk_usage_percent)}</div>`;
+    }
+
+    return `<div class="p-3">
+      <div class="mb-3 d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">${esc(agent.name || agent.hostname || 'unknown')} ${online}</h5>
+        <small class="text-muted">Last seen ${lastSeenStr}</small>
+      </div>
+
+      <!-- Memory Card (Matching user screenshot design) -->
+      <div class="card mb-3 shadow-sm border">
+        <div class="card-header bg-light py-2">
+          <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-memory me-1"></i> Memory</h6>
+        </div>
+        <div class="card-body p-2">
+          <div class="p-2 mb-1 rounded fw-bold" style="background-color: #d0e1fd; color: #084298;">
+            Total: <span>${fmtSize(totalRamBytes)}</span>
+          </div>
+          <div class="p-2 mb-1 rounded" style="background-color: #f8d7da; color: #842029;">
+            Used: <strong>${fmtSize(usedRamBytes)}</strong> <em>${fmtNum(usedRamPct)}%</em>
+          </div>
+          <div class="p-2 mb-1 rounded" style="background-color: #e2e3e5; color: #41464b;">
+            Buffer+Cache: <strong>${fmtSize(bufRamBytes)}</strong> <em>${fmtNum(bufRamPct)}%</em>
+          </div>
+          <div class="p-2 mb-1 rounded" style="background-color: #d1e7dd; color: #0f5132;">
+            Free: <strong>${fmtSize(freeRamBytes)}</strong> <em>${fmtNum(freeRamPct)}%</em>
+          </div>
+          <div class="progress mt-2" style="height: 14px; border-radius: 6px; overflow: hidden;">
+            <div class="progress-bar bg-danger" role="progressbar" style="width: ${Math.max(0, Math.min(100, usedRamPct))}%"></div>
+            <div class="progress-bar bg-secondary" role="progressbar" style="width: ${Math.max(0, Math.min(100, bufRamPct))}%"></div>
+            <div class="progress-bar bg-success" role="progressbar" style="width: ${Math.max(0, Math.min(100, freeRamPct))}%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CPU Card -->
+      <div class="card mb-3 shadow-sm border">
+        <div class="card-header bg-light py-2">
+          <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-microchip me-1"></i> CPU</h6>
+        </div>
+        <div class="card-body p-3">
+          <div class="mb-2"><strong>Model:</strong> ${esc(cpuModel)}</div>
+          <div class="mb-2"><strong>Specs:</strong> ${esc(cpuCores)} Cores / ${esc(cpuThreads)} Threads ${cpuSpeed ? '@ ' + esc(cpuSpeed) : ''}</div>
+          <div>Usage: <strong>${fmtNum(t.cpu_usage_percent ?? 0)}%</strong> ${bar(t.cpu_usage_percent)}</div>
+        </div>
+      </div>
+
+      <!-- Disks Card -->
+      <div class="card mb-3 shadow-sm border">
+        <div class="card-header bg-light py-2">
+          <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-hard-drive me-1"></i> Disks & Storage</h6>
+        </div>
+        <div class="card-body p-2">
+          ${disksHtml}
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
+        <div class="col-6">GPU <strong>${gpu}</strong></div>
+        <div class="col-6">ZFS <strong>${esc(t.zfs_health || 'N/A')}</strong></div>
+      </div>
+
+      <!-- Host Power Controls -->
+      <div class="card mb-3 border-danger shadow-sm">
+        <div class="card-header bg-danger text-white py-2">
+          <h6 class="mb-0 fw-bold"><i class="fa-solid fa-power-off me-1"></i> Host Power Operations</h6>
+        </div>
+        <div class="card-body p-3 d-flex gap-2">
+          <button class="btn btn-outline-danger btn-sm" onclick="agentReboot('${agent.id}')"><i class="fa-solid fa-arrows-rotate me-1"></i> Reboot Host</button>
+          <button class="btn btn-danger btn-sm" onclick="agentShutdown('${agent.id}')"><i class="fa-solid fa-power-off me-1"></i> Shutdown Host</button>
+        </div>
+      </div>
+
+      <!-- Systemd Service Manager -->
+      <div class="card mb-3 border-primary shadow-sm">
+        <div class="card-header bg-primary text-white py-2">
+          <h6 class="mb-0 fw-bold"><i class="fa-solid fa-gear me-1"></i> Systemd Service Manager</h6>
+        </div>
+        <div class="card-body p-3">
+          <div class="input-group input-group-sm mb-2">
+            <span class="input-group-text">Service Name</span>
+            <input type="text" class="form-control" id="sysd-service-${agent.id}" placeholder="e.g. nginx, sshd, docker" value="sshd">
+            <button class="btn btn-outline-primary" onclick="manageService('${agent.id}', 'status')">Status</button>
+            <button class="btn btn-outline-success" onclick="manageService('${agent.id}', 'start')">Start</button>
+            <button class="btn btn-outline-warning" onclick="manageService('${agent.id}', 'restart')">Restart</button>
+            <button class="btn btn-outline-danger" onclick="manageService('${agent.id}', 'stop')">Stop</button>
+          </div>
+          <div id="sysd-output-${agent.id}" class="d-none mt-2">
+            <pre class="bg-dark text-light p-2 rounded small mb-0" style="max-height: 200px; overflow-y: auto;" id="sysd-text-${agent.id}"></pre>
+          </div>
+        </div>
+      </div>
+
+      <hr><h6>Discovery & Metadata</h6>
+      <div class="row small text-muted">
+        <div class="col-6">OS: ${esc(d.os || '')}</div>
+        <div class="col-6">Kernel: ${esc(d.kernel || '')}</div>
+        <div class="col-6">IPs: ${esc((d.ip_addresses || []).join(', '))}</div>
+        <div class="col-6">Location: ${esc(d.location || '')}</div>
+      </div>
+      <hr><h6>Capabilities</h6>
+      <div class="small">${capabilitiesHtml(d.capabilities)}</div>
+    </div>`;
+  }
+
+  // Render the agent's enabled capabilities (reported in its discovery frame) as
+  // green/gray badges. service_control is a list, so it renders as its own line.
+  function capabilitiesHtml(caps) {
+    caps = caps || {};
+    const badge = (name, on) => `<span class="badge ${on ? 'bg-success' : 'bg-secondary'} me-1 mb-1">${esc(name)}</span>`;
+    const bools = [
+      ['Telemetry', caps.telemetry],
+      ['LDAP config', caps.configure_ldap],
+      ['LDAP tunnel', caps.ldap_tunnel],
+      ['Secrets', caps.secrets],
+      ['IAM', caps.iam],
+      ['Reboot', caps.reboot],
+      ['Bash', caps.arbitrary_bash],
+    ];
+    const sc = Array.isArray(caps.service_control) ? caps.service_control : [];
+    const scLine = sc.length
+      ? `<div class="mt-1 text-muted">Service control: ${esc(sc.join(', '))}</div>`
+      : '';
+    return bools.map(([n, on]) => badge(n, !!on)).join('') + scLine;
+  }
+
+  async function agentReboot(agentId) {
+    const ok = await app.messages.confirm('Are you sure you want to REBOOT this host?');
+    if (!ok) return;
+    app.api.post(`agent/nodes/${agentId}/command`, { command: 'reboot', isHighRisk: true }, function(err, res) {
+      if (err) return app.messages.toast('Reboot failed: ' + (err.message || err), 'danger');
+      app.messages.toast('Reboot command sent to host', 'success');
+    });
+  }
+
+  async function agentShutdown(agentId) {
+    const ok = await app.messages.confirm('Are you sure you want to SHUTDOWN this host?');
+    if (!ok) return;
+    app.api.post(`agent/nodes/${agentId}/command`, { command: 'shutdown', isHighRisk: true }, function(err, res) {
+      if (err) return app.messages.toast('Shutdown failed: ' + (err.message || err), 'danger');
+      app.messages.toast('Shutdown command sent to host', 'success');
+    });
+  }
+
+  function manageService(agentId, action) {
+    const service = ($(`#sysd-service-${agentId}`).val() || '').trim();
+    if (!service) return app.messages.toast('Service name required', 'warning');
+    const outBox = $(`#sysd-output-${agentId}`);
+    const outText = $(`#sysd-text-${agentId}`);
+    outBox.removeClass('d-none');
+    outText.text(`Executing systemctl ${action} ${service}...`);
+    app.api.post(`agent/nodes/${agentId}/command`, {
+      command: 'systemd_action',
+      payload: { action, service },
+      isHighRisk: action !== 'status'
+    }, function(err, res) {
+      if (err) {
+        outText.text('Error: ' + (err.message || JSON.stringify(err)));
+        return;
+      }
+      outText.text(`Command '${action}' sent for service '${service}'. Check output or logs.`);
+    });
+  }
+
+  // Re-fetch agents (every 30s + on socket events) so status dots stay live.
+  async function refreshAgents() {
+    try {
+      const res = await app.api.get('agent/nodes');
+      indexAgents((res && res.agents) || []);
+      agentsUnavailable = false;
+      renderTable();
+    } catch (e) {
+      agentsUnavailable = true;
+      renderTable(); // re-render so dots flip to neutral, not stale green
     }
   }
 
@@ -608,8 +1041,15 @@
   function renderTable() {
     const filter = $('#search-filter').val().toLowerCase();
     const sort = $('#sort-by').val();
+    const showPlumbing = $('#toggle-plumbing').is(':checked');
 
     let filtered = rawResources.filter(r => {
+      if (!showPlumbing && !filter) {
+        const sub = (r.metadata?.subType || '').toLowerCase();
+        if (r.kind === 'container' || r.kind === 'oauth' || sub === 'sidecar' || sub === 'container' || sub === 'openresty') {
+          return false;
+        }
+      }
       if (!filter) return true;
       return (r.name || '').toLowerCase().includes(filter) ||
              (r.slug || '').toLowerCase().includes(filter) ||
@@ -646,6 +1086,10 @@
       }
     });
 
+    // Rows are emitted depth-first, so a node's descendants are exactly the
+    // rows that follow it until depth drops back to its own. `data-depth` is
+    // what applyTreeCollapse() below walks -- that ordering is the whole
+    // mechanism, so keep the traversal depth-first if you change this.
     const flatten = (nodes, depth) => {
        nodes.forEach(n => {
          let indentHtml = '';
@@ -656,7 +1100,18 @@
             indentHtml += '<i class="fa-solid fa-turn-up fa-rotate-90 text-muted me-2"></i>';
          }
          n.indentHtml = indentHtml;
+         n.depth = depth;
+         // A leaf gets a spacer of the same width, so names stay aligned down
+         // the column instead of jittering by whether a row has children.
+         n.caretHtml = n.children.length
+           ? '<button type="button" class="btn btn-link btn-sm p-0 me-1 text-reset tree-caret" '
+             + 'onclick="toggleTreeNode(\'' + n.id + '\'); return false;" '
+             + 'aria-label="Expand or collapse ' + escapeHtmlAttr(n.name || '') + '" '
+             + 'title="Expand/collapse"><i class="fa-solid fa-chevron-down fa-fw"></i></button>'
+           : '<span class="d-inline-block me-1" style="width:1.1rem"></span>';
+         n.childCount = n.children.length;
          n.accessHtml = accessCellHtml(n.id);
+         if (n.kind === 'host') attachAgentStatus(n);
          finalRenderList.push(n);
          if (n.children.length > 0) {
            flatten(n.children, depth + 1);
@@ -670,8 +1125,110 @@
     for (const r of finalRenderList) {
       $.scope.resources.push(r);
     }
+
+    applyTreeCollapse();
   }
   
+  // ── Collapsible tree ───────────────────────────────────────────────────────
+  // Which nodes are collapsed, by resource id. Persisted so the shape of the
+  // tree survives a refresh (and the Directory self-heal reload that follows
+  // most edits) -- a tree that re-expands every time is worse than no tree.
+  var TREE_COLLAPSE_KEY = 'directory.collapsedNodes';
+
+  function loadCollapsed() {
+    try {
+      const raw = localStorage.getItem(TREE_COLLAPSE_KEY);
+      return new Set(raw ? JSON.parse(raw) : []);
+    } catch (e) { return new Set(); }
+  }
+
+  function saveCollapsed(set) {
+    try { localStorage.setItem(TREE_COLLAPSE_KEY, JSON.stringify([...set])); } catch (e) {}
+  }
+
+  function escapeHtmlAttr(s) {
+    return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  // Hide every row beneath a collapsed node and point its caret sideways.
+  // Rows are in depth-first order, so "beneath" is the run of following rows
+  // with a greater depth. A node inside an already-hidden run stays hidden
+  // regardless of its own state, which is what makes nesting work.
+  function applyTreeCollapse() {
+    const $rows = $('#resources-list tr');
+
+    // While a search is active every match must be visible, even one sitting
+    // under a collapsed ancestor -- otherwise searching silently returns
+    // nothing and looks broken. The collapsed set is left untouched, so the
+    // tree springs back to its saved shape as soon as the box is cleared.
+    if (($('#search-filter').val() || '').trim()) {
+      $rows.show();
+      $rows.find('.tree-caret i').removeClass('fa-chevron-right').addClass('fa-chevron-down');
+      return;
+    }
+
+    const collapsed = loadCollapsed();
+    let hideBelowDepth = null;
+
+    $rows.each(function() {
+      const $row = $(this);
+      const depth = parseInt($row.attr('data-depth') || '0', 10);
+      const id = ($row.attr('id') || '').replace('resource-row-', '');
+
+      if (hideBelowDepth !== null && depth > hideBelowDepth) {
+        $row.hide();
+        return; // still inside a collapsed subtree; its own state is moot
+      }
+      hideBelowDepth = null;
+      $row.show();
+
+      // Visual state lives on the .tree-caret BUTTON, rotated by CSS, and the
+      // hide decision is made from `collapsed` alone.
+      //
+      // This used to read `.tree-caret i` and bail out when it found nothing.
+      // Font Awesome runs in SVG-with-JS mode here: its mutation observer
+      // rewrites every <i class="fa-..."> into an <svg>, so moments after a
+      // render that selector matches nothing, the function returned early
+      // WITHOUT setting hideBelowDepth, and collapsing silently did nothing at
+      // all. Never make the collapse logic depend on an element another library
+      // is free to replace.
+      const $caret = $row.find('.tree-caret');
+      if (!$caret.length) return;   // leaf row: nothing to collapse
+      if (collapsed.has(id)) {
+        $caret.addClass('tree-caret-collapsed');
+        hideBelowDepth = depth;
+      } else {
+        $caret.removeClass('tree-caret-collapsed');
+      }
+    });
+  }
+
+  function toggleTreeNode(id) {
+    const collapsed = loadCollapsed();
+    if (collapsed.has(id)) collapsed.delete(id); else collapsed.add(id);
+    saveCollapsed(collapsed);
+    applyTreeCollapse();
+  }
+
+  function expandAllTree() {
+    saveCollapsed(new Set());
+    applyTreeCollapse();
+  }
+
+  // Collapse every row that has children. Reads the ids out of the rendered
+  // rows rather than the resource list so it can only ever collapse something
+  // that is actually on screen and actually has a caret.
+  function collapseAllTree() {
+    const collapsed = new Set();
+    $('#resources-list tr').each(function() {
+      const $row = $(this);
+      if (!$row.find('.tree-caret').length) return;
+      collapsed.add(($row.attr('id') || '').replace('resource-row-', ''));
+    });
+    saveCollapsed(collapsed);
+    applyTreeCollapse();
+  }
+
   function toggleFormFields() {
     const kind = $('#res-kind').val();
     if (kind === 'host') {
@@ -1047,10 +1604,229 @@
     refreshGroupsUI(r.id);
     refreshEdgesUI(r.id);
     refreshChildrenUI(r.id);
+    loadResourceSecrets(r.id);
     await loadLdapGroups();
+  }
+
+  var currentResourceSecretsList = [];
+  var currentParentSecretsList = [];
+  var rawResourceSecretsMap = {};
+
+  const SECRET_KEY_REGEX = /^[A-Za-z0-9_]+$/;
+
+  function validateSecretKeyInput(el) {
+    const $el = $(el);
+    const val = $el.val().trim();
+    if (val && !SECRET_KEY_REGEX.test(val)) {
+      $el.addClass('is-invalid');
+      return false;
+    } else {
+      $el.removeClass('is-invalid');
+      return true;
+    }
+  }
+
+  function generateRandomString(len) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;:,.<>?';
+    const bytes = new Uint8Array(len);
+    window.crypto.getRandomValues(bytes);
+    let str = '';
+    for (let i = 0; i < len; i++) {
+      str += chars[bytes[i] % chars.length];
+    }
+    return str;
+  }
+
+  async function loadResourceSecrets(id) {
+    const $tbody = $('#secrets-table-body').empty();
+    $tbody.append('<tr><td colspan="3" class="text-center text-muted py-3"><i class="fa-solid fa-spinner fa-spin me-2"></i>Loading secrets from OpenBao...</td></tr>');
+    currentResourceSecretsList = [];
+    currentParentSecretsList = [];
+    rawResourceSecretsMap = {};
+
+    try {
+      const res = await app.api.get(`directory-admin/resources/${id}/secrets`);
+      currentResourceSecretsList = (res && res.secrets) || [];
+      currentParentSecretsList = (res && res.parentSecrets) || [];
+      renderSecretsTable();
+      populateParentSecretsDropdown();
+    } catch (err) {
+      $tbody.empty().append(`<tr><td colspan="3" class="text-center text-danger py-3"><i class="fa-solid fa-triangle-exclamation me-2"></i>Failed to load secrets: ${esc(err.message || 'Unknown error')}</td></tr>`);
+    }
+  }
+
+  function populateParentSecretsDropdown() {
+    const $card = $('#inherit-secret-card');
+    const $select = $('#inherit-parent-select').empty();
+    const $btn = $('#btn-inherit-secret');
+
+    $card.show();
+
+    if (!currentParentSecretsList || currentParentSecretsList.length === 0) {
+      $select.append('<option value="">(No parent/ancestor secrets available in OpenBao)</option>');
+      $btn.prop('disabled', true);
+      return;
+    }
+
+    $btn.prop('disabled', false);
+    $select.append('<option value="">-- Select Parent Resource Secret --</option>');
+    currentParentSecretsList.forEach(p => {
+      const valStr = `INHERIT:${p.parentSlug}:${p.key}`;
+      const labelStr = `${p.parentName || p.parentSlug} → ${p.key}`;
+      $select.append(`<option value="${esc(valStr)}">${esc(labelStr)}</option>`);
+    });
+  }
+
+  function renderSecretsTable() {
+    const $tbody = $('#secrets-table-body').empty();
+
+    if (currentResourceSecretsList.length === 0) {
+      $tbody.append('<tr><td colspan="3" class="text-center text-muted py-3">No secrets configured for this resource yet.</td></tr>');
+      return;
+    }
+
+    currentResourceSecretsList.forEach((s, idx) => {
+      const $row = $(`
+        <tr class="secret-row" data-key="${esc(s.key)}">
+          <td><code class="fw-bold fs-6">${esc(s.key)}</code></td>
+          <td>
+            ${s.isInherited
+              ? `<span class="badge bg-info text-dark shadow-sm"><i class="fa-solid fa-link me-1"></i>Inherited from ${esc(s.parentSlug || 'Parent')}</span> <small class="text-muted ms-1">(${esc(s.parentKey || s.key)})</small>`
+              : `<span class="badge bg-success shadow-sm"><i class="fa-solid fa-lock me-1"></i>Configured in OpenBao</span> <span class="badge bg-secondary ms-1"><i class="fa-solid fa-eye-slash me-1"></i>Secret Value Hidden</span>`
+            }
+          </td>
+          <td class="text-end">
+            <button class="btn btn-sm btn-outline-secondary" onclick="editSecretKey('${esc(s.key)}')" title="Set / Overwrite Value"><i class="fa-solid fa-pen me-1"></i> Edit Value</button>
+            <button class="btn btn-sm btn-outline-danger ms-1" onclick="deleteSecretKey('${esc(s.key)}')" title="Delete Secret"><i class="fa-solid fa-trash"></i></button>
+          </td>
+        </tr>
+      `);
+      $tbody.append($row);
+    });
+  }
+
+  function generateSecretValue() {
+    let key = $('#new-secret-key').val().trim();
+    if (!key) {
+      key = 'SECRET_KEY';
+      $('#new-secret-key').val(key);
+    }
+    const len = parseInt($('#gen-secret-length').val(), 10) || 32;
+    const randomSecret = generateRandomString(len);
+    $('#new-secret-val').val(randomSecret);
+    $('#gen-secret-notice').show();
+  }
+
+  function editSecretKey(key) {
+    $('#new-secret-key').val(key);
+    $('#new-secret-val').val('').focus();
+    $('#gen-secret-notice').hide();
+  }
+
+  async function addSecretRow() {
+    const keyEl = $('#new-secret-key')[0];
+    const key = $('#new-secret-key').val().trim();
+    const val = $('#new-secret-val').val();
+    const resourceId = $('#res-id').val();
+
+    if (!key) {
+      app.messages.action('Please enter a secret key name (e.g. DB_PASSWORD).', $('#secrets-tab-container'), 'warning');
+      return;
+    }
+    if (!validateSecretKeyInput(keyEl)) {
+      app.messages.action('Invalid secret key format. Only uppercase/lowercase letters, numbers, and underscores are allowed (e.g. DB_PASSWORD).', $('#secrets-tab-container'), 'danger');
+      return;
+    }
+    if (!resourceId) return;
+
+    try {
+      app.messages.action('Saving secret to OpenBao...', $('#secrets-tab-container'), 'info');
+      await app.api.post(`directory-admin/resources/${resourceId}/secrets`, { secrets: { [key]: val || '' } });
+      app.messages.action(`Secret '${key}' saved to OpenBao successfully!`, $('#secrets-tab-container'), 'success');
+      $('#new-secret-key').val('');
+      $('#new-secret-val').val('');
+      $('#gen-secret-notice').hide();
+      loadResourceSecrets(resourceId);
+    } catch (err) {
+      app.messages.action(err.message || 'Failed to save secret to OpenBao', $('#secrets-tab-container'), 'danger');
+    }
+  }
+
+  async function inheritParentSecret() {
+    const childKey = $('#inherit-child-key').val().trim();
+    const inheritVal = $('#inherit-parent-select').val();
+    const resourceId = $('#res-id').val();
+
+    if (!childKey) {
+      app.messages.action('Please enter a child secret key name (e.g. DB_HOST).', $('#secrets-tab-container'), 'warning');
+      return;
+    }
+    if (!SECRET_KEY_REGEX.test(childKey)) {
+      app.messages.action('Invalid child key name. Only letters, numbers, and underscores allowed.', $('#secrets-tab-container'), 'danger');
+      return;
+    }
+    if (!inheritVal) {
+      app.messages.action('Select a parent secret to inherit from.', $('#secrets-tab-container'), 'warning');
+      return;
+    }
+    if (!resourceId) return;
+
+    try {
+      app.messages.action('Saving inherited secret to OpenBao...', $('#secrets-tab-container'), 'info');
+      await app.api.post(`directory-admin/resources/${resourceId}/secrets`, { secrets: { [childKey]: inheritVal } });
+      app.messages.action(`Inherited secret '${childKey}' saved successfully!`, $('#secrets-tab-container'), 'success');
+      $('#inherit-child-key').val('');
+      loadResourceSecrets(resourceId);
+    } catch (err) {
+      app.messages.action(err.message || 'Failed to save inherited secret', $('#secrets-tab-container'), 'danger');
+    }
+  }
+
+  async function deleteSecretKey(key) {
+    const confirmed = await app.messages.confirm(`Delete secret '${key}' from OpenBao?`, $('#secrets-tab-container'), 'danger');
+    if (!confirmed) return;
+    const resourceId = $('#res-id').val();
+    if (!resourceId) return;
+
+    try {
+      app.messages.action(`Deleting secret '${key}' from OpenBao...`, $('#secrets-tab-container'), 'info');
+      await app.api.post(`directory-admin/resources/${resourceId}/secrets`, { action: 'delete', key });
+      app.messages.action(`Secret '${key}' deleted successfully from OpenBao.`, $('#secrets-tab-container'), 'success');
+      loadResourceSecrets(resourceId);
+    } catch (err) {
+      app.messages.action(err.message || 'Failed to delete secret from OpenBao', $('#secrets-tab-container'), 'danger');
+    }
+  }
+
+  function refreshResourceSecrets() {
+    const resourceId = $('#res-id').val();
+    if (resourceId) loadResourceSecrets(resourceId);
   }
   
   async function saveResource() {
+    // Promote path: the modal was opened from a discovered inventory row, so
+    // Save confirms promotion (creates LDAP groups + marks managed) rather than
+    // a normal resource create/update.
+    if (promoteSlug) {
+      const slug = promoteSlug;
+      promoteSlug = null;
+      try {
+        const res = await new Promise((resolve, reject) => {
+          app.api.post('discovery/promote/' + slug, {}, function(err, r) {
+            if (err) reject(err); else resolve(r);
+          });
+        });
+        await loadResources();
+        loadDiscoveryResources();
+        app.modal.close();
+        app.messages.toast('Promoted ' + slug + (res && res.groups ? ' — created groups: ' + res.groups.join(', ') : ''), 'success');
+      } catch (err) {
+        promoteSlug = slug;
+        app.messages.action('Failed to promote: ' + (err.message || err), app.modal.body(), 'danger');
+      }
+      return;
+    }
+
     const id = $('#res-id').val();
     const data = {
       name: $('#res-name').val(),
@@ -1149,6 +1925,7 @@
       allGroups.push(res.results);
       refreshGroupsUI(resourceId);
       $('#new-group-cn').val('');
+      await loadResources(); // keep the Access column in sync
     } catch (err) {
       console.error(err);
       app.messages.action('Failed to add group', app.modal.body(), 'danger');
@@ -1160,6 +1937,7 @@
       await app.api.delete('directory-admin/groups/' + id);
       allGroups = allGroups.filter(g => g.id !== id);
       refreshGroupsUI($('#res-id').val());
+      await loadResources(); // keep the Access column in sync
     } catch (err) {
       console.error(err);
       app.messages.action('Failed to remove group', app.modal.body(), 'danger');
@@ -1188,6 +1966,7 @@
       allEdges.push(res.results);
       refreshEdgesUI(resourceId);
       $('#new-edge-target').val('');
+      await loadResources();
     } catch (err) {
       console.error(err);
       app.messages.action('Failed to add edge', app.modal.body(), 'danger');
@@ -1199,6 +1978,7 @@
       await app.api.delete('directory-admin/edges/' + id);
       allEdges = allEdges.filter(e => e.id !== id);
       refreshEdgesUI($('#res-id').val());
+      await loadResources();
     } catch (err) {
       console.error(err);
       app.messages.action('Failed to remove edge', app.modal.body(), 'danger');
@@ -1238,14 +2018,23 @@
   function renderDiscoveryTable() {
     const search = $('#discovery-search-filter').val().toLowerCase();
     const filtered = allDiscoveryResources.filter(r => {
-      if(search && !r.name.toLowerCase().includes(search) && !r.slug.toLowerCase().includes(search)) return false;
-      const isManaged = !!(r.metadata && r.metadata.managed);
-      if(isManaged) return false;
+      if (search && !r.name.toLowerCase().includes(search) && !r.slug.toLowerCase().includes(search)) return false;
+      // Directory contains managed items; Discovered Inventory only shows unmanaged/pending items awaiting promotion
+      const isExplicitManaged = r.metadata && (r.metadata.managed === true || r.metadata.managed === 'true');
+      if (isExplicitManaged || r.kind === 'site' || r.kind === 'service') return false;
       return true;
     });
 
     $.scope.discoveryResources.empty();
     for(const r of filtered) {
+      // "Unknown IP" was shown for every device whose address is known per-NIC
+      // rather than in metadata.ip -- which is most of them, since a source
+      // that enumerates interfaces (UniFi, Proxmox guest agent) fills
+      // `interfaces[].ip`. Resolve a display address from the NICs so the
+      // column agrees with the interface list right beneath it.
+      const meta = r.metadata || {};
+      const fromNic = (meta.interfaces || []).map(i => i && i.ip).find(Boolean) || null;
+      r.displayIp = meta.ip || fromNic;
       $.scope.discoveryResources.push(r);
     }
     
@@ -1258,42 +2047,63 @@
     }
   }
 
+  // Promoting a discovered resource opens the resource form pre-filled with the
+  // discovered data so it can be reviewed before the resource is marked managed
+  // (and its LDAP groups created). The modal's Save (saveResource) sees
+  // promoteSlug set and calls the promote endpoint instead of a normal save.
   function promoteResource(slug) {
-    app.api.post('discovery/promote/' + slug, {}, function(err, res) {
-      if(err) {
-        app.messages.toast("Error promoting resource: " + (err.message || err), 'danger');
-        return;
-      }
-      const resource = allDiscoveryResources.find(r => r.slug === slug);
-      if(resource) {
-        resource.metadata = resource.metadata || {};
-        resource.metadata.managed = true;
-      }
-      $('.actionMessage').html('<div class="alert alert-success alert-dismissible"><button type="button" class="btn-close" data-bs-dismiss="alert"></button>Successfully promoted! Created groups: ' + res.groups.join(', ') + '</div>').show();
-      renderDiscoveryTable();
-      loadResources(); // Also update directory tab
-    });
+    const r = allDiscoveryResources.find(x => x.slug === slug);
+    if (!r) { app.messages.toast('Discovered resource not found', 'danger'); return; }
+    promoteSlug = slug;
+    openResourceModal('Promote Resource', null); // add-mode: groups/children tabs hidden
+    const m = r.metadata || {};
+    $('#res-name').val(r.name || '');
+    $('#res-slug').val(r.slug || '');
+    $('#res-kind').val(r.kind || 'host');
+    $('#res-description').val(r.description || '');
+    $('#res-ip').val(m.ip || '');
+    $('#res-address').val(m.address || '');
+    $('#res-subtype').val(m.subType || '');
+    $('#res-mac').val(m.macAddress || '');
+    $('#res-port').val(m.port || '');
+    $('#res-external-port').val(m.externalPort || '');
+    $('#res-icon').val(m.icon || '');
+    $('#res-tagline').val(m.tagline || '');
+    updateIconPreview();
+    toggleFormFields();
+    loadLdapGroups();
   }
 
   // --- THETA AGENT INSTALL MODAL & WIZARD ---
-  function generateRandomHexToken(byteLen) {
-    const arr = new Uint8Array(byteLen || 16);
-    (window.crypto || window.msCrypto).getRandomValues(arr);
-    return Array.from(arr, b => b.toString(16).padStart(2, '0')).join('');
-  }
-
-  function regenerateAgentToken(inputId) {
-    const newToken = generateRandomHexToken(16);
-    $('#' + inputId).val(newToken);
-    if (inputId === 'agent-quick-token') $('#agent-custom-token').val(newToken);
-    else $('#agent-quick-token').val(newToken);
-    updateAgentCommands();
-  }
+  // Agent tokens are no longer generated here. The browser minting a token the
+  // server had never heard of is exactly what made /api/agent/ws unauthenticated:
+  // there was nothing to validate against. Tokens now come from
+  // POST /api/agent/enroll (see enrollAgent).
 
   function updateAgentCommands() {
     const quickUrl = ($('#agent-quick-url').val() || window.location.origin).replace(/\/+$/, '');
     const quickToken = $('#agent-quick-token').val() || '';
-    const quickCmd = `curl -fsSL ${quickUrl}/resources/theta-agent/install.sh | sh -s -- --url "${quickUrl}" --token "${quickToken}"`;
+    // public_key must reach the host: without it the agent refuses every
+    // high-risk command. It was never emitted before, which is why signed
+    // commands only ever "worked" while verification was being skipped.
+    // Join-key command. Only a key we just minted can appear here -- the list
+    // endpoint deliberately never returns key values.
+    const joinUrl = ($('#agent-quick-url').val() || window.location.origin).replace(/\/+$/, '');
+    const selectedKeyId = $('#agent-join-key-select').val();
+    let joinCmd;
+    if (mintedJoinKey) {
+      joinCmd = `curl -fsSL ${joinUrl}/resources/theta-agent/install.sh | sh -s -- --url "${joinUrl}" --join-key "${mintedJoinKey}"`;
+    } else if (selectedKeyId) {
+      const k = agentJoinKeys.find(x => x.id === selectedKeyId);
+      joinCmd = `curl -fsSL ${joinUrl}/resources/theta-agent/install.sh | sh -s -- --url "${joinUrl}" --join-key "${k ? k.keyPrefix : ''}…"\n\n# Paste the full value of this key -- it was only shown when created.\n# If you no longer have it, create a new key above.`;
+    } else {
+      joinCmd = '# Create a join key above, or select one you already have the value for.';
+    }
+    $('#agent-join-command').text(joinCmd);
+
+    const pubKey = (pendingEnrollment && pendingEnrollment.publicKey) || '';
+    const quickCmd = `curl -fsSL ${quickUrl}/resources/theta-agent/install.sh | sh -s -- --url "${quickUrl}" --token "${quickToken}"`
+      + (pubKey ? ` --public-key "${pubKey}"` : '');
     $('#agent-quick-command').text(quickCmd);
 
     const customUrl = ($('#agent-custom-url').val() || window.location.origin).replace(/\/+$/, '');
@@ -1314,6 +2124,7 @@
     const yamlStr = [
       `server_url: "${customUrl}"`,
       `auth_token: "${customToken}"`,
+      `public_key: "${pubKey}"`,
       `location: "${customLocation}"`,
       `capabilities:`,
       `  telemetry: ${telemetry}`,
@@ -1349,9 +2160,14 @@
     });
   }
 
+  // Enrollment state for the open install modal. The token exists only here,
+  // in memory, between the enroll call and the operator copying it: the server
+  // stores a hash and cannot show it again.
+  var pendingEnrollment = null;
+
   function openAgentInstallModal() {
     const currentOrigin = window.location.origin;
-    const initialToken = generateRandomHexToken(16);
+    pendingEnrollment = null;
 
     const bodyHtml = `
       <div class="mb-3 p-3 bg-light rounded border">
@@ -1364,6 +2180,111 @@
         </div>
       </div>
 
+      <ul class="nav nav-tabs mb-3" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="agent-mode-join-btn" data-bs-toggle="tab" data-bs-target="#agent-mode-join" type="button" role="tab">
+            <i class="fa-solid fa-key me-1"></i> Join key <span class="badge bg-success ms-1">easiest</span>
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="agent-mode-pre-btn" data-bs-toggle="tab" data-bs-target="#agent-mode-pre" type="button" role="tab">
+            <i class="fa-solid fa-id-badge me-1"></i> Pre-register this host
+          </button>
+        </li>
+      </ul>
+
+      <div class="tab-content mb-3">
+        <!-- ── Join key: one credential, host enrolls itself ────────────── -->
+        <div class="tab-pane fade show active" id="agent-mode-join" role="tabpanel">
+          <div class="card border-success">
+            <div class="card-header py-2 fw-bold small bg-success-subtle">
+              <i class="fa-solid fa-key me-1"></i> Install with a join key
+            </div>
+            <div class="card-body py-3">
+              <p class="small text-muted mb-3">
+                Run this on any host and it enrolls itself. The SSO issues that host its own
+                token and public key on first connect, and the agent writes both into its
+                <code>agent.yml</code> — nothing to copy back and forth. One key works for as
+                many hosts as you like; each still gets its own revocable identity.
+              </p>
+              <div class="d-flex gap-2 align-items-end mb-3">
+                <div class="flex-grow-1">
+                  <label class="form-label small fw-bold mb-1">Existing join keys</label>
+                  <select id="agent-join-key-select" class="form-select form-select-sm" onchange="updateAgentCommands()"></select>
+                  <div class="form-text small">A key's value is shown only when it is created — mint a new one if you don't have it saved.</div>
+                </div>
+                <button class="btn btn-sm btn-success" onclick="mintAgentJoinKey()">
+                  <i class="fa-solid fa-plus me-1"></i> New join key
+                </button>
+              </div>
+              <div id="agent-join-key-result" style="display:none"></div>
+
+              <label class="form-label small fw-bold mb-1">Run on the target host (as root):</label>
+              <pre class="bg-dark text-light p-3 rounded font-monospace small mb-2 text-wrap text-break" id="agent-join-command" style="user-select: all;"></pre>
+              <div class="d-flex justify-content-end">
+                <button class="btn btn-sm btn-success" id="btn-copy-join" onclick="copyAgentCommand('agent-join-command', 'btn-copy-join')">
+                  <i class="fa-solid fa-copy me-1"></i> Copy install command
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card mt-3">
+            <div class="card-header py-2 fw-bold small">
+              <i class="fa-solid fa-list-check me-1"></i> Manage join keys
+            </div>
+            <div class="card-body py-2">
+              <table class="table table-sm table-hover mb-0 small" id="agent-join-key-table">
+                <thead>
+                  <tr>
+                    <th>Label</th>
+                    <th>Prefix</th>
+                    <th>Created</th>
+                    <th>Hosts joined</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="agent-join-key-tbody"></tbody>
+              </table>
+              <div id="agent-join-key-hosts" style="display:none" class="mt-2"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ── Pre-register: bind to a host resource up front ───────────── -->
+        <div class="tab-pane fade" id="agent-mode-pre" role="tabpanel">
+
+      <div class="card border-primary mb-3" id="agent-enroll-card">
+        <div class="card-header py-2 fw-bold small bg-primary-subtle">
+          <i class="fa-solid fa-id-badge me-1"></i> 1. Enroll this host
+        </div>
+        <div class="card-body py-3">
+          <p class="small text-muted mb-3">
+            Use this when you want the agent bound to a specific Directory host from the start.
+            The SSO issues the token here and you copy it onto the machine yourself.
+          </p>
+          <div class="row g-2 align-items-end">
+            <div class="col-md-4">
+              <label class="form-label small fw-bold mb-1">Agent name</label>
+              <input type="text" id="agent-enroll-name" class="form-control form-control-sm" placeholder="e.g. web01">
+            </div>
+            <div class="col-md-5">
+              <label class="form-label small fw-bold mb-1">Bind to host resource</label>
+              <select id="agent-enroll-resource" class="form-select form-select-sm"></select>
+              <div class="form-text small">Links the agent to a Directory host, so its status and metrics attach to that resource.</div>
+            </div>
+            <div class="col-md-3">
+              <button class="btn btn-sm btn-primary w-100" id="agent-enroll-btn" onclick="enrollAgent()">
+                <i class="fa-solid fa-key me-1"></i> Enroll &amp; issue token
+              </button>
+            </div>
+          </div>
+          <div id="agent-enroll-result" class="mt-3" style="display:none"></div>
+        </div>
+      </div>
+
+      <div id="agent-install-steps" style="display:none">
       <ul class="nav nav-pills mb-3" id="agent-install-tabs" role="tablist">
         <li class="nav-item" role="presentation">
           <button class="nav-link active" id="tab-quick-btn" data-bs-toggle="pill" data-bs-target="#tab-quick-pane" type="button" role="tab">
@@ -1386,12 +2307,9 @@
               <input type="text" id="agent-quick-url" class="form-control form-control-sm" value="${currentOrigin}" oninput="updateAgentCommands()">
             </div>
             <div class="col-md-6">
-              <label class="form-label small fw-bold mb-1">Host Token</label>
+              <label class="form-label small fw-bold mb-1">Issued Token</label>
               <div class="input-group input-group-sm">
-                <input type="text" id="agent-quick-token" class="form-control font-monospace" value="${initialToken}" oninput="updateAgentCommands()">
-                <button class="btn btn-outline-secondary" type="button" onclick="regenerateAgentToken('agent-quick-token')" title="Regenerate Token">
-                  <i class="fa-solid fa-rotate"></i>
-                </button>
+                <input type="text" id="agent-quick-token" class="form-control font-monospace" value="" readonly title="Issued by the SSO at enrollment">
               </div>
             </div>
           </div>
@@ -1415,12 +2333,9 @@
               <input type="text" id="agent-custom-url" class="form-control form-control-sm" value="${currentOrigin}" oninput="updateAgentCommands()">
             </div>
             <div class="col-md-4">
-              <label class="form-label small fw-bold mb-1">Host Token</label>
+              <label class="form-label small fw-bold mb-1">Issued Token</label>
               <div class="input-group input-group-sm">
-                <input type="text" id="agent-custom-token" class="form-control font-monospace" value="${initialToken}" oninput="updateAgentCommands()">
-                <button class="btn btn-outline-secondary" type="button" onclick="regenerateAgentToken('agent-custom-token')" title="Regenerate Token">
-                  <i class="fa-solid fa-rotate"></i>
-                </button>
+                <input type="text" id="agent-custom-token" class="form-control font-monospace" value="" readonly title="Issued by the SSO at enrollment">
               </div>
             </div>
             <div class="col-md-3">
@@ -1490,23 +2405,624 @@
           </div>
         </div>
       </div>
+      </div>
+        </div><!-- /pre-register pane -->
+      </div><!-- /tab-content -->
     `;
 
     app.modal.open({
-      title: '<i class="fa-solid fa-shield-halved text-primary me-2"></i> Install Theta Agent',
+      title: 'Install Theta Agent',
       bodyHtml: bodyHtml,
       size: 'lg'
+    });
+
+    loadAgentJoinKeys();
+
+    // Only hosts can carry an agent -- the API rejects anything else, so don't
+    // offer it here.
+    const $sel = $('#agent-enroll-resource').empty();
+    $sel.append('<option value="">(not bound — bind later)</option>');
+    rawResources
+      .filter(r => r.kind === 'host')
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      .forEach(r => {
+        const taken = agentsByResource[r.id] ? ' — already has an agent' : '';
+        $sel.append($('<option>').val(r.id).text((r.name || r.slug) + taken).prop('disabled', !!agentsByResource[r.id]));
+      });
+
+    $('#agent-enroll-resource').on('change', function () {
+      const r = rawResources.find(x => x.id === this.value);
+      if (r && !$('#agent-enroll-name').val()) $('#agent-enroll-name').val(r.name || r.slug);
     });
 
     updateAgentCommands();
   }
 
-  // Plugin scheduling moved to the dedicated /plugins page (the Agents &
-  // Scheduler tab here was its old home). Discovery inventory + the discovery
-  // results table remain on this page.
+  // Join keys the operator can reuse. Values are never returned by the list
+  // endpoint -- only a prefix -- so the dropdown identifies a key without being
+  // able to rebuild an install command from it. Minting is the only way to see
+  // a key's value, and only once.
+  var agentJoinKeys = [];        // non-revoked, for the install-command dropdown
+  var agentJoinKeysAll = [];     // every key, for the management table
+  var mintedJoinKey = null;   // in-memory, for the command shown right now
+
+  function loadAgentJoinKeys() {
+    app.api.get('agent/join-keys', function(err, res) {
+      agentJoinKeysAll = (res && res.joinKeys ? res.joinKeys : []);
+      agentJoinKeys = agentJoinKeysAll.filter(k => !k.revoked);
+
+      const $sel = $('#agent-join-key-select').empty();
+      if (!agentJoinKeys.length) {
+        $sel.append('<option value="">No join keys yet — create one</option>');
+      } else {
+        $sel.append('<option value="">Select a key…</option>');
+        agentJoinKeys.forEach(k => {
+          const used = k.use_count ? `${k.use_count} host${k.use_count === 1 ? '' : 's'}` : 'unused';
+          $sel.append($('<option>').val(k.id).text(`${k.label} (${k.keyPrefix}…, ${used})`));
+        });
+      }
+
+      const $tbody = $('#agent-join-key-tbody').empty();
+      $('#agent-join-key-hosts').hide().empty();
+      if (!agentJoinKeysAll.length) {
+        $tbody.append('<tr><td colspan="6" class="text-muted">No join keys yet.</td></tr>');
+      } else {
+        agentJoinKeysAll.forEach(k => {
+          const created = k.created_on ? new Date(k.created_on * 1000).toLocaleDateString() : '—';
+          const used = k.use_count ? `${k.use_count} host${k.use_count === 1 ? '' : 's'}` : '0 hosts';
+          const status = k.revoked
+            ? '<span class="badge bg-secondary">Revoked</span>'
+            : '<span class="badge bg-success">Active</span>';
+          const revokeBtn = k.revoked ? '' :
+            `<button class="btn btn-outline-warning btn-sm" title="Revoke -- stops it enrolling new hosts; already-joined hosts are unaffected" onclick="confirmAgentJoinKeyAction(this, '${k.id}', 'revoke')"><i class="fa-solid fa-ban"></i></button>`;
+          const $row = $('<tr>').attr('data-join-key-row', k.id).append(
+            $('<td>').text(k.label),
+            $('<td>').append($('<code>').text(k.keyPrefix + '…')),
+            $('<td>').text(created),
+            $('<td>').append($('<a href="#">').text(used).on('click', function(e) { e.preventDefault(); viewAgentJoinKeyHosts(k.id, k.label); })),
+            $('<td>').html(status),
+            $('<td class="text-end agent-join-key-actions">').html(
+              '<div class="btn-group btn-group-sm">' + revokeBtn +
+              `<button class="btn btn-outline-danger btn-sm" title="Delete the key record itself; already-joined hosts keep working" onclick="confirmAgentJoinKeyAction(this, '${k.id}', 'delete')"><i class="fa-solid fa-trash"></i></button>` +
+              '</div>'
+            )
+          );
+          $tbody.append($row);
+        });
+      }
+
+      updateAgentCommands();
+    });
+  }
+
+  async function viewAgentJoinKeyHosts(id, label) {
+    const $out = $('#agent-join-key-hosts').show().html('<i class="fa-solid fa-spinner fa-spin"></i> Loading…');
+    try {
+      const res = await app.api.get(`agent/join-keys/${id}/agents`);
+      const body = (res && (res.results || res)) || {};
+      const agents = body.agents || [];
+      if (!agents.length) {
+        $out.html(`<div class="alert alert-secondary py-2 small mb-0">No hosts have joined with <strong>${esc(label)}</strong> yet.</div>`);
+        return;
+      }
+      const rows = agents.map(a => {
+        const dot = a.isOnline ? 'text-success' : 'text-muted';
+        const seen = a.last_seen ? new Date(a.last_seen * 1000).toLocaleString() : 'never';
+        return `<tr><td><i class="fa-solid fa-circle ${dot}" style="font-size:8px"></i> ${esc(a.name)}</td><td>${esc(a.enrolled_on ? new Date(a.enrolled_on * 1000).toLocaleDateString() : '—')}</td><td>${esc(seen)}</td></tr>`;
+      }).join('');
+      $out.html(
+        `<div class="small fw-bold mb-1">Hosts joined with ${esc(label)}:</div>` +
+        '<table class="table table-sm mb-0"><thead><tr><th>Host</th><th>Joined</th><th>Last seen</th></tr></thead><tbody>' + rows + '</tbody></table>'
+      );
+    } catch (err) {
+      $out.html('<div class="alert alert-danger py-2 small mb-0">Could not load hosts: ' + esc(err.message || err) + '</div>');
+    }
+  }
+
+  // Inline, row-scoped confirm -- swaps the row's action buttons for
+  // "Revoke/Delete this key? Yes/No" in place. Deliberately not
+  // app.messages.confirm(): that renders into a single shared .actionMessage
+  // banner, so a second click before the first resolves leaves a dangling
+  // `$('body').one('click', ...)` handler from the first call and the banner
+  // can end up out of sync with which row it's actually confirming for.
+  // Scoping state to the row itself sidesteps that entirely.
+  function confirmAgentJoinKeyAction(btn, id, action) {
+    const isDelete = action === 'delete';
+    const label = isDelete ? 'Delete' : 'Revoke';
+    const cls = isDelete ? 'btn-danger' : 'btn-warning';
+    $(btn).closest('td').html(
+      `<span class="small me-1">${label}?</span>` +
+      `<button class="btn ${cls} btn-sm me-1" onclick="reallyDoAgentJoinKeyAction('${id}', '${action}')">Yes</button>` +
+      `<button class="btn btn-outline-secondary btn-sm" onclick="loadAgentJoinKeys()">No</button>`
+    );
+  }
+
+  async function reallyDoAgentJoinKeyAction(id, action) {
+    try {
+      if (action === 'delete') {
+        await app.api.delete(`agent/join-keys/${id}`);
+        app.messages.toast('Join key deleted.', 'success');
+      } else {
+        await app.api.post(`agent/join-keys/${id}/revoke`, {});
+        app.messages.toast('Join key revoked.', 'success');
+      }
+    } catch (err) {
+      app.messages.toast(`Could not ${action}: ` + (err.message || err), 'danger');
+    }
+    loadAgentJoinKeys();
+  }
+
+  async function mintAgentJoinKey() {
+    try {
+      const res = await app.api.post('agent/join-keys', { label: 'ui' });
+      const body = (res && (res.results || res)) || {};
+      if (!body.key) throw new Error(body.message || 'no key returned');
+      mintedJoinKey = body.key;
+      $('#agent-join-key-result').show().html(
+        '<div class="alert alert-success py-2 small mb-3">'
+        + '<i class="fa-solid fa-circle-check me-1"></i><strong>Join key created.</strong> '
+        + 'It is shown <strong>once</strong> — only its hash is stored. It is already in the command below.'
+        + '</div>'
+        + '<label class="form-label small fw-bold mb-1">Join key</label>'
+        + '<div class="input-group input-group-sm mb-3">'
+        + '<input type="text" class="form-control font-monospace" readonly value="' + esc(body.key) + '">'
+        + '<button class="btn btn-outline-secondary" type="button" id="btn-copy-jk" onclick="copyAgentCommand(\'agent-jk-copy\', \'btn-copy-jk\')"><i class="fa-solid fa-copy"></i></button>'
+        + '</div>'
+        + '<span id="agent-jk-copy" class="d-none">' + esc(body.key) + '</span>'
+      );
+      loadAgentJoinKeys();
+      updateAgentCommands();
+    } catch (err) {
+      app.messages.toast('Could not create a join key: ' + (err.message || err), 'danger');
+    }
+  }
+
+  // Mint the token server-side, then reveal the install steps built from it.
+  async function enrollAgent() {
+    const name = ($('#agent-enroll-name').val() || '').trim();
+    const resourceId = $('#agent-enroll-resource').val() || null;
+    if (!name) {
+      app.messages.toast('Give the agent a name first.', 'warning');
+      return;
+    }
+    const $btn = $('#agent-enroll-btn').prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin me-1"></i> Enrolling…');
+    try {
+      const res = await app.api.post('agent/enroll', { name, resourceId });
+      const body = res && (res.results || res);
+      if (!body || !body.token) throw new Error((body && body.message) || 'enrollment failed');
+
+      pendingEnrollment = body;
+      $('#agent-quick-token').val(body.token);
+      $('#agent-custom-token').val(body.token);
+
+      // The signing key is what makes reboot/arbitrary_bash possible. If the
+      // server could not load one, say so here rather than letting the operator
+      // discover it the first time a command is silently refused.
+      const keyWarn = body.signingAvailable === false
+        ? '<div class="alert alert-warning py-2 small mb-2"><i class="fa-solid fa-triangle-exclamation me-1"></i>'
+          + 'The SSO has no agent signing key, so high-risk commands (reboot, configure_ldap, arbitrary_bash) '
+          + 'will be refused. Re-run <code>./setup.sh</code> so OpenBao grants <code>secret/agent/*</code>.</div>'
+        : '';
+
+      $('#agent-enroll-result').show().html(
+        keyWarn +
+        '<div class="alert alert-success py-2 small mb-2">'
+        + '<i class="fa-solid fa-circle-check me-1"></i><strong>Enrolled.</strong> '
+        + 'This token is shown <strong>once</strong> — only its hash is stored. '
+        + 'If you lose it, rotate the agent to issue a new one.</div>'
+        + '<label class="form-label small fw-bold mb-1">Agent token</label>'
+        + '<div class="input-group input-group-sm mb-2">'
+        + '<input type="text" class="form-control font-monospace" id="agent-issued-token" readonly value="' + esc(body.token) + '">'
+        + '<button class="btn btn-outline-secondary" type="button" onclick="copyAgentCommand(\'agent-issued-token-copy\', \'btn-copy-token\')" id="btn-copy-token"><i class="fa-solid fa-copy"></i></button>'
+        + '</div>'
+        + '<span id="agent-issued-token-copy" class="d-none">' + esc(body.token) + '</span>'
+      );
+
+      $('#agent-enroll-card').removeClass('border-primary').addClass('border-success');
+      $btn.html('<i class="fa-solid fa-check me-1"></i> Enrolled');
+      $('#agent-install-steps').show();
+      updateAgentCommands();
+      refreshAgents();
+    } catch (err) {
+      $btn.prop('disabled', false).html('<i class="fa-solid fa-key me-1"></i> Enroll &amp; issue token');
+      app.messages.toast('Enrollment failed: ' + (err.message || err), 'danger');
+    }
+  }
+
+  var discoveryPlugins = [];
+
+  function loadDiscoveryPlugins() {
+    app.api.get('plugins', function(err, res) {
+      if (err) return;
+      discoveryPlugins = (res.results || []).filter(p => p.category === 'discovery');
+      renderDiscoveryPlugins();
+    });
+  }
+
+  function renderDiscoveryPlugins() {
+    const $list = $('#discovery-plugins-list').empty();
+    if (discoveryPlugins.length === 0) {
+      $list.append('<div class="text-muted text-center py-4"><i class="fa-solid fa-plug fs-2 mb-2 text-black-50"></i><br>No discovery plugins configured.</div>');
+      return;
+    }
+    discoveryPlugins.forEach(p => {
+      const badgeClass = p.enabled ? 'bg-success' : 'bg-secondary';
+      const statusText = p.enabled ? 'Loaded' : 'Unloaded';
+      // Last-run state is surfaced by the plugins API (lastRunAt/lastStatus/
+      // lastError/lastLog) but was dropped here; show it so a plugin that errors
+      // is visible without digging into logs.
+      const runOk = p.lastStatus === 'ok';
+      const runErr = p.lastStatus === 'error';
+      const runState = p.lastRunAt
+        ? `<span class="badge ${runOk ? 'bg-success' : runErr ? 'bg-danger' : 'bg-secondary'}" ${runErr && p.lastError ? 'title="' + esc(p.lastError) + '"' : ''}>${runOk ? 'ok' : runErr ? 'error' : esc(p.lastStatus) || 'ran'}</span> <span class="text-muted">${fmtRunTs(p.lastRunAt)}</span>`
+        : '<span class="text-muted">Never run</span>';
+      const logsBtn = (p.lastLog || p.lastError)
+        ? `<button class="btn btn-sm btn-outline-secondary" title="View run log" onclick="showPluginLog('${p.id}')"><i class="fa-solid fa-scroll"></i> Logs</button>`
+        : '';
+      const card = `
+        <div class="card mb-3 border shadow-sm">
+          <div class="card-body d-flex align-items-center justify-content-between">
+            <div>
+              <h6 class="mb-1"><strong>${p.name}</strong> <span class="badge bg-secondary ms-2">${p.pluginType}</span></h6>
+              <div class="small text-muted font-monospace">${p.slug} | Schedule: ${p.cron}</div>
+              <div class="small">Last run: ${runState}</div>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+              <span class="badge ${badgeClass} me-2">${statusText}</span>
+              ${logsBtn}
+              <button class="btn btn-sm btn-outline-secondary" title="Edit" onclick="openEditDiscoveryPluginModal('${p.id}')"><i class="fa-solid fa-pen"></i> Edit</button>
+              <button class="btn btn-sm btn-outline-primary" onclick="toggleDiscoveryPlugin('${p.id}', ${!p.enabled})">${p.enabled ? 'Unload' : 'Load'}</button>
+              <button class="btn btn-sm btn-success" title="Run now" onclick="runDiscoveryPluginNow('${p.id}')"><i class="fa-solid fa-play"></i> Run</button>
+              <button class="btn btn-sm btn-outline-danger" onclick="deleteDiscoveryPlugin('${p.id}')"><i class="fas fa-trash"></i></button>
+            </div>
+          </div>
+        </div>
+      `;
+      $list.append(card);
+    });
+  }
+
+  // "Never run" when a discovery plugin has no run yet; otherwise relative time.
+  function fmtRunTs(ts) {
+    if (!ts) return 'Never run';
+    const m = moment(ts);
+    return m.isValid() ? m.fromNow() : 'Never run';
+  }
+
+  // Modal showing the discovery plugin's last run log + error (from the plugins
+  // API's lastLog/lastError fields). Logs can be long, so render in a scrollable
+  // <pre> rather than a toast.
+  function showPluginLog(id) {
+    const p = discoveryPlugins.find(x => x.id === id);
+    if (!p) return;
+    const body = p.lastError
+      ? `<div class="alert alert-danger mb-2">${esc(p.lastError)}</div>`
+      : '';
+    const log = p.lastLog || '(no log captured for this run)';
+    app.modal.open({
+      title: 'Run log — ' + (p.name || p.slug),
+      size: 'lg',
+      bodyHtml: body + '<pre class="p-2 mb-0 bg-light border" style="max-height:55vh;overflow:auto;white-space:pre-wrap;font-size:.85rem;">' + esc(log) + '</pre>',
+    });
+  }
+
+  async function toggleDiscoveryPlugin(id, state) {
+    const endpoint = state ? 'load' : 'unload';
+    try {
+      await app.api.post(`plugins/${id}/${endpoint}`, {});
+      app.messages.toast(`Discovery plugin ${state ? 'loaded' : 'unloaded'}`, 'success');
+      loadDiscoveryPlugins();
+    } catch (e) {
+      app.messages.toast('Error toggling plugin: ' + e.message, 'danger');
+    }
+  }
+
+  async function runDiscoveryPluginNow(id) {
+    try {
+      await app.api.post(`plugins/${id}/run`, {});
+      app.messages.toast('Enqueued discovery plugin run', 'success');
+      loadDiscoveryPlugins();
+    } catch (e) {
+      app.messages.toast('Error running plugin: ' + e.message, 'danger');
+    }
+  }
+
+  var discoveryPluginTypes = [];
+
+  // ── Discovery plugin config helpers (ported from plugins.ejs) ─────────────
+  // Stored value is always a 5-field cron string; the dropdown picks a preset
+  // and "Custom…" reveals the raw input. Config fields are driven by each
+  // plugin type's configSchema so per-plugin settings (e.g. Proxmox url /
+  // tokenId / tokenSecret) are collected at create time.
+  var DP_CRON_PRESETS = [
+    { key: 'hourly', label: 'Hourly',           cron: '0 * * * *' },
+    { key: 'daily',  label: 'Daily (midnight)',  cron: '0 0 * * *' },
+    { key: 'weekly', label: 'Weekly (Sun)',      cron: '0 0 * * 0' },
+    { key: 'custom', label: 'Custom…',           cron: null },
+  ];
+  function dpCronKeyFor(cron) {
+    var m = DP_CRON_PRESETS.filter(function(p){ return p.cron === cron; })[0];
+    return m ? m.key : 'custom';
+  }
+  function dpCronSelectHtml(prefix, current) {
+    current = current || '0 * * * *';
+    var key = dpCronKeyFor(current);
+    var opts = DP_CRON_PRESETS.map(function(p){
+      return '<option value="' + p.key + '"' + (p.key === key ? ' selected' : '') + '>' + p.label + '</option>';
+    }).join('');
+    var rawStyle = key === 'custom' ? '' : ' style="display:none"';
+    return '<select class="form-select" id="' + prefix + 'cron-select" onchange="dpOnCronChange(\'' + prefix + '\')">' + opts + '</select>' +
+      '<input type="text" class="form-control font-monospace mt-2" id="' + prefix + 'cron" value="' + current + '"' + rawStyle + '>';
+  }
+  function dpOnCronChange(prefix) {
+    var sel = document.getElementById(prefix + 'cron-select');
+    var raw = document.getElementById(prefix + 'cron');
+    if (!sel || !raw) return;
+    if (sel.value === 'custom') { raw.style.display = ''; }
+    else {
+      raw.style.display = 'none';
+      var preset = DP_CRON_PRESETS.filter(function(p){ return p.key === sel.value; })[0];
+      if (preset) raw.value = preset.cron;
+    }
+  }
+  function dpCronFromForm(prefix) {
+    var sel = document.getElementById(prefix + 'cron-select');
+    if (sel && sel.value !== 'custom') {
+      var preset = DP_CRON_PRESETS.filter(function(p){ return p.key === sel.value; })[0];
+      if (preset) return preset.cron;
+    }
+    var raw = document.getElementById(prefix + 'cron');
+    return (raw && raw.value.trim()) || '0 * * * *';
+  }
+  // `values` pre-fills the form for edit mode. Secret fields are never returned
+  // by the API in the clear (they live in OpenBao and come back masked), so
+  // they are rendered EMPTY with a "leave blank to keep" hint rather than
+  // prefilled with `********` -- submitting the mask back would otherwise store
+  // the literal asterisks as the secret.
+  function dpConfigFormHtml(type, prefix, values) {
+    var t = discoveryPluginTypes.filter(function(x){ return x.type === type; })[0];
+    var schema = t && t.configSchema;
+    if (!schema || !schema.length) return '<p class="text-muted">No configuration fields for this plugin.</p>';
+    values = values || {};
+    var html = '';
+    schema.forEach(function(f) {
+      var label = f.label + (f.secret ? ' <span class="text-warning" title="stored in OpenBao"><i class="fa-solid fa-key"></i></span>' : '') + (f.required ? ' <span class="text-danger">*</span>' : '');
+      if (f.type === 'boolean' || f.type === 'checkbox' || f.key === 'autoPromote') {
+        var isChecked = values[f.key] === true || values[f.key] === 'true' || values[f.key] === 1 || values[f.key] === '1' || (values[f.key] === undefined && f.default !== false);
+        html += '<div class="mb-3 form-check">' +
+          '<input type="checkbox" class="form-check-input" id="' + prefix + f.key + '"' + (isChecked ? ' checked' : '') + '>' +
+          '<label class="form-check-label fw-bold" for="' + prefix + f.key + '">' + label + '</label>' +
+        '</div>';
+      } else if (f.type === 'site_select' || f.key === 'location') {
+        var selectedVal = String(values[f.key] != null ? values[f.key] : (f.default || '')).trim();
+        var sites = rawResources.filter(r => r.kind === 'site');
+        var siteOpts = '<option value="">(Default Site)</option>';
+        sites.forEach(function(s) {
+          var sel = (s.name === selectedVal || s.slug === selectedVal || (!selectedVal && s.slug === 'site-default')) ? ' selected' : '';
+          siteOpts += '<option value="' + esc(s.name) + '"' + sel + '>' + esc(s.name) + ' (' + esc(s.slug) + ')</option>';
+        });
+        html += '<div class="mb-3">' +
+          '<label class="form-label fw-bold">' + label + '</label>' +
+          '<select class="form-select" id="' + prefix + f.key + '">' + siteOpts + '</select>' +
+        '</div>';
+      } else {
+        var inputType = f.type === 'password' ? 'password' : (f.type === 'url' ? 'url' : 'text');
+        var req = (f.required && !f.secret) ? ' required' : '';
+        var ph = f.placeholder ? (' placeholder="' + esc(f.placeholder) + '"') : '';
+        var val = '';
+        if (!f.secret && values[f.key] != null) val = ' value="' + esc(values[f.key]) + '"';
+        if (f.secret && values.__isEdit) ph = ' placeholder="unchanged — type a new value to replace"';
+        html += '<div class="mb-3"><label class="form-label fw-bold">' + label + '</label>' +
+          '<input type="' + inputType + '" class="form-control" id="' + prefix + f.key + '"' + req + ph + val + '></div>';
+      }
+    });
+    return html;
+  }
+  function dpCollectConfig(type, prefix) {
+    var t = discoveryPluginTypes.filter(function(x){ return x.type === type; })[0];
+    var schema = t && t.configSchema;
+    var out = {};
+    if (!schema) return out;
+    schema.forEach(function(f) {
+      var el = document.getElementById(prefix + f.key);
+      if (el) {
+        if (f.type === 'boolean' || f.type === 'checkbox' || el.type === 'checkbox') {
+          out[f.key] = el.checked;
+        } else {
+          out[f.key] = el.value;
+        }
+      }
+    });
+    return out;
+  }
+  function dpRenderFields() {
+    var type = document.getElementById('new-plugin-type').value;
+    document.getElementById('new-plugin-config-fields').innerHTML = dpConfigFormHtml(type, 'np-');
+  }
+
+  function openNewDiscoveryPluginModal() {
+    app.api.get('plugins/types', function(err, res) {
+      if (err) { app.messages.toast('Error loading plugin types: ' + err.message, 'danger'); return; }
+      discoveryPluginTypes = (res.results || []).filter(t => t.category === 'discovery');
+      if (discoveryPluginTypes.length === 0) {
+        app.messages.toast('No discovery plugin types available', 'warning');
+        return;
+      }
+
+      const options = discoveryPluginTypes.map(t => `<option value="${t.type}">${t.name} (${t.type})</option>`).join('');
+      const bodyHtml = `
+        <div class="mb-3">
+          <label class="form-label fw-bold">Plugin Type</label>
+          <select id="new-plugin-type" class="form-select shadow-sm" onchange="dpRenderFields()">${options}</select>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold">Instance Name</label>
+          <input type="text" id="new-plugin-name" class="form-control shadow-sm" placeholder="e.g. Local Subnet Scanner">
+          <div class="form-text">A slug is derived automatically from the name.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold">Schedule</label>
+          ${dpCronSelectHtml('np-', '0 * * * *')}
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="new-plugin-enabled" checked>
+          <label class="form-check-label fw-semibold" for="new-plugin-enabled">Enable (load on create)</label>
+        </div>
+        <hr><h6 class="fw-bold">Configuration</h6><div id="new-plugin-config-fields">${dpConfigFormHtml(discoveryPluginTypes[0].type, 'np-')}</div>
+        <div class="d-flex justify-content-end gap-2">
+          <button class="btn btn-secondary" onclick="app.modal.close()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveNewDiscoveryPlugin()">Create Plugin</button>
+        </div>
+      `;
+
+      app.modal.open({
+        title: 'Configure New Discovery Plugin',
+        bodyHtml: bodyHtml,
+        size: 'lg'
+      });
+    });
+  }
+
+  // Edit an existing instance. Non-secret config goes to PUT /plugins/:id;
+  // secrets go to PUT /plugins/:id/secrets and only when the operator actually
+  // typed a new value -- they are two endpoints because the DB row must never
+  // hold a secret (see routes/api_plugins.js).
+  function openEditDiscoveryPluginModal(id) {
+    const p = discoveryPlugins.find(x => x.id === id);
+    if (!p) return;
+    app.api.get('plugins/types', function(err, res) {
+      if (err) { app.messages.toast('Error loading plugin types: ' + err.message, 'danger'); return; }
+      discoveryPluginTypes = (res.results || []).filter(t => t.category === 'discovery');
+      const values = Object.assign({}, p.config || {}, { __isEdit: true });
+      const bodyHtml = `
+        <div class="mb-3">
+          <label class="form-label fw-bold">Plugin Type</label>
+          <input type="text" class="form-control" value="${esc(p.pluginType)}" disabled>
+          <div class="form-text">The type is fixed once an instance exists — create a new instance to use a different one.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold">Instance Name</label>
+          <input type="text" id="edit-plugin-name" class="form-control shadow-sm" value="${esc(p.name)}">
+          <div class="form-text">Slug <code>${esc(p.slug)}</code> is stable and does not change.</div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label fw-bold">Schedule</label>
+          ${dpCronSelectHtml('ep-', p.cron)}
+        </div>
+        <div class="form-check mb-3">
+          <input class="form-check-input" type="checkbox" id="edit-plugin-enabled" ${p.enabled ? 'checked' : ''}>
+          <label class="form-check-label fw-semibold" for="edit-plugin-enabled">Loaded (runs on its schedule)</label>
+        </div>
+        <hr><h6 class="fw-bold">Configuration</h6>
+        <div id="edit-plugin-config-fields">${dpConfigFormHtml(p.pluginType, 'ep-', values)}</div>
+        <div class="d-flex justify-content-end gap-2">
+          <button class="btn btn-secondary" onclick="app.modal.close()">Cancel</button>
+          <button class="btn btn-primary" onclick="saveEditedDiscoveryPlugin('${p.id}')">Save changes</button>
+        </div>
+      `;
+      app.modal.open({ title: 'Edit Discovery Plugin — ' + p.name, bodyHtml: bodyHtml, size: 'lg' });
+    });
+  }
+
+  async function saveEditedDiscoveryPlugin(id) {
+    const p = discoveryPlugins.find(x => x.id === id);
+    if (!p) return;
+    const name = ($('#edit-plugin-name').val() || '').trim();
+    if (!name) { app.messages.toast('Name is required', 'warning'); return; }
+
+    const flat = dpCollectConfig(p.pluginType, 'ep-');
+    const type = discoveryPluginTypes.find(t => t.type === p.pluginType);
+    const schema = (type && type.configSchema) || [];
+
+    // Split by the schema so a secret never rides along in the DB payload, and
+    // an untouched secret field is not sent at all.
+    const config = {};
+    const secrets = {};
+    schema.forEach(f => {
+      const v = flat[f.key];
+      if (f.secret) { if (v) secrets[f.key] = v; }
+      else config[f.key] = v;
+    });
+
+    try {
+      await app.api.put(`plugins/${id}`, {
+        name,
+        cron: dpCronFromForm('ep-'),
+        enabled: $('#edit-plugin-enabled').is(':checked'),
+        config
+      });
+      if (Object.keys(secrets).length) await app.api.put(`plugins/${id}/secrets`, secrets);
+      app.modal.close();
+      app.messages.toast('Plugin updated', 'success');
+      loadDiscoveryPlugins();
+    } catch (e) {
+      app.messages.toast('Error saving plugin: ' + (e.message || e), 'danger');
+    }
+  }
+
+  // Was referenced by the card's trash button but never defined, so clicking it
+  // only threw a ReferenceError -- delete appeared to do nothing.
+  async function deleteDiscoveryPlugin(id) {
+    const p = discoveryPlugins.find(x => x.id === id);
+    const label = p ? (p.name || p.slug) : 'this plugin';
+    const $card = $('#plugins-tab-pane');
+    const confirmed = await app.messages.confirm(
+      `Delete discovery plugin "${label}"? Its schedule stops and its stored secrets are removed. Resources it already discovered stay in the Directory.`,
+      $card, 'warning');
+    if (!confirmed) return;
+    try {
+      await app.api.delete(`plugins/${id}`);
+      app.messages.toast('Plugin deleted', 'success');
+      loadDiscoveryPlugins();
+    } catch (e) {
+      app.messages.toast('Error deleting plugin: ' + (e.message || e), 'danger');
+    }
+  }
+
+  async function saveNewDiscoveryPlugin() {
+    const type = $('#new-plugin-type').val();
+    const name = $('#new-plugin-name').val().trim();
+    const cron = dpCronFromForm('np-');
+    const enabled = $('#new-plugin-enabled').is(':checked');
+    const config = dpCollectConfig(type, 'np-');
+
+    if (!type) return app.messages.action('Select a plugin type.', app.modal.body(), 'danger');
+    if (!name) return app.messages.action('Name is required', app.modal.body(), 'danger');
+
+    try {
+      await app.api.post('plugins', {
+        pluginType: type,
+        name,
+        cron,
+        enabled,
+        config
+      });
+      app.messages.toast('Discovery plugin created successfully!', 'success');
+      app.modal.close();
+      loadDiscoveryPlugins();
+    } catch (e) {
+      app.messages.action('Error creating plugin: ' + e.message, app.modal.body(), 'danger');
+    }
+  }
 
   $(document).ready(function(){
     loadDiscoveryResources();
+    loadDiscoveryPlugins();
+    // Keep the host status dots live: refresh the agent join periodically and on
+    // socket.io agent.* broadcasts (dedicated socket — the app default is P2PSub).
+    refreshAgents();
+    setInterval(refreshAgents, 30000);
+    try {
+      const dirAgentSocket = io({ auth: { token: app.auth.getToken() } });
+      dirAgentSocket.on('agent.telemetry', function(msg){
+        const a = msg && agentsById[msg.agentId];
+        if (a) { a.lastTelemetry = msg.payload; a.isOnline = true; renderTable(); }
+      });
+      dirAgentSocket.on('agent.discovery', function(msg){
+        const a = msg && agentsById[msg.agentId];
+        if (a) { a.lastDiscovery = msg.payload; a.isOnline = true; renderTable(); }
+      });
+    } catch (e) { /* socket is optional; periodic refresh still runs */ }
   });
 </script>
 

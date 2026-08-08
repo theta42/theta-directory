@@ -355,7 +355,11 @@ EOF
     # Required SSO groups. The app gates admin/invite/oauth-admin on these;
     # app_sso_service_account is a marker (not a permission gate) for
     # non-person accounts -- see the Users page.
-    for group in app_super_admin app_sso_admin app_sso_invite app_sso_oauth_admin app_sso_service_account; do
+    #
+    # god_admin is the global super group (docs/GROUPS.md §2), the top of the
+    # group-inheritance lattice. It is seeded here so it exists from first boot;
+    # the theta-suite bootstrap puts the first admin person into it.
+    for group in god_admin app_sso_admin app_sso_invite app_sso_oauth_admin app_sso_service_account; do
         ldapadd -x -D "$LDAP_BIND_DN" -w "$LDAP_ADMIN_PASS" -H ldap://localhost:389 << EOF || true
 dn: cn=${group},ou=groups,${LDAP_BASE_DN}
 objectClass: groupOfNames
@@ -366,11 +370,11 @@ member: ${LDAP_BIND_DN}
 EOF
     done
 
-    # Nest app_super_admin into the SSO admin groups, so cross-app super admins
-    # hold those rights by membership rather than by a special case in app code.
-    # This is what makes the privilege visible to every consumer -- SSSD, sudo,
-    # anything binding LDAP directly -- instead of only to callers that happen
-    # to route through utils/permission.js.
+    # Nest god_admin into the SSO admin groups, so god admins hold those rights
+    # by membership rather than by a special case in app code. This is what makes
+    # the privilege visible to every consumer -- SSSD, sudo, anything binding
+    # LDAP directly -- instead of only to callers that happen to route through
+    # utils/permission.js.
     #
     # app_sso_service_account is deliberately excluded: it is a marker for
     # non-person accounts, not a permission, and nesting admins into it would
@@ -381,10 +385,10 @@ EOF
 dn: cn=${group},ou=groups,${LDAP_BASE_DN}
 changetype: modify
 add: member
-member: cn=app_super_admin,ou=groups,${LDAP_BASE_DN}
+member: cn=god_admin,ou=groups,${LDAP_BASE_DN}
 EOF
         done
-        info "Nested app_super_admin into the SSO admin groups"
+        info "Nested god_admin into the SSO admin groups"
     fi
 
     info "LDAP directory initialized"
