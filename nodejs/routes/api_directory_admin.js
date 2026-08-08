@@ -799,4 +799,61 @@ router.get('/resources/:id/driver-logs', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── Discovered Inventory Operations (Merge & Ignore) ───────────────────────
+router.post('/discovered/ignore', async (req, res, next) => {
+  try {
+    const { resourceId } = req.body;
+    if (!resourceId) return res.status(400).json({ status: 'error', message: 'resourceId is required' });
+    const r = await Resource.get(resourceId);
+    if (!r) return res.status(404).json({ status: 'error', message: 'resource not found' });
+    
+    r.metadata = r.metadata || {};
+    r.metadata.ignored = true;
+    await r.save();
+    res.json({ status: 'ok', resourceId: r.id, ignored: true });
+  } catch (err) { next(err); }
+});
+
+router.post('/discovered/merge', async (req, res, next) => {
+  try {
+    const { discoveredId, targetId } = req.body;
+    if (!discoveredId || !targetId) {
+      return res.status(400).json({ status: 'error', message: 'discoveredId and targetId are required' });
+    }
+    const disc = await Resource.get(discoveredId);
+    const target = await Resource.get(targetId);
+    if (!disc || !target) {
+      return res.status(404).json({ status: 'error', message: 'Discovered or Target resource not found' });
+    }
+
+    // Merge metadata (interfaces, discovery sources, OS details)
+    target.metadata = target.metadata || {};
+    disc.metadata = disc.metadata || {};
+
+    const sources = new Set([...(target.metadata.discovery_sources || []), ...(disc.metadata.discovery_sources || [])]);
+    target.metadata.discovery_sources = Array.from(sources);
+
+    if (disc.metadata.interfaces) {
+      const existingInterfaces = target.metadata.interfaces || [];
+      const macs = new Set(existingInterfaces.map(i => i.mac).filter(Boolean));
+      for (const iface of disc.metadata.interfaces) {
+        if (!iface.mac || !macs.has(iface.mac)) {
+          existingInterfaces.push(iface);
+        }
+      }
+      target.metadata.interfaces = existingInterfaces;
+    }
+
+    if (disc.metadata.os) target.metadata.os = target.metadata.os || disc.metadata.os;
+    if (disc.metadata.kernel) target.metadata.kernel = target.metadata.kernel || disc.metadata.kernel;
+
+    await target.save();
+
+    // Remove or mark discovered record as merged
+    await disc.delete();
+
+    res.json({ status: 'ok', mergedTargetId: target.id, targetName: target.name });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
