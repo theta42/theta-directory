@@ -72,16 +72,20 @@ async function bao(method, path, body) {
 // overwrite, so this is safe to call on every token fetch — edits (e.g. adding a
 // grant) propagate immediately because OpenBao parses policy content at use.
 async function ensurePolicy(name, hcl) {
-	const existing = await baoConf.request('GET', `sys/policies/acl/${name}`);
-	if (existing.status !== 200 && existing.status !== 404) {
-		const t = await existing.text().catch(() => '');
-		throw new Error(`OpenBao policy read ${name} failed (${existing.status}) ${t}`);
+	try {
+		const existing = await baoConf.request('GET', `sys/policies/acl/${name}`);
+		if (existing.status === 200) {
+			const body = await existing.json().catch(() => null);
+			if (body && typeof body.policy === 'string' && body.policy.trim() === hcl.trim()) return; // unchanged
+		}
+	} catch (e) {
+		console.warn(`[VaultBroker] policy GET ${name} warning:`, e.message);
 	}
-	if (existing.status === 200) {
-		const body = await existing.json().catch(() => null);
-		if (body && typeof body.policy === 'string' && body.policy === hcl) return; // unchanged
+	try {
+		await bao('PUT', `sys/policies/acl/${name}`, { policy: hcl });
+	} catch (err) {
+		console.warn(`[VaultBroker] policy PUT ${name} warning:`, err.message);
 	}
-	await bao('PUT', `sys/policies/acl/${name}`, { policy: hcl });
 }
 
 // Mint a token through a token role with the given policies. Returns

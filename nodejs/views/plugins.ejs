@@ -142,16 +142,37 @@
       if (!includeSecrets && f.secret) return;
       var val = v[f.key];
       if (f.secret) val = '';
-      if (val === undefined || val === null) val = '';
-      var inputType = f.type === 'password' ? 'password' : (f.type === 'url' ? 'url' : 'text');
-      var req = f.required ? ' required' : '';
-      var ph = f.placeholder ? (' placeholder="' + f.placeholder + '"') : '';
       var label = f.label + (f.secret ? ' <span class="text-warning" title="stored in OpenBao"><i class="fa-solid fa-key"></i></span>' : '') + (f.required ? ' <span class="text-danger">*</span>' : '');
-      html += '<div class="mb-3">' +
-        '<label class="form-label">' + label + '</label>' +
-        '<input type="' + inputType + '" class="form-control" id="' + prefix + f.key + '" value="' + String(val).replace(/"/g, '&quot;') + '"' + req + ph + '>';
-      if (f.secret) html += '<div class="form-text">Leave blank to keep the current secret.</div>';
-      html += '</div>';
+
+      if (f.type === 'boolean' || f.type === 'checkbox' || f.key === 'autoPromote') {
+        var isChecked = val === true || val === 'true' || val === 1 || val === '1' || (val === undefined && f.default !== false);
+        html += '<div class="mb-3 form-check">' +
+          '<input type="checkbox" class="form-check-input" id="' + prefix + f.key + '"' + (isChecked ? ' checked' : '') + '>' +
+          '<label class="form-check-label fw-bold" for="' + prefix + f.key + '">' + label + '</label>' +
+        '</div>';
+      } else if (f.type === 'site_select' || f.key === 'location') {
+        var selectedVal = String(val || f.default || '').trim();
+        var sites = window.availableSites || [];
+        var siteOpts = '<option value="">(Default Site)</option>';
+        sites.forEach(function(s) {
+          var sel = (s.name === selectedVal || s.slug === selectedVal || (!selectedVal && s.slug === 'site-default')) ? ' selected' : '';
+          siteOpts += '<option value="' + app.util.escapeHtml(s.name) + '"' + sel + '>' + app.util.escapeHtml(s.name) + ' (' + app.util.escapeHtml(s.slug) + ')</option>';
+        });
+        html += '<div class="mb-3">' +
+          '<label class="form-label fw-bold">' + label + '</label>' +
+          '<select class="form-select" id="' + prefix + f.key + '">' + siteOpts + '</select>' +
+        '</div>';
+      } else {
+        if (val === undefined || val === null) val = '';
+        var inputType = f.type === 'password' ? 'password' : (f.type === 'url' ? 'url' : 'text');
+        var req = f.required ? ' required' : '';
+        var ph = f.placeholder ? (' placeholder="' + f.placeholder + '"') : '';
+        html += '<div class="mb-3">' +
+          '<label class="form-label fw-bold">' + label + '</label>' +
+          '<input type="' + inputType + '" class="form-control" id="' + prefix + f.key + '" value="' + String(val).replace(/"/g, '&quot;') + '"' + req + ph + '>';
+        if (f.secret) html += '<div class="form-text">Leave blank to keep the current secret.</div>';
+        html += '</div>';
+      }
     });
     return html;
   }
@@ -210,7 +231,13 @@
     if (!schema) return out;
     schema.forEach(function(f) {
       var el = document.getElementById(prefix + f.key);
-      if (el) out[f.key] = el.value;
+      if (el) {
+        if (f.type === 'boolean' || f.type === 'checkbox' || el.type === 'checkbox') {
+          out[f.key] = el.checked;
+        } else {
+          out[f.key] = el.value;
+        }
+      }
     });
     return out;
   }

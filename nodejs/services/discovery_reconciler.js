@@ -19,9 +19,42 @@ function isDescendant(candidateId, rootId, edges) {
 }
 
 class DiscoveryReconciler {
-  static async reconcile(sourceName, payload) {
+  static async reconcile(sourceName, payload, options = {}) {
     const { resources = [], edges = [] } = payload;
     let newDevices = 0;
+    const location = options.location || options.site || null;
+    const autoPromote = !!options.autoPromote;
+
+    let targetSite = null;
+    if (location && String(location).trim()) {
+      const sites = await Resource.list({ where: { kind: 'site' } });
+      const locStr = String(location).trim().toLowerCase();
+      targetSite = sites.find(s => s.name.toLowerCase() === locStr || s.slug.toLowerCase() === locStr);
+      if (!targetSite) {
+        const locSlug = `site-${locStr.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+        targetSite = await Resource.create({
+          id: crypto.randomUUID(),
+          kind: 'site',
+          name: String(location).trim(),
+          slug: locSlug,
+          created_on: Math.floor(Date.now() / 1000)
+        }).catch(() => null);
+      }
+    }
+    if (!targetSite) {
+      const sites = await Resource.list({ where: { kind: 'site' } });
+      if (sites && sites.length > 0) {
+        targetSite = sites[0];
+      } else {
+        targetSite = await Resource.create({
+          id: crypto.randomUUID(),
+          kind: 'site',
+          name: 'Default Site',
+          slug: 'site-default',
+          created_on: Math.floor(Date.now() / 1000)
+        }).catch(() => null);
+      }
+    }
 
     const normalizeMac = (m) => (m || '').toLowerCase().replace(/[^a-f0-9]/g, '');
     const normalizeHost = (h) => (h || '').toLowerCase().split('.')[0].trim();
@@ -35,6 +68,7 @@ class DiscoveryReconciler {
 
     for (const res of resources) {
       if (!res.metadata) res.metadata = {};
+      if (autoPromote) res.metadata.managed = true;
       res._originalSlug = res.slug; // Keep track for edge mapping
 
       let existing = null;
@@ -255,6 +289,45 @@ class DiscoveryReconciler {
       }
     }
     
+    if (targetSite) {
+      const childSlugs = new Set(edges.map(e => e.childSlug));
+      for (const res of resources) {
+        if (res._actualId && res._actualId !== targetSite.id && !childSlugs.has(res._originalSlug || res.slug)) {
+          const edgeExists = existingEdges.find(e => e.childId === res._actualId);
+          if (!edgeExists) {
+            const created = await ResourceEdge.create({
+              id: crypto.randomUUID(),
+              parentId: targetSite.id,
+              childId: res._actualId,
+              relation: 'hosts'
+            }).catch(() => null);
+            if (created) existingEdges.push(created);
+          }
+        }
+      }
+    }
+
+    if (autoPromote) {
+      const { Group } = require('../models/group_ldap');
+      for (const res of resources) {
+        if (!res._actualId) continue;
+        const accessGroup = `${res.slug}_access`;
+        const adminGroup = `${res.slug}_admin`;
+        try {
+          await Group.get(accessGroup).catch(async (e) => {
+            if (e.status === 404) await Group.add({ name: accessGroup, description: `Access to ${res.name}`, owner: 'cn=admin' });
+          });
+          await Group.get(adminGroup).catch(async (e) => {
+            if (e.status === 404) await Group.add({ name: adminGroup, description: `Admin access to ${res.name}`, owner: 'cn=admin' });
+          });
+          await ResourceGroup.create({ id: crypto.randomUUID(), resourceId: res._actualId, groupCn: accessGroup, accessLevel: 'user' }).catch(() => {});
+          await ResourceGroup.create({ id: crypto.randomUUID(), resourceId: res._actualId, groupCn: adminGroup, accessLevel: 'admin' }).catch(() => {});
+        } catch (err) {
+          console.error(`[DiscoveryReconciler] autoPromote failed for ${res.slug}:`, err.message);
+        }
+      }
+    }
+
     if (newDevices > 0) {
       console.log(`[DiscoveryReconciler] Source ${sourceName} discovered ${newDevices} new devices.`);
     }

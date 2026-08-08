@@ -290,6 +290,15 @@ class AgentManager {
     };
   }
 
+  // Find connected/enrolled agent bound to a resource ID.
+  async getAgentForResource(resourceId) {
+    if (!resourceId) return null;
+    const rows = await Agent.list().catch(() => []);
+    const agent = rows.find(a => a.resourceId === resourceId);
+    if (!agent) return null;
+    return agent.toPublic(this.liveState(agent.id));
+  }
+
   // Every enrolled agent, connected or not.
   async listAgents() {
     const rows = await Agent.list();

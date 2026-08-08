@@ -195,11 +195,12 @@ class Resource extends Model {
   // Walk all parent ResourceEdges upwards recursively to find all ancestor
   // resources (Host, Cluster, Site, etc.).
   static async findAllAncestors(resourceId, visited = new Set()) {
-    if (visited.has(resourceId)) return [];
+    if (!resourceId || visited.has(resourceId)) return [];
     visited.add(resourceId);
 
     const ancestors = [];
-    const parentEdges = await ResourceEdge.list({ where: { childId: resourceId } }).catch(() => []);
+    const allEdges = await ResourceEdge.list().catch(() => []);
+    const parentEdges = allEdges.filter(e => e.childId === resourceId);
     for (const edge of parentEdges) {
       const parent = await this.get(edge.parentId).catch(() => null);
       if (!parent) continue;

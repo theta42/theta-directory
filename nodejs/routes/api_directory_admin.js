@@ -247,6 +247,9 @@ router.post('/resources', async (req, res, next) => {
       if (parents.length > 0) req.body.hostId = parents[0].id;
     }
     
+    if (req.body.kind !== 'site' && req.body.kind !== 'Site' && !req.body.hostId) {
+      return res.status(400).json({ error: 'Only Site resources can be top-level. All other resource types must have a parent resource.' });
+    }
     if (req.body.kind === 'host' && !req.body.hostId) {
       return res.status(400).json({ error: 'Hosts must have a parent Site or Host' });
     }
@@ -316,6 +319,9 @@ router.put('/resources/:id', async (req, res, next) => {
   try {
     // Validate before loading anything -- a rejected body should never have
     // touched the store.
+    if (req.body.kind !== 'site' && req.body.kind !== 'Site' && !req.body.hostId) {
+      return res.status(400).json({ error: 'Only Site resources can be top-level. All other resource types must have a parent resource.' });
+    }
     if (req.body.kind === 'host' && !req.body.hostId) {
       return res.status(400).json({ error: 'Hosts must have a parent Site or Host' });
     }
@@ -646,15 +652,21 @@ router.get('/resources/:id/secrets', async (req, res, next) => {
       };
     });
 
-    // Find all ancestor resources across any depth (Host, Site, etc.) + Global Sites
+    // Explicit Secret Inheritance Lineage:
+    // Find ancestor resources in direct upward path (Host, Cluster, Site)
     const parentSecrets = [];
     const seenAncestors = new Set();
 
     const ancestors = await Resource.findAllAncestors(resource.id).catch(() => []);
     const sites = await Resource.list({ where: { kind: 'site' } }).catch(() => []);
-    const allAncestors = [...ancestors, ...sites];
+    const candidateAncestors = [...ancestors];
+    for (const site of sites) {
+      if (!candidateAncestors.some(a => a.id === site.id)) {
+        candidateAncestors.push(site);
+      }
+    }
 
-    for (const parent of allAncestors) {
+    for (const parent of candidateAncestors) {
       if (!parent || parent.id === resource.id || seenAncestors.has(parent.id)) continue;
       seenAncestors.add(parent.id);
 
@@ -664,11 +676,15 @@ router.get('/resources/:id/secrets', async (req, res, next) => {
         const parentBody = await parentR.json().catch(() => ({}));
         const pMap = (parentBody.data && parentBody.data.data) || {};
         for (const pKey of Object.keys(pMap)) {
-          parentSecrets.push({
-            parentSlug: parent.slug,
-            parentName: `${parent.name} (${parent.kind ? parent.kind.toUpperCase() : 'PARENT'})`,
-            key: pKey
-          });
+          const pVal = String(pMap[pKey] || '');
+          // Ancestor's own secrets (not pointers) are candidates for explicit inheritance
+          if (!pVal.startsWith('INHERIT:')) {
+            parentSecrets.push({
+              parentSlug: parent.slug,
+              parentName: `${parent.name} (${parent.kind ? parent.kind.toUpperCase() : 'ANCESTOR'})`,
+              key: pKey
+            });
+          }
         }
       }
     }
@@ -681,25 +697,38 @@ router.post('/resources/:id/secrets', async (req, res, next) => {
   try {
     const resource = await Resource.get(req.params.id);
     if (!resource) return res.status(404).json({ status: 'error', message: 'resource not found' });
-    const secrets = (req.body.secrets && typeof req.body.secrets === 'object') ? req.body.secrets : {};
+    const baoConf = require('@simpleworkjs/bao-conf');
+    const path = `secret/data/resources/${resource.slug}/conf`;
 
-    // Validate key names (Standard Env Var format: A-Z, 0-9, underscores)
-    for (const key of Object.keys(secrets)) {
-      if (!SECRET_KEY_REGEX.test(key)) {
-        return res.status(400).json({
-          status: 'error',
-          message: `Invalid secret key '${key}'. Keys must contain only letters, numbers, and underscores (e.g. DB_PASSWORD)`
-        });
+    // Fetch existing secret map from OpenBao so new/edited keys are merged and non-target keys preserved
+    let currentMap = {};
+    try {
+      const getRes = await baoConf.request('GET', path);
+      if (getRes.ok) {
+        const body = await getRes.json().catch(() => ({}));
+        currentMap = (body.data && body.data.data) || {};
+      }
+    } catch (e) {}
+
+    if (req.body.action === 'delete' && req.body.key) {
+      delete currentMap[req.body.key];
+    } else if (req.body.secrets && typeof req.body.secrets === 'object') {
+      for (const [key, val] of Object.entries(req.body.secrets)) {
+        if (!SECRET_KEY_REGEX.test(key)) {
+          return res.status(400).json({
+            status: 'error',
+            message: `Invalid secret key '${key}'. Keys must contain only letters, numbers, and underscores (e.g. DB_PASSWORD)`
+          });
+        }
+        currentMap[key] = val;
       }
     }
 
-    const baoConf = require('@simpleworkjs/bao-conf');
-    const path = `secret/data/resources/${resource.slug}/conf`;
-    const r = await baoConf.request('POST', path, { data: secrets });
+    const r = await baoConf.request('POST', path, { data: currentMap });
     if (!r.ok) {
       return res.status(500).json({ status: 'error', message: 'failed to save secrets to OpenBao' });
     }
-    res.json({ status: 'ok' });
+    res.json({ status: 'ok', keys: Object.keys(currentMap) });
   } catch (err) { next(err); }
 });
 
@@ -734,6 +763,39 @@ router.post('/resources/:id/grants', async (req, res, next) => {
       await SharedSecretGrant.grant({ secretId: secret.id, granteeType: 'resource', granteeId: resource.id, grantedBy: req.user.uid });
       return res.json({ status: 'ok', message: 'grant created' });
     }
+  } catch (err) { next(err); }
+});
+
+// ── Subtype Drivers Operations API ───────────────────────────────────────────
+const DriverRegistry = require('../services/driver_registry');
+
+router.get('/resources/:id/driver-metrics', async (req, res, next) => {
+  try {
+    const resource = await Resource.get(req.params.id);
+    if (!resource) return res.status(404).json({ status: 'error', message: 'resource not found' });
+    const metrics = await DriverRegistry.getMetrics(resource);
+    res.json({ status: 'ok', resourceId: resource.id, metrics });
+  } catch (err) { next(err); }
+});
+
+router.post('/resources/:id/driver-action', async (req, res, next) => {
+  try {
+    const resource = await Resource.get(req.params.id);
+    if (!resource) return res.status(404).json({ status: 'error', message: 'resource not found' });
+    const { action, params } = req.body || {};
+    if (!action) return res.status(400).json({ status: 'error', message: 'action is required' });
+    const result = await DriverRegistry.execAction(resource, action, params || {});
+    res.json({ status: 'ok', resourceId: resource.id, result });
+  } catch (err) { next(err); }
+});
+
+router.get('/resources/:id/driver-logs', async (req, res, next) => {
+  try {
+    const resource = await Resource.get(req.params.id);
+    if (!resource) return res.status(404).json({ status: 'error', message: 'resource not found' });
+    const lines = parseInt(req.query.lines, 10) || 100;
+    const logs = await DriverRegistry.getLogs(resource, lines);
+    res.json({ status: 'ok', resourceId: resource.id, logs });
   } catch (err) { next(err); }
 });
 

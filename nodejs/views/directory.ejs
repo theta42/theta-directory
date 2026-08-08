@@ -581,7 +581,7 @@
       </div>
 
       <!-- Inherit Parent Secret Card -->
-      <div class="card bg-light border-0 shadow-sm p-3" id="inherit-secret-card" style="display:none">
+      <div class="card bg-light border-0 shadow-sm p-3" id="inherit-secret-card">
         <h6 class="card-title text-dark mb-2"><i class="fa-solid fa-diagram-project text-info me-1"></i> Inherit Secret from Parent Resource</h6>
         <div class="row g-2 align-items-center">
           <div class="col-md-4">
@@ -593,7 +593,7 @@
             <select class="form-select form-select-sm" id="inherit-parent-select"></select>
           </div>
           <div class="col-md-3 pt-3">
-            <button class="btn btn-sm btn-outline-info w-100" onclick="inheritParentSecret()"><i class="fa-solid fa-link me-1"></i> Inherit Secret</button>
+            <button class="btn btn-sm btn-outline-info w-100" id="btn-inherit-secret" onclick="inheritParentSecret()"><i class="fa-solid fa-link me-1"></i> Inherit Secret</button>
           </div>
         </div>
       </div>
@@ -613,7 +613,7 @@
         {id: 'groups', label: 'Associated LDAP Groups', bodyHtml: groupsTabHtml},
         {id: 'children', label: 'Children', bodyHtml: childrenTabHtml},
         {id: 'secrets', label: 'Secrets & OpenBao', bodyHtml: secretsTabHtml},
-        {id: 'metrics', label: 'Metrics', bodyHtml: metricsTabHtml(resourcesById[id] && resourcesById[id].agent)},
+        {id: 'agent', label: 'Agent', bodyHtml: agentTabHtml(resourcesById[id] && resourcesById[id].agent)},
       ],
       footer: {
         metaHtml: id ? app.modal.formatAudit(resourcesById[id], {formatDate: function(ms){ return moment(ms).format('YYYY-MM-DD HH:mm'); }}) : '',
@@ -647,10 +647,7 @@
   var allGroups = [];
   var allEdges = [];
   var rawResources = [];
-  // resourceId -> { groups: [{cn, accessLevel, exists, memberCount}], memberCount }
   var accessSummary = {};
-  // When set, the resource modal's Save promotes this discovered slug (review
-  // the pre-filled form, then confirm) instead of a normal resource save.
   var promoteSlug = null;
 
   $(document).ready(async function() {
@@ -662,16 +659,9 @@
     }
   });
   
-  // Connected theta-agent join: hostname->agent and token->agent (case-insensitive
-  // hostname). Populated by loadResources/refreshAgents; host rows + the Metrics
-  // tab read from these. Agent data comes from /api/agent/nodes (admin-gated).
   var agentsByHost = {};
   var agentsByResource = {};
   var agentsById = {};
-  // True when the agent/nodes endpoint itself was unreachable (network, or an
-  // older app without the agent route). When set we cannot tell "this host has
-  // no agent" apart from "the agent service is down", so we must NOT paint every
-  // host red as if it lacked an agent.
   var agentsUnavailable = false;
 
   async function loadResources() {
@@ -680,12 +670,7 @@
         app.api.get('directory-admin/resources'),
         app.api.get('directory-admin/groups'),
         app.api.get('directory-admin/edges'),
-        // Access counts are a nicety, not load-bearing: if the LDAP join fails
-        // the table still renders, just without the Access column populated.
         app.api.get('directory-admin/access-summary').catch(function(){ return {results: {}}; }),
-        // Agents are a nicety too: never block the directory on them. Track
-        // whether the endpoint itself is reachable so host rows can tell "no
-        // agent on this host" from "agent service is down" (see attachAgentStatus).
         app.api.get('agent/nodes')
           .then(function(res){ agentsUnavailable = false; return res; })
           .catch(function(){ agentsUnavailable = true; return {agents: []}; })
@@ -706,7 +691,6 @@
 
       rawResources = [];
       for (const r of resResources.results) {
-        // Compute hostName from edges
         r.hostName = '—';
         r.parentId = null;
         const parentEdge = allEdges.find(e => e.childId === r.id);
@@ -720,27 +704,17 @@
       
       renderTable();
 
-      // Type-ahead for the "what can this user reach" lookup. Non-blocking: the
-      // input accepts a free-typed uid whether or not the list ever arrives.
       loadDirectoryUsers().then(function(users) {
         $('#access-uid-list').html(users.map(function(u) {
           return '<option value="' + u.uid + '">' + (u.cn || u.uid) + '</option>';
         }).join(''));
-      }).catch(function(){ /* datalist is a convenience only */ });
+      }).catch(function(){});
     } catch (err) {
       console.error(err);
       app.messages.toast('Failed to load data', 'danger');
     }
   }
 
-  // Index agents from /api/agent/nodes. `agentsByResource` is the real link --
-  // an agent row now carries the id of the host it was enrolled against, so a
-  // resource's agent is a lookup, not a guess.
-  //
-  // agentsByHost survives only as a fallback for agents enrolled without a
-  // resource binding. It used to be the ONLY mechanism, which meant a host
-  // whose directory name differed from its OS hostname silently showed "no
-  // agent", and two hosts sharing a hostname aliased onto each other.
   function indexAgents(agents) {
     agentsByHost = {};
     agentsByResource = {};
@@ -756,31 +730,20 @@
   function esc(s) { return s == null ? '' : app.util.escapeHtml(String(s)); }
   function timeAgo(iso) { if (!iso) return ''; var m = moment(iso); return m.isValid() ? m.fromNow() : ''; }
 
-  // Green (online, healthy) / Yellow (online, high load) / Red (not connected
-  // or offline). Attaches n.isHost + a colored dot + tooltip for host rows, and
-  // stores the agent on resourcesById so the Metrics tab can find it.
   function attachAgentStatus(n) {
     n.isHost = true;
-    // Bound agent first; hostname match only for agents with no binding yet.
     const name = (n.name || '').toLowerCase();
     const slug = (n.slug || '').replace(/^host_/, '').toLowerCase();
     const a = agentsByResource[n.id] || agentsByHost[name] || (slug && agentsByHost[slug]);
     n.agent = a || null;
     if (resourcesById[n.id]) resourcesById[n.id].agent = a || null;
     if (!a) {
-      // Endpoint unreachable: we genuinely don't know -- neutral grey, not a
-      // false red alarm across every host.
       if (agentsUnavailable) { n.agentColor = '#adb5bd'; n.agentStatusTitle = 'Agent service unreachable'; return; }
-      // No agent enrolled at all is a neutral fact about most hosts, not a
-      // fault -- red here made a directory of ordinary hosts look like an
-      // outage. Red is reserved for "enrolled, and not connected".
       n.agentColor = '#adb5bd'; n.agentStatusTitle = 'No theta-agent enrolled'; return;
     }
     if (a.revoked) { n.agentColor = '#6c757d'; n.agentStatusTitle = 'Agent enrollment revoked'; return; }
     if (!a.isOnline) {
-      // Now distinguishable from "never existed", because the enrollment row
-      // outlives the connection.
-      const seen = a.last_seen ? ' — last seen ' + timeAgo(new Date(a.last_seen * 1000).toISOString()) : '';
+      const seen = (a.lastSeen || a.last_seen) ? ' — last seen ' + timeAgo(a.lastSeen || new Date(a.last_seen * 1000).toISOString()) : '';
       n.agentColor = '#dc3545'; n.agentStatusTitle = 'Agent enrolled but offline' + seen; return;
     }
     const t = a.lastTelemetry || {};
@@ -789,29 +752,154 @@
     n.agentStatusTitle = high ? 'Connected — high load' : 'Connected — healthy';
   }
 
-  // Metrics tab body for the resource modal (snapshot of the joined agent).
-  function metricsTabHtml(agent) {
+  // Agent tab body for the resource modal.
+  function agentTabHtml(agent) {
     if (!agent) {
-      return '<div class="p-3 text-center text-muted"><i class="fa-solid fa-microchip fa-3x mb-3"></i><h6>No theta-agent connected</h6><p class="small">Install the agent on this host to see live metrics.</p></div>';
+      return '<div class="p-3 text-center text-muted"><i class="fa-solid fa-microchip fa-3x mb-3"></i><h6>No theta-agent connected</h6><p class="small">Install the agent on this host to see live telemetry and issue control commands.</p></div>';
     }
     const d = agent.lastDiscovery || {};
     const t = agent.lastTelemetry || {};
+    const fmtNum = (n) => (n == null || isNaN(n)) ? '0.00' : Number(n).toFixed(2);
+    const fmtSize = (bytes) => {
+      if (!bytes || bytes <= 0) return '0.00 B';
+      const gib = bytes / (1024 * 1024 * 1024);
+      if (gib >= 1) return fmtNum(gib) + ' GiB';
+      const mib = bytes / (1024 * 1024);
+      return fmtNum(mib) + ' MiB';
+    };
+
     const bar = (val) => `<div class="progress" style="height:8px"><div class="progress-bar" style="width:${Math.max(0, Math.min(100, val || 0))}%"></div></div>`;
     const online = agent.isOnline ? '<span class="badge bg-success">Online</span>' : '<span class="badge bg-secondary">Offline</span>';
-    const gpu = (t.gpu_usage_percent != null && t.gpu_usage_percent >= 0) ? t.gpu_usage_percent + '%' : 'N/A';
+    const gpu = (t.gpu_usage_percent != null && t.gpu_usage_percent >= 0) ? fmtNum(t.gpu_usage_percent) + '%' : 'N/A';
+    const lastSeenIso = agent.lastSeen || (agent.last_seen ? new Date(agent.last_seen * 1000).toISOString() : '');
+    const lastSeenStr = timeAgo(lastSeenIso) || 'never';
+
+    // RAM details
+    const ram = t.ram_details || d.ram_details || {};
+    const totalRamBytes = ram.total_bytes || (d.ram_total_gb ? d.ram_total_gb * 1024 * 1024 * 1024 : 0);
+    const usedRamBytes = ram.used_bytes || (totalRamBytes * (t.ram_usage_percent || 0) / 100);
+    const bufRamBytes = ram.buffers_cache_bytes || 0;
+    const freeRamBytes = ram.free_bytes || Math.max(0, totalRamBytes - usedRamBytes - bufRamBytes);
+
+    const usedRamPct = ram.used_percent != null ? ram.used_percent : (t.ram_usage_percent || 0);
+    const bufRamPct = ram.buffers_cache_percent != null ? ram.buffers_cache_percent : 0;
+    const freeRamPct = ram.free_percent != null ? ram.free_percent : Math.max(0, 100 - usedRamPct - bufRamPct);
+
+    // CPU details
+    const cpuDet = t.cpu_details || d.cpu_details || {};
+    const cpuModel = cpuDet.model || d.cpu || 'Unknown CPU';
+    const cpuCores = cpuDet.cores || 'N/A';
+    const cpuThreads = cpuDet.threads || 'N/A';
+    const cpuSpeed = cpuDet.mhz ? (cpuDet.mhz >= 1000 ? (cpuDet.mhz / 1000).toFixed(2) + ' GHz' : cpuDet.mhz.toFixed(0) + ' MHz') : '';
+
+    // Disks
+    const disks = t.disks || d.disks || [];
+
+    let disksHtml = '';
+    if (disks.length > 0) {
+      disksHtml = `<div class="table-responsive"><table class="table table-sm text-center small mb-0"><thead><tr><th>Mount</th><th>Type</th><th>FS</th><th>Usage</th><th>Total</th></tr></thead><tbody>` +
+        disks.map(dk => `<tr>
+          <td><code>${esc(dk.mountpoint)}</code></td>
+          <td><span class="badge bg-outline-secondary border text-dark">${esc(dk.drivetype || 'Disk')}</span></td>
+          <td><span class="badge bg-light text-dark border">${esc(dk.fstype || 'N/A')}</span></td>
+          <td>${fmtNum(dk.usage_percent)}%</td>
+          <td>${fmtSize(dk.total_bytes)}</td>
+        </tr>`).join('') + `</tbody></table></div>`;
+    } else {
+      disksHtml = `<div class="small">Disk Usage: <strong>${fmtNum(t.disk_usage_percent ?? 0)}%</strong> ${bar(t.disk_usage_percent)}</div>`;
+    }
+
     return `<div class="p-3">
       <div class="mb-3 d-flex justify-content-between align-items-center">
-        <h5 class="mb-0">${esc(agent.hostname || 'unknown')} ${online}</h5>
-        <small class="text-muted">Last seen ${timeAgo(agent.lastSeen)}</small>
+        <h5 class="mb-0">${esc(agent.name || agent.hostname || 'unknown')} ${online}</h5>
+        <small class="text-muted">Last seen ${lastSeenStr}</small>
       </div>
-      <div class="row g-3">
-        <div class="col-6">CPU <strong>${t.cpu_usage_percent ?? 0}%</strong>${bar(t.cpu_usage_percent)}</div>
-        <div class="col-6">RAM <strong>${t.ram_usage_percent ?? 0}%</strong>${bar(t.ram_usage_percent)}</div>
-        <div class="col-6">Disk <strong>${t.disk_usage_percent ?? 0}%</strong>${bar(t.disk_usage_percent)}</div>
+
+      <!-- Memory Card (Matching user screenshot design) -->
+      <div class="card mb-3 shadow-sm border">
+        <div class="card-header bg-light py-2">
+          <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-memory me-1"></i> Memory</h6>
+        </div>
+        <div class="card-body p-2">
+          <div class="p-2 mb-1 rounded fw-bold" style="background-color: #d0e1fd; color: #084298;">
+            Total: <span>${fmtSize(totalRamBytes)}</span>
+          </div>
+          <div class="p-2 mb-1 rounded" style="background-color: #f8d7da; color: #842029;">
+            Used: <strong>${fmtSize(usedRamBytes)}</strong> <em>${fmtNum(usedRamPct)}%</em>
+          </div>
+          <div class="p-2 mb-1 rounded" style="background-color: #e2e3e5; color: #41464b;">
+            Buffer+Cache: <strong>${fmtSize(bufRamBytes)}</strong> <em>${fmtNum(bufRamPct)}%</em>
+          </div>
+          <div class="p-2 mb-1 rounded" style="background-color: #d1e7dd; color: #0f5132;">
+            Free: <strong>${fmtSize(freeRamBytes)}</strong> <em>${fmtNum(freeRamPct)}%</em>
+          </div>
+          <div class="progress mt-2" style="height: 14px; border-radius: 6px; overflow: hidden;">
+            <div class="progress-bar bg-danger" role="progressbar" style="width: ${Math.max(0, Math.min(100, usedRamPct))}%"></div>
+            <div class="progress-bar bg-secondary" role="progressbar" style="width: ${Math.max(0, Math.min(100, bufRamPct))}%"></div>
+            <div class="progress-bar bg-success" role="progressbar" style="width: ${Math.max(0, Math.min(100, freeRamPct))}%"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CPU Card -->
+      <div class="card mb-3 shadow-sm border">
+        <div class="card-header bg-light py-2">
+          <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-microchip me-1"></i> CPU</h6>
+        </div>
+        <div class="card-body p-3">
+          <div class="mb-2"><strong>Model:</strong> ${esc(cpuModel)}</div>
+          <div class="mb-2"><strong>Specs:</strong> ${esc(cpuCores)} Cores / ${esc(cpuThreads)} Threads ${cpuSpeed ? '@ ' + esc(cpuSpeed) : ''}</div>
+          <div>Usage: <strong>${fmtNum(t.cpu_usage_percent ?? 0)}%</strong> ${bar(t.cpu_usage_percent)}</div>
+        </div>
+      </div>
+
+      <!-- Disks Card -->
+      <div class="card mb-3 shadow-sm border">
+        <div class="card-header bg-light py-2">
+          <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-hard-drive me-1"></i> Disks & Storage</h6>
+        </div>
+        <div class="card-body p-2">
+          ${disksHtml}
+        </div>
+      </div>
+
+      <div class="row g-3 mb-3">
         <div class="col-6">GPU <strong>${gpu}</strong></div>
         <div class="col-6">ZFS <strong>${esc(t.zfs_health || 'N/A')}</strong></div>
       </div>
-      <hr><h6>Discovery</h6>
+
+      <!-- Host Power Controls -->
+      <div class="card mb-3 border-danger shadow-sm">
+        <div class="card-header bg-danger text-white py-2">
+          <h6 class="mb-0 fw-bold"><i class="fa-solid fa-power-off me-1"></i> Host Power Operations</h6>
+        </div>
+        <div class="card-body p-3 d-flex gap-2">
+          <button class="btn btn-outline-danger btn-sm" onclick="agentReboot('${agent.id}')"><i class="fa-solid fa-arrows-rotate me-1"></i> Reboot Host</button>
+          <button class="btn btn-danger btn-sm" onclick="agentShutdown('${agent.id}')"><i class="fa-solid fa-power-off me-1"></i> Shutdown Host</button>
+        </div>
+      </div>
+
+      <!-- Systemd Service Manager -->
+      <div class="card mb-3 border-primary shadow-sm">
+        <div class="card-header bg-primary text-white py-2">
+          <h6 class="mb-0 fw-bold"><i class="fa-solid fa-gear me-1"></i> Systemd Service Manager</h6>
+        </div>
+        <div class="card-body p-3">
+          <div class="input-group input-group-sm mb-2">
+            <span class="input-group-text">Service Name</span>
+            <input type="text" class="form-control" id="sysd-service-${agent.id}" placeholder="e.g. nginx, sshd, docker" value="sshd">
+            <button class="btn btn-outline-primary" onclick="manageService('${agent.id}', 'status')">Status</button>
+            <button class="btn btn-outline-success" onclick="manageService('${agent.id}', 'start')">Start</button>
+            <button class="btn btn-outline-warning" onclick="manageService('${agent.id}', 'restart')">Restart</button>
+            <button class="btn btn-outline-danger" onclick="manageService('${agent.id}', 'stop')">Stop</button>
+          </div>
+          <div id="sysd-output-${agent.id}" class="d-none mt-2">
+            <pre class="bg-dark text-light p-2 rounded small mb-0" style="max-height: 200px; overflow-y: auto;" id="sysd-text-${agent.id}"></pre>
+          </div>
+        </div>
+      </div>
+
+      <hr><h6>Discovery & Metadata</h6>
       <div class="row small text-muted">
         <div class="col-6">OS: ${esc(d.os || '')}</div>
         <div class="col-6">Kernel: ${esc(d.kernel || '')}</div>
@@ -842,6 +930,44 @@
       ? `<div class="mt-1 text-muted">Service control: ${esc(sc.join(', '))}</div>`
       : '';
     return bools.map(([n, on]) => badge(n, !!on)).join('') + scLine;
+  }
+
+  async function agentReboot(agentId) {
+    const ok = await app.messages.confirm('Are you sure you want to REBOOT this host?');
+    if (!ok) return;
+    app.api.post(`agent/nodes/${agentId}/command`, { command: 'reboot', isHighRisk: true }, function(err, res) {
+      if (err) return app.messages.toast('Reboot failed: ' + (err.message || err), 'danger');
+      app.messages.toast('Reboot command sent to host', 'success');
+    });
+  }
+
+  async function agentShutdown(agentId) {
+    const ok = await app.messages.confirm('Are you sure you want to SHUTDOWN this host?');
+    if (!ok) return;
+    app.api.post(`agent/nodes/${agentId}/command`, { command: 'shutdown', isHighRisk: true }, function(err, res) {
+      if (err) return app.messages.toast('Shutdown failed: ' + (err.message || err), 'danger');
+      app.messages.toast('Shutdown command sent to host', 'success');
+    });
+  }
+
+  function manageService(agentId, action) {
+    const service = ($(`#sysd-service-${agentId}`).val() || '').trim();
+    if (!service) return app.messages.toast('Service name required', 'warning');
+    const outBox = $(`#sysd-output-${agentId}`);
+    const outText = $(`#sysd-text-${agentId}`);
+    outBox.removeClass('d-none');
+    outText.text(`Executing systemctl ${action} ${service}...`);
+    app.api.post(`agent/nodes/${agentId}/command`, {
+      command: 'systemd_action',
+      payload: { action, service },
+      isHighRisk: action !== 'status'
+    }, function(err, res) {
+      if (err) {
+        outText.text('Error: ' + (err.message || JSON.stringify(err)));
+        return;
+      }
+      outText.text(`Command '${action}' sent for service '${service}'. Check output or logs.`);
+    });
   }
 
   // Re-fetch agents (every 30s + on socket events) so status dots stay live.
@@ -1532,18 +1658,23 @@
   function populateParentSecretsDropdown() {
     const $card = $('#inherit-secret-card');
     const $select = $('#inherit-parent-select').empty();
+    const $btn = $('#btn-inherit-secret');
+
+    $card.show();
 
     if (!currentParentSecretsList || currentParentSecretsList.length === 0) {
-      $card.hide();
+      $select.append('<option value="">(No parent/ancestor secrets available in OpenBao)</option>');
+      $btn.prop('disabled', true);
       return;
     }
 
+    $btn.prop('disabled', false);
+    $select.append('<option value="">-- Select Parent Resource Secret --</option>');
     currentParentSecretsList.forEach(p => {
       const valStr = `INHERIT:${p.parentSlug}:${p.key}`;
       const labelStr = `${p.parentName || p.parentSlug} → ${p.key}`;
       $select.append(`<option value="${esc(valStr)}">${esc(labelStr)}</option>`);
     });
-    $card.show();
   }
 
   function renderSecretsTable() {
@@ -1596,6 +1727,7 @@
     const keyEl = $('#new-secret-key')[0];
     const key = $('#new-secret-key').val().trim();
     const val = $('#new-secret-val').val();
+    const resourceId = $('#res-id').val();
 
     if (!key) {
       app.messages.action('Please enter a secret key name (e.g. DB_PASSWORD).', $('#secrets-tab-container'), 'warning');
@@ -1605,17 +1737,25 @@
       app.messages.action('Invalid secret key format. Only uppercase/lowercase letters, numbers, and underscores are allowed (e.g. DB_PASSWORD).', $('#secrets-tab-container'), 'danger');
       return;
     }
+    if (!resourceId) return;
 
-    rawResourceSecretsMap[key] = val || '';
-    $('#new-secret-key').val('');
-    $('#new-secret-val').val('');
-    $('#gen-secret-notice').hide();
-    await saveResourceSecretsMap();
+    try {
+      app.messages.action('Saving secret to OpenBao...', $('#secrets-tab-container'), 'info');
+      await app.api.post(`directory-admin/resources/${resourceId}/secrets`, { secrets: { [key]: val || '' } });
+      app.messages.action(`Secret '${key}' saved to OpenBao successfully!`, $('#secrets-tab-container'), 'success');
+      $('#new-secret-key').val('');
+      $('#new-secret-val').val('');
+      $('#gen-secret-notice').hide();
+      loadResourceSecrets(resourceId);
+    } catch (err) {
+      app.messages.action(err.message || 'Failed to save secret to OpenBao', $('#secrets-tab-container'), 'danger');
+    }
   }
 
   async function inheritParentSecret() {
     const childKey = $('#inherit-child-key').val().trim();
     const inheritVal = $('#inherit-parent-select').val();
+    const resourceId = $('#res-id').val();
 
     if (!childKey) {
       app.messages.action('Please enter a child secret key name (e.g. DB_HOST).', $('#secrets-tab-container'), 'warning');
@@ -1629,30 +1769,32 @@
       app.messages.action('Select a parent secret to inherit from.', $('#secrets-tab-container'), 'warning');
       return;
     }
+    if (!resourceId) return;
 
-    rawResourceSecretsMap[childKey] = inheritVal;
-    $('#inherit-child-key').val('');
-    await saveResourceSecretsMap();
+    try {
+      app.messages.action('Saving inherited secret to OpenBao...', $('#secrets-tab-container'), 'info');
+      await app.api.post(`directory-admin/resources/${resourceId}/secrets`, { secrets: { [childKey]: inheritVal } });
+      app.messages.action(`Inherited secret '${childKey}' saved successfully!`, $('#secrets-tab-container'), 'success');
+      $('#inherit-child-key').val('');
+      loadResourceSecrets(resourceId);
+    } catch (err) {
+      app.messages.action(err.message || 'Failed to save inherited secret', $('#secrets-tab-container'), 'danger');
+    }
   }
 
   async function deleteSecretKey(key) {
     const confirmed = await app.messages.confirm(`Delete secret '${key}' from OpenBao?`, $('#secrets-tab-container'), 'danger');
     if (!confirmed) return;
-    delete rawResourceSecretsMap[key];
-    await saveResourceSecretsMap();
-  }
-
-  async function saveResourceSecretsMap() {
     const resourceId = $('#res-id').val();
     if (!resourceId) return;
 
     try {
-      app.messages.action('Saving secrets to OpenBao...', $('#secrets-tab-container'), 'info');
-      await app.api.post(`directory-admin/resources/${resourceId}/secrets`, { secrets: rawResourceSecretsMap });
-      app.messages.action('Secret saved to OpenBao successfully!', $('#secrets-tab-container'), 'success');
+      app.messages.action(`Deleting secret '${key}' from OpenBao...`, $('#secrets-tab-container'), 'info');
+      await app.api.post(`directory-admin/resources/${resourceId}/secrets`, { action: 'delete', key });
+      app.messages.action(`Secret '${key}' deleted successfully from OpenBao.`, $('#secrets-tab-container'), 'success');
       loadResourceSecrets(resourceId);
     } catch (err) {
-      app.messages.action(err.message || 'Failed to save secrets to OpenBao', $('#secrets-tab-container'), 'danger');
+      app.messages.action(err.message || 'Failed to delete secret from OpenBao', $('#secrets-tab-container'), 'danger');
     }
   }
 
@@ -2644,15 +2786,35 @@
     values = values || {};
     var html = '';
     schema.forEach(function(f) {
-      var inputType = f.type === 'password' ? 'password' : (f.type === 'url' ? 'url' : 'text');
-      var req = (f.required && !f.secret) ? ' required' : '';
-      var ph = f.placeholder ? (' placeholder="' + esc(f.placeholder) + '"') : '';
-      var val = '';
-      if (!f.secret && values[f.key] != null) val = ' value="' + esc(values[f.key]) + '"';
-      if (f.secret && values.__isEdit) ph = ' placeholder="unchanged — type a new value to replace"';
       var label = f.label + (f.secret ? ' <span class="text-warning" title="stored in OpenBao"><i class="fa-solid fa-key"></i></span>' : '') + (f.required ? ' <span class="text-danger">*</span>' : '');
-      html += '<div class="mb-3"><label class="form-label">' + label + '</label>' +
-        '<input type="' + inputType + '" class="form-control" id="' + prefix + f.key + '"' + req + ph + val + '></div>';
+      if (f.type === 'boolean' || f.type === 'checkbox' || f.key === 'autoPromote') {
+        var isChecked = values[f.key] === true || values[f.key] === 'true' || values[f.key] === 1 || values[f.key] === '1' || (values[f.key] === undefined && f.default !== false);
+        html += '<div class="mb-3 form-check">' +
+          '<input type="checkbox" class="form-check-input" id="' + prefix + f.key + '"' + (isChecked ? ' checked' : '') + '>' +
+          '<label class="form-check-label fw-bold" for="' + prefix + f.key + '">' + label + '</label>' +
+        '</div>';
+      } else if (f.type === 'site_select' || f.key === 'location') {
+        var selectedVal = String(values[f.key] != null ? values[f.key] : (f.default || '')).trim();
+        var sites = rawResources.filter(r => r.kind === 'site');
+        var siteOpts = '<option value="">(Default Site)</option>';
+        sites.forEach(function(s) {
+          var sel = (s.name === selectedVal || s.slug === selectedVal || (!selectedVal && s.slug === 'site-default')) ? ' selected' : '';
+          siteOpts += '<option value="' + esc(s.name) + '"' + sel + '>' + esc(s.name) + ' (' + esc(s.slug) + ')</option>';
+        });
+        html += '<div class="mb-3">' +
+          '<label class="form-label fw-bold">' + label + '</label>' +
+          '<select class="form-select" id="' + prefix + f.key + '">' + siteOpts + '</select>' +
+        '</div>';
+      } else {
+        var inputType = f.type === 'password' ? 'password' : (f.type === 'url' ? 'url' : 'text');
+        var req = (f.required && !f.secret) ? ' required' : '';
+        var ph = f.placeholder ? (' placeholder="' + esc(f.placeholder) + '"') : '';
+        var val = '';
+        if (!f.secret && values[f.key] != null) val = ' value="' + esc(values[f.key]) + '"';
+        if (f.secret && values.__isEdit) ph = ' placeholder="unchanged — type a new value to replace"';
+        html += '<div class="mb-3"><label class="form-label fw-bold">' + label + '</label>' +
+          '<input type="' + inputType + '" class="form-control" id="' + prefix + f.key + '"' + req + ph + val + '></div>';
+      }
     });
     return html;
   }
@@ -2661,7 +2823,16 @@
     var schema = t && t.configSchema;
     var out = {};
     if (!schema) return out;
-    schema.forEach(function(f) { var el = document.getElementById(prefix + f.key); if (el) out[f.key] = el.value; });
+    schema.forEach(function(f) {
+      var el = document.getElementById(prefix + f.key);
+      if (el) {
+        if (f.type === 'boolean' || f.type === 'checkbox' || el.type === 'checkbox') {
+          out[f.key] = el.checked;
+        } else {
+          out[f.key] = el.value;
+        }
+      }
+    });
     return out;
   }
   function dpRenderFields() {

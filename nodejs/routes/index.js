@@ -88,19 +88,7 @@ router.get('/plugins', function(req, res, next) {
 });
 
 router.get('/vault', function(req, res) {
-  // Personal per-user secrets (secret/users/<uid>/*) for everyone; admins get
-  // free-form access across all of secret/ plus an Apps tab to mint scoped
-  // tokens for external apps. The view renders the shell for any logged-in
-  // user; the client gates login via app.auth.forceLogin() and derives the
-  // admin/namespace scope from /api/user/me. The /api/vault proxy enforces the
-  // same scoping server-side (scopeGuard + the token's own OpenBao policy), so
-  // the client-derived scope is only cosmetic. vaultAddr is the only
-  // server-rendered value (it's a non-user-specific env var); uid + isAdmin
-  // are resolved client-side to avoid the header-vs-navigation auth mismatch.
-  res.render('vault', {
-    ...values,
-    vaultAddr: process.env.VAULT_ADDR || 'http://openbao:8200',
-  });
+  res.redirect('/conf');
 });
 
 // Linkable deep-link to a single resource's modal, e.g. from the resource

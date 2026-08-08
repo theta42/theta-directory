@@ -99,6 +99,7 @@ class Agent extends Model {
 		delete data.tokenHash;
 		return {
 			...data,
+			lastSeen: data.last_seen ? new Date(data.last_seen * 1000).toISOString() : null,
 			connected: !!(liveState && liveState.connected),
 			// "Online" is a live-connection fact, not a stored one. A row with a
 			// last_seen from an hour ago is an installed agent that is down.
