@@ -60,13 +60,15 @@ describe('Agent ops — POST /api/v1/agent/secrets', () => {
 		expect(res.status).toBe(401);
 	});
 
-	test('missing paths returns 400', async () => {
+	test('missing paths defaults to agent node & resource secrets', async () => {
 		const { token } = await enrollAgent();
 		const res = await request(app)
 			.post('/api/v1/agent/secrets')
 			.set('Authorization', `Bearer ${token}`)
 			.send({});
 
-		expect(res.status).toBe(400);
+		expect(res.status).toBe(200);
+		expect(res.body.status).toBe('ok');
+		expect(res.body.secrets).toBeDefined();
 	});
 });
