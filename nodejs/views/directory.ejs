@@ -48,6 +48,10 @@
                             <button type="button" class="btn btn-outline-secondary" onclick="expandAllTree()" title="Expand all"><i class="fa-solid fa-angles-down"></i></button>
                             <button type="button" class="btn btn-outline-secondary" onclick="collapseAllTree()" title="Collapse all"><i class="fa-solid fa-angles-up"></i></button>
                         </div>
+                        <div class="form-check form-switch form-check-inline ms-1 me-1">
+                            <input class="form-check-input" type="checkbox" id="toggle-plumbing" onchange="renderTable()">
+                            <label class="form-check-label small text-muted" for="toggle-plumbing" title="Show containers, oauth clients, and sidecars">Plumbing</label>
+                        </div>
                         <input type="text" id="search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search..." onkeyup="renderTable()" style="width: 200px;">
                         <select id="sort-by" class="form-select form-select-sm shadow-sm" onchange="renderTable()" style="width: 150px;">
                           <option value="name">Name (A-Z)</option>
@@ -90,12 +94,12 @@
                   {{{indentHtml}}}
                   {{{caretHtml}}}
                   {{#isHost}}<span class="d-inline-block rounded-circle me-1" style="width:10px;height:10px;background:{{agentColor}};" title="{{agentStatusTitle}}"></span>{{/isHost}}
-                  <span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
-                  {{#metadata.isProduction}}<span class="badge bg-danger">Prod</span>{{/metadata.isProduction}}
-                  {{^metadata.isProduction}}<span class="badge bg-info">Dev</span>{{/metadata.isProduction}}
-                  <a href="#" class="text-reset text-decoration-none ms-2" onclick="openEditModal('{{id}}'); return false;" title="View details">
+                  <a href="#" class="text-reset text-decoration-none me-2" onclick="openEditModal('{{id}}'); return false;" title="View details">
                     <strong>{{name}}</strong>
                   </a>
+                  <span class="badge bg-secondary me-1">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
+                  {{#metadata.isProduction}}<span class="badge bg-danger me-1">Prod</span>{{/metadata.isProduction}}
+                  {{^metadata.isProduction}}<span class="badge bg-info me-1">Dev</span>{{/metadata.isProduction}}
                 </td>
                 <td>
                   {{#metadata.ip}}<div><small>IP:</small> {{metadata.ip}}</div>{{/metadata.ip}}
@@ -507,6 +511,95 @@
     </div>
   `;
 
+  var secretsTabHtml = `
+    <div class="mb-3" id="secrets-tab-container">
+      <div class="d-flex justify-content-between align-items-center mb-3">
+        <div>
+          <h6 class="mb-0"><i class="fa-solid fa-vault text-warning me-2"></i>Resource Secrets (OpenBao KV Engine)</h6>
+          <small class="text-muted">Encrypted key-value secrets stored in OpenBao under <code>secret/data/resources/&lt;slug&gt;/conf</code></small>
+        </div>
+        <button class="btn btn-sm btn-outline-primary" onclick="refreshResourceSecrets()"><i class="fa-solid fa-sync me-1"></i> Refresh</button>
+      </div>
+
+      <div class="secrets-action-msg mb-2" style="display:none"></div>
+
+      <div class="table-responsive shadow-sm rounded border mb-3">
+        <table class="table table-hover align-middle mb-0" id="secrets-table">
+          <thead class="table-dark">
+            <tr>
+              <th style="width: 35%;">Secret Key</th>
+              <th>Status / Security</th>
+              <th style="width: 240px;" class="text-end">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="secrets-table-body">
+            <tr><td colspan="3" class="text-center text-muted py-3">Loading secrets...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Add / Generate Secret Card -->
+      <div class="card bg-light border-0 shadow-sm p-3 mb-3">
+        <h6 class="card-title text-dark mb-2"><i class="fa-solid fa-plus-circle text-primary me-1"></i> Add or Generate Secret Key</h6>
+        <div class="row g-2 align-items-center mb-2">
+          <div class="col-md-5">
+            <label class="form-label small text-muted mb-1">Secret Key Name (e.g. <code>DB_PASSWORD</code>)</label>
+            <input type="text" class="form-control form-control-sm font-monospace" id="new-secret-key" placeholder="DB_PASSWORD" onkeyup="validateSecretKeyInput(this)">
+            <div class="invalid-feedback small">Only letters, numbers, and underscores allowed (e.g. DB_PASSWORD).</div>
+          </div>
+          <div class="col-md-4">
+            <label class="form-label small text-muted mb-1">Secret Value</label>
+            <input type="text" class="form-control form-control-sm font-monospace" id="new-secret-val" placeholder="Enter value or click Generate">
+          </div>
+          <div class="col-md-3 pt-3">
+            <button class="btn btn-sm btn-primary w-100" id="btn-add-secret" onclick="addSecretRow()"><i class="fa-solid fa-save me-1"></i> Save Secret</button>
+          </div>
+        </div>
+
+        <div class="row g-2 align-items-center mt-1">
+          <div class="col-md-4">
+            <label class="form-label small text-muted mb-1">Generator Length</label>
+            <select class="form-select form-select-sm" id="gen-secret-length">
+              <option value="8">8 characters</option>
+              <option value="12">12 characters</option>
+              <option value="16">16 characters</option>
+              <option value="24">24 characters</option>
+              <option value="32" selected>32 characters (Default)</option>
+              <option value="48">48 characters</option>
+              <option value="64">64 characters</option>
+              <option value="128">128 characters</option>
+            </select>
+          </div>
+          <div class="col-md-8 text-end pt-3">
+            <button class="btn btn-sm btn-outline-success" onclick="generateSecretValue()"><i class="fa-solid fa-bolt me-1"></i> Generate Secret into Field</button>
+          </div>
+        </div>
+
+        <div class="alert alert-warning border-0 shadow-sm p-2 small mt-2 mb-0" id="gen-secret-notice" style="display:none">
+          <i class="fa-solid fa-shield-halved text-warning me-1"></i> Generated secret is shown in the field above. Click <strong>Save Secret</strong> to store in OpenBao — secret values will not be displayed again once saved.
+        </div>
+      </div>
+
+      <!-- Inherit Parent Secret Card -->
+      <div class="card bg-light border-0 shadow-sm p-3" id="inherit-secret-card" style="display:none">
+        <h6 class="card-title text-dark mb-2"><i class="fa-solid fa-diagram-project text-info me-1"></i> Inherit Secret from Parent Resource</h6>
+        <div class="row g-2 align-items-center">
+          <div class="col-md-4">
+            <label class="form-label small text-muted mb-1">Child Secret Key Name</label>
+            <input type="text" class="form-control form-control-sm font-monospace" id="inherit-child-key" placeholder="DB_HOST">
+          </div>
+          <div class="col-md-5">
+            <label class="form-label small text-muted mb-1">Parent Resource Secret</label>
+            <select class="form-select form-select-sm" id="inherit-parent-select"></select>
+          </div>
+          <div class="col-md-3 pt-3">
+            <button class="btn btn-sm btn-outline-info w-100" onclick="inheritParentSecret()"><i class="fa-solid fa-link me-1"></i> Inherit Secret</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
   // Shared by openAddModal/openEditModal: builds the tabbed/footer/(optionally
   // URL-tracked) modal DOM. Callers then populate fields via .val() and hide
   // the Groups/Children tabs in add-mode (no resource id to scope them to).
@@ -519,6 +612,7 @@
         {id: 'details', label: 'Details', bodyHtml: detailsTabHtml},
         {id: 'groups', label: 'Associated LDAP Groups', bodyHtml: groupsTabHtml},
         {id: 'children', label: 'Children', bodyHtml: childrenTabHtml},
+        {id: 'secrets', label: 'Secrets & OpenBao', bodyHtml: secretsTabHtml},
         {id: 'metrics', label: 'Metrics', bodyHtml: metricsTabHtml(resourcesById[id] && resourcesById[id].agent)},
       ],
       footer: {
@@ -527,7 +621,7 @@
       },
       url: id ? {path: '/directory/' + resourcesById[id].slug} : null,
     });
-    $('#sw-modal-tab-groups-btn, #sw-modal-tab-children-btn').closest('li').toggle(!!id);
+    $('#sw-modal-tab-groups-btn, #sw-modal-tab-children-btn, #sw-modal-tab-secrets-btn').closest('li').toggle(!!id);
   }
 
   function refreshChildrenUI(resourceId) {
@@ -724,7 +818,30 @@
         <div class="col-6">IPs: ${esc((d.ip_addresses || []).join(', '))}</div>
         <div class="col-6">Location: ${esc(d.location || '')}</div>
       </div>
+      <hr><h6>Capabilities</h6>
+      <div class="small">${capabilitiesHtml(d.capabilities)}</div>
     </div>`;
+  }
+
+  // Render the agent's enabled capabilities (reported in its discovery frame) as
+  // green/gray badges. service_control is a list, so it renders as its own line.
+  function capabilitiesHtml(caps) {
+    caps = caps || {};
+    const badge = (name, on) => `<span class="badge ${on ? 'bg-success' : 'bg-secondary'} me-1 mb-1">${esc(name)}</span>`;
+    const bools = [
+      ['Telemetry', caps.telemetry],
+      ['LDAP config', caps.configure_ldap],
+      ['LDAP tunnel', caps.ldap_tunnel],
+      ['Secrets', caps.secrets],
+      ['IAM', caps.iam],
+      ['Reboot', caps.reboot],
+      ['Bash', caps.arbitrary_bash],
+    ];
+    const sc = Array.isArray(caps.service_control) ? caps.service_control : [];
+    const scLine = sc.length
+      ? `<div class="mt-1 text-muted">Service control: ${esc(sc.join(', '))}</div>`
+      : '';
+    return bools.map(([n, on]) => badge(n, !!on)).join('') + scLine;
   }
 
   // Re-fetch agents (every 30s + on socket events) so status dots stay live.
@@ -798,8 +915,15 @@
   function renderTable() {
     const filter = $('#search-filter').val().toLowerCase();
     const sort = $('#sort-by').val();
+    const showPlumbing = $('#toggle-plumbing').is(':checked');
 
     let filtered = rawResources.filter(r => {
+      if (!showPlumbing && !filter) {
+        const sub = (r.metadata?.subType || '').toLowerCase();
+        if (r.kind === 'container' || r.kind === 'oauth' || sub === 'sidecar' || sub === 'container' || sub === 'openresty') {
+          return false;
+        }
+      }
       if (!filter) return true;
       return (r.name || '').toLowerCase().includes(filter) ||
              (r.slug || '').toLowerCase().includes(filter) ||
@@ -1354,7 +1478,187 @@
     refreshGroupsUI(r.id);
     refreshEdgesUI(r.id);
     refreshChildrenUI(r.id);
+    loadResourceSecrets(r.id);
     await loadLdapGroups();
+  }
+
+  var currentResourceSecretsList = [];
+  var currentParentSecretsList = [];
+  var rawResourceSecretsMap = {};
+
+  const SECRET_KEY_REGEX = /^[A-Za-z0-9_]+$/;
+
+  function validateSecretKeyInput(el) {
+    const $el = $(el);
+    const val = $el.val().trim();
+    if (val && !SECRET_KEY_REGEX.test(val)) {
+      $el.addClass('is-invalid');
+      return false;
+    } else {
+      $el.removeClass('is-invalid');
+      return true;
+    }
+  }
+
+  function generateRandomString(len) {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+-=[]{}|;:,.<>?';
+    const bytes = new Uint8Array(len);
+    window.crypto.getRandomValues(bytes);
+    let str = '';
+    for (let i = 0; i < len; i++) {
+      str += chars[bytes[i] % chars.length];
+    }
+    return str;
+  }
+
+  async function loadResourceSecrets(id) {
+    const $tbody = $('#secrets-table-body').empty();
+    $tbody.append('<tr><td colspan="3" class="text-center text-muted py-3"><i class="fa-solid fa-spinner fa-spin me-2"></i>Loading secrets from OpenBao...</td></tr>');
+    currentResourceSecretsList = [];
+    currentParentSecretsList = [];
+    rawResourceSecretsMap = {};
+
+    try {
+      const res = await app.api.get(`directory-admin/resources/${id}/secrets`);
+      currentResourceSecretsList = (res && res.secrets) || [];
+      currentParentSecretsList = (res && res.parentSecrets) || [];
+      renderSecretsTable();
+      populateParentSecretsDropdown();
+    } catch (err) {
+      $tbody.empty().append(`<tr><td colspan="3" class="text-center text-danger py-3"><i class="fa-solid fa-triangle-exclamation me-2"></i>Failed to load secrets: ${esc(err.message || 'Unknown error')}</td></tr>`);
+    }
+  }
+
+  function populateParentSecretsDropdown() {
+    const $card = $('#inherit-secret-card');
+    const $select = $('#inherit-parent-select').empty();
+
+    if (!currentParentSecretsList || currentParentSecretsList.length === 0) {
+      $card.hide();
+      return;
+    }
+
+    currentParentSecretsList.forEach(p => {
+      const valStr = `INHERIT:${p.parentSlug}:${p.key}`;
+      const labelStr = `${p.parentName || p.parentSlug} → ${p.key}`;
+      $select.append(`<option value="${esc(valStr)}">${esc(labelStr)}</option>`);
+    });
+    $card.show();
+  }
+
+  function renderSecretsTable() {
+    const $tbody = $('#secrets-table-body').empty();
+
+    if (currentResourceSecretsList.length === 0) {
+      $tbody.append('<tr><td colspan="3" class="text-center text-muted py-3">No secrets configured for this resource yet.</td></tr>');
+      return;
+    }
+
+    currentResourceSecretsList.forEach((s, idx) => {
+      const $row = $(`
+        <tr class="secret-row" data-key="${esc(s.key)}">
+          <td><code class="fw-bold fs-6">${esc(s.key)}</code></td>
+          <td>
+            ${s.isInherited
+              ? `<span class="badge bg-info text-dark shadow-sm"><i class="fa-solid fa-link me-1"></i>Inherited from ${esc(s.parentSlug || 'Parent')}</span> <small class="text-muted ms-1">(${esc(s.parentKey || s.key)})</small>`
+              : `<span class="badge bg-success shadow-sm"><i class="fa-solid fa-lock me-1"></i>Configured in OpenBao</span> <span class="badge bg-secondary ms-1"><i class="fa-solid fa-eye-slash me-1"></i>Secret Value Hidden</span>`
+            }
+          </td>
+          <td class="text-end">
+            <button class="btn btn-sm btn-outline-secondary" onclick="editSecretKey('${esc(s.key)}')" title="Set / Overwrite Value"><i class="fa-solid fa-pen me-1"></i> Edit Value</button>
+            <button class="btn btn-sm btn-outline-danger ms-1" onclick="deleteSecretKey('${esc(s.key)}')" title="Delete Secret"><i class="fa-solid fa-trash"></i></button>
+          </td>
+        </tr>
+      `);
+      $tbody.append($row);
+    });
+  }
+
+  function generateSecretValue() {
+    let key = $('#new-secret-key').val().trim();
+    if (!key) {
+      key = 'SECRET_KEY';
+      $('#new-secret-key').val(key);
+    }
+    const len = parseInt($('#gen-secret-length').val(), 10) || 32;
+    const randomSecret = generateRandomString(len);
+    $('#new-secret-val').val(randomSecret);
+    $('#gen-secret-notice').show();
+  }
+
+  function editSecretKey(key) {
+    $('#new-secret-key').val(key);
+    $('#new-secret-val').val('').focus();
+    $('#gen-secret-notice').hide();
+  }
+
+  async function addSecretRow() {
+    const keyEl = $('#new-secret-key')[0];
+    const key = $('#new-secret-key').val().trim();
+    const val = $('#new-secret-val').val();
+
+    if (!key) {
+      app.messages.action('Please enter a secret key name (e.g. DB_PASSWORD).', $('#secrets-tab-container'), 'warning');
+      return;
+    }
+    if (!validateSecretKeyInput(keyEl)) {
+      app.messages.action('Invalid secret key format. Only uppercase/lowercase letters, numbers, and underscores are allowed (e.g. DB_PASSWORD).', $('#secrets-tab-container'), 'danger');
+      return;
+    }
+
+    rawResourceSecretsMap[key] = val || '';
+    $('#new-secret-key').val('');
+    $('#new-secret-val').val('');
+    $('#gen-secret-notice').hide();
+    await saveResourceSecretsMap();
+  }
+
+  async function inheritParentSecret() {
+    const childKey = $('#inherit-child-key').val().trim();
+    const inheritVal = $('#inherit-parent-select').val();
+
+    if (!childKey) {
+      app.messages.action('Please enter a child secret key name (e.g. DB_HOST).', $('#secrets-tab-container'), 'warning');
+      return;
+    }
+    if (!SECRET_KEY_REGEX.test(childKey)) {
+      app.messages.action('Invalid child key name. Only letters, numbers, and underscores allowed.', $('#secrets-tab-container'), 'danger');
+      return;
+    }
+    if (!inheritVal) {
+      app.messages.action('Select a parent secret to inherit from.', $('#secrets-tab-container'), 'warning');
+      return;
+    }
+
+    rawResourceSecretsMap[childKey] = inheritVal;
+    $('#inherit-child-key').val('');
+    await saveResourceSecretsMap();
+  }
+
+  async function deleteSecretKey(key) {
+    const confirmed = await app.messages.confirm(`Delete secret '${key}' from OpenBao?`, $('#secrets-tab-container'), 'danger');
+    if (!confirmed) return;
+    delete rawResourceSecretsMap[key];
+    await saveResourceSecretsMap();
+  }
+
+  async function saveResourceSecretsMap() {
+    const resourceId = $('#res-id').val();
+    if (!resourceId) return;
+
+    try {
+      app.messages.action('Saving secrets to OpenBao...', $('#secrets-tab-container'), 'info');
+      await app.api.post(`directory-admin/resources/${resourceId}/secrets`, { secrets: rawResourceSecretsMap });
+      app.messages.action('Secret saved to OpenBao successfully!', $('#secrets-tab-container'), 'success');
+      loadResourceSecrets(resourceId);
+    } catch (err) {
+      app.messages.action(err.message || 'Failed to save secrets to OpenBao', $('#secrets-tab-container'), 'danger');
+    }
+  }
+
+  function refreshResourceSecrets() {
+    const resourceId = $('#res-id').val();
+    if (resourceId) loadResourceSecrets(resourceId);
   }
   
   async function saveResource() {
@@ -1782,6 +2086,28 @@
               </div>
             </div>
           </div>
+
+          <div class="card mt-3">
+            <div class="card-header py-2 fw-bold small">
+              <i class="fa-solid fa-list-check me-1"></i> Manage join keys
+            </div>
+            <div class="card-body py-2">
+              <table class="table table-sm table-hover mb-0 small" id="agent-join-key-table">
+                <thead>
+                  <tr>
+                    <th>Label</th>
+                    <th>Prefix</th>
+                    <th>Created</th>
+                    <th>Hosts joined</th>
+                    <th>Status</th>
+                    <th class="text-end">Actions</th>
+                  </tr>
+                </thead>
+                <tbody id="agent-join-key-tbody"></tbody>
+              </table>
+              <div id="agent-join-key-hosts" style="display:none" class="mt-2"></div>
+            </div>
+          </div>
         </div>
 
         <!-- ── Pre-register: bind to a host resource up front ───────────── -->
@@ -1974,12 +2300,15 @@
   // endpoint -- only a prefix -- so the dropdown identifies a key without being
   // able to rebuild an install command from it. Minting is the only way to see
   // a key's value, and only once.
-  var agentJoinKeys = [];
+  var agentJoinKeys = [];        // non-revoked, for the install-command dropdown
+  var agentJoinKeysAll = [];     // every key, for the management table
   var mintedJoinKey = null;   // in-memory, for the command shown right now
 
   function loadAgentJoinKeys() {
     app.api.get('agent/join-keys', function(err, res) {
-      agentJoinKeys = (res && res.joinKeys ? res.joinKeys : []).filter(k => !k.revoked);
+      agentJoinKeysAll = (res && res.joinKeys ? res.joinKeys : []);
+      agentJoinKeys = agentJoinKeysAll.filter(k => !k.revoked);
+
       const $sel = $('#agent-join-key-select').empty();
       if (!agentJoinKeys.length) {
         $sel.append('<option value="">No join keys yet — create one</option>');
@@ -1990,8 +2319,95 @@
           $sel.append($('<option>').val(k.id).text(`${k.label} (${k.keyPrefix}…, ${used})`));
         });
       }
+
+      const $tbody = $('#agent-join-key-tbody').empty();
+      $('#agent-join-key-hosts').hide().empty();
+      if (!agentJoinKeysAll.length) {
+        $tbody.append('<tr><td colspan="6" class="text-muted">No join keys yet.</td></tr>');
+      } else {
+        agentJoinKeysAll.forEach(k => {
+          const created = k.created_on ? new Date(k.created_on * 1000).toLocaleDateString() : '—';
+          const used = k.use_count ? `${k.use_count} host${k.use_count === 1 ? '' : 's'}` : '0 hosts';
+          const status = k.revoked
+            ? '<span class="badge bg-secondary">Revoked</span>'
+            : '<span class="badge bg-success">Active</span>';
+          const revokeBtn = k.revoked ? '' :
+            `<button class="btn btn-outline-warning btn-sm" title="Revoke -- stops it enrolling new hosts; already-joined hosts are unaffected" onclick="confirmAgentJoinKeyAction(this, '${k.id}', 'revoke')"><i class="fa-solid fa-ban"></i></button>`;
+          const $row = $('<tr>').attr('data-join-key-row', k.id).append(
+            $('<td>').text(k.label),
+            $('<td>').append($('<code>').text(k.keyPrefix + '…')),
+            $('<td>').text(created),
+            $('<td>').append($('<a href="#">').text(used).on('click', function(e) { e.preventDefault(); viewAgentJoinKeyHosts(k.id, k.label); })),
+            $('<td>').html(status),
+            $('<td class="text-end agent-join-key-actions">').html(
+              '<div class="btn-group btn-group-sm">' + revokeBtn +
+              `<button class="btn btn-outline-danger btn-sm" title="Delete the key record itself; already-joined hosts keep working" onclick="confirmAgentJoinKeyAction(this, '${k.id}', 'delete')"><i class="fa-solid fa-trash"></i></button>` +
+              '</div>'
+            )
+          );
+          $tbody.append($row);
+        });
+      }
+
       updateAgentCommands();
     });
+  }
+
+  async function viewAgentJoinKeyHosts(id, label) {
+    const $out = $('#agent-join-key-hosts').show().html('<i class="fa-solid fa-spinner fa-spin"></i> Loading…');
+    try {
+      const res = await app.api.get(`agent/join-keys/${id}/agents`);
+      const body = (res && (res.results || res)) || {};
+      const agents = body.agents || [];
+      if (!agents.length) {
+        $out.html(`<div class="alert alert-secondary py-2 small mb-0">No hosts have joined with <strong>${esc(label)}</strong> yet.</div>`);
+        return;
+      }
+      const rows = agents.map(a => {
+        const dot = a.isOnline ? 'text-success' : 'text-muted';
+        const seen = a.last_seen ? new Date(a.last_seen * 1000).toLocaleString() : 'never';
+        return `<tr><td><i class="fa-solid fa-circle ${dot}" style="font-size:8px"></i> ${esc(a.name)}</td><td>${esc(a.enrolled_on ? new Date(a.enrolled_on * 1000).toLocaleDateString() : '—')}</td><td>${esc(seen)}</td></tr>`;
+      }).join('');
+      $out.html(
+        `<div class="small fw-bold mb-1">Hosts joined with ${esc(label)}:</div>` +
+        '<table class="table table-sm mb-0"><thead><tr><th>Host</th><th>Joined</th><th>Last seen</th></tr></thead><tbody>' + rows + '</tbody></table>'
+      );
+    } catch (err) {
+      $out.html('<div class="alert alert-danger py-2 small mb-0">Could not load hosts: ' + esc(err.message || err) + '</div>');
+    }
+  }
+
+  // Inline, row-scoped confirm -- swaps the row's action buttons for
+  // "Revoke/Delete this key? Yes/No" in place. Deliberately not
+  // app.messages.confirm(): that renders into a single shared .actionMessage
+  // banner, so a second click before the first resolves leaves a dangling
+  // `$('body').one('click', ...)` handler from the first call and the banner
+  // can end up out of sync with which row it's actually confirming for.
+  // Scoping state to the row itself sidesteps that entirely.
+  function confirmAgentJoinKeyAction(btn, id, action) {
+    const isDelete = action === 'delete';
+    const label = isDelete ? 'Delete' : 'Revoke';
+    const cls = isDelete ? 'btn-danger' : 'btn-warning';
+    $(btn).closest('td').html(
+      `<span class="small me-1">${label}?</span>` +
+      `<button class="btn ${cls} btn-sm me-1" onclick="reallyDoAgentJoinKeyAction('${id}', '${action}')">Yes</button>` +
+      `<button class="btn btn-outline-secondary btn-sm" onclick="loadAgentJoinKeys()">No</button>`
+    );
+  }
+
+  async function reallyDoAgentJoinKeyAction(id, action) {
+    try {
+      if (action === 'delete') {
+        await app.api.delete(`agent/join-keys/${id}`);
+        app.messages.toast('Join key deleted.', 'success');
+      } else {
+        await app.api.post(`agent/join-keys/${id}/revoke`, {});
+        app.messages.toast('Join key revoked.', 'success');
+      }
+    } catch (err) {
+      app.messages.toast(`Could not ${action}: ` + (err.message || err), 'danger');
+    }
+    loadAgentJoinKeys();
   }
 
   async function mintAgentJoinKey() {

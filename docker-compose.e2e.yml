@@ -1,0 +1,93 @@
+# End-to-end test of the LDAP byte-pump tunnel (DESIGN.md §4).
+#
+# Spins up OpenLDAP + Redis, a real SSO server (bin/www, so the WSS relay is
+# live), and a client that simulates the agent: it enrolls one, connects over
+# WSS, sends a real LDAP bind as raw bytes, and verifies the SSO relays it into
+# OpenLDAP and pipes the response back.
+#
+#   docker compose -f docker-compose.e2e.yml up --build --abort-on-container-exit
+#   # exit code 0 = tunnel works; the client prints E2E PASS.
+
+services:
+  ldap:
+    build:
+      context: .
+      dockerfile: Dockerfile.openldap
+    environment:
+      - LDAP_BASE_DN=dc=test,dc=local
+      - LDAP_ADMIN_PASS=secret
+      - ORG_NAME=Test SSO
+    command: ["sleep", "infinity"]
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost:389 -b '' -s base '(objectClass=*)' >/dev/null 2>&1"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+      start_period: 5s
+    volumes:
+      - ldap-data:/var/lib/ldap
+      - ldap-certs:/etc/openldap/certs
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
+  sso:
+    build:
+      context: .
+      dockerfile: Dockerfile.test-runner
+    command: ["node", "bin/www"]
+    environment:
+      - NODE_ENV=test
+      - NODE_PORT=3001
+      # Test OpenBao (theta-test-bao) — sso-broker token so the SSO can sign
+      # high-risk agent commands and read node-scoped secrets.
+      - VAULT_ADDR=http://theta-test-bao:8200
+      - VAULT_TOKEN=${VAULT_TOKEN:-}
+      - app_ldap__url=ldap://ldap:389
+      - app_ldap__bindDN=cn=admin,dc=test,dc=local
+      - app_ldap__bindPassword=secret
+      - app_ldap__userBase=ou=people,dc=test,dc=local
+      - app_ldap__groupBase=ou=groups,dc=test,dc=local
+      - app_redis__redisConf__url=redis://redis:6379
+      - REDIS_URL=redis://redis:6379
+      - app_oauth__jwtSecret=test-jwt-secret-for-testing-only
+      - app_name=Test SSO
+    depends_on:
+      ldap:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile.test-runner
+    command: ["sh", "-c", "seed-test-user && node test/tunnel_e2e.js"]
+    environment:
+      - NODE_ENV=test
+      - SSO_URL=http://sso:3001
+      - app_ldap__url=ldap://ldap:389
+      - app_ldap__bindDN=cn=admin,dc=test,dc=local
+      - app_ldap__bindPassword=secret
+      - app_ldap__userBase=ou=people,dc=test,dc=local
+      - app_ldap__groupBase=ou=groups,dc=test,dc=local
+      - app_redis__redisConf__url=redis://redis:6379
+      - REDIS_URL=redis://redis:6379
+      - app_oauth__jwtSecret=test-jwt-secret-for-testing-only
+      - app_name=Test SSO
+    depends_on:
+      sso:
+        condition: service_started
+      ldap:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  ldap-data:
+  ldap-certs:

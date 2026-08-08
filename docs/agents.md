@@ -6,7 +6,12 @@ nav_order: 5
 
 # Theta Agent & Endpoint Management
 
-The **Theta Agent** (`theta-agent`) is a unified, 2-way Command & Control (C2) endpoint management daemon written in Go for Linux hosts across your home lab, infrastructure, or data center. It connects outbound via a long-lived WebSocket connection to the central **SSO Manager** (`wss://<sso-host>/api/agent/ws`), enabling real-time host telemetry, automated host discovery, and local-first administrative management.
+The **Theta Agent** (`theta-agent`) is a unified, 2-way Command & Control (C2)
+endpoint management daemon written in Go for Linux hosts across your home lab,
+infrastructure, or data center. It connects outbound via a long-lived WebSocket
+connection to the central **SSO Manager** (`wss://<sso-host>/api/agent/ws`),
+  enabling real-time host telemetry, automated host discovery, and local-first
+  administrative management.
 
 ---
 
@@ -44,9 +49,34 @@ host does not yield a credential that works anywhere else.
 | `POST /api/agent/join-keys` | Mint one — returned **once** |
 | `POST /api/agent/join-keys/:id/revoke` | Stop it enrolling new hosts |
 | `DELETE /api/agent/join-keys/:id` | Remove it |
+| `GET /api/agent/join-keys/:id/agents` | Which hosts enrolled through this key |
 
 Revoking a join key does **not** disconnect hosts that already joined; they hold
 their own tokens by then. Revoke the agent itself to cut a specific host off.
+
+**Reuse.** Yes — a join key is not consumed on use. `AgentJoinKey.authenticate`
+only checks `revoked` and `expires_on`; it never invalidates the key itself.
+Every use increments `use_count` and stamps `last_used_on`, but the key keeps
+working until you revoke or delete it (or it expires) — "one key works for as
+many hosts as you like" above is literal, not a figure of speech.
+
+**UI.** The **Install Agent** modal (Directory → Install Agent → Join key tab)
+has a **Manage join keys** table below the mint/select dropdown: label, prefix,
+created date, hosts joined, status, and **Revoke**/**Delete** actions per key.
+Clicking a key's "N hosts" link expands the list of hosts that joined through
+it (name, online status, joined date, last seen).
+
+**Audit.** Yes, both halves are logged as structured `"component":"agent"`
+lines, and the hosts-joined list in the UI above is queryable directly:
+- Minting: `action: "join_key_issued"` records the acting admin (`actor`),
+  `label`, and `keyPrefix`.
+- Each enrollment through that key: `action: "join"` records `agentId`,
+  `agentName`, `remoteAddr`, `joinKeyLabel`, and `joinKeyPrefix`.
+- `GET /api/agent/join-keys/:id/agents` returns the same "which hosts did key
+  X add" answer the UI shows — it matches on the trace `Agent.enroll` leaves in
+  each agent's `description` ("Self-enrolled with join key `<prefix>`") rather
+  than a stored foreign key, since a join key is exchanged for a per-agent
+  token immediately and from then on the agent's own identity is what matters.
 
 ### Pre-registering a host
 
@@ -167,6 +197,9 @@ To protect hosts against unauthorized control, `theta-agent` enforces a **strict
 | **Service Control** | `service_control` | High | Restarts systemd services listed in an explicit allowlist (e.g., `["nginx", "docker", "sssd"]`). |
 | **Reboot** | `reboot` | High | Triggers an immediate system reboot (`systemctl reboot`). |
 | **Arbitrary Bash** | `arbitrary_bash` | Critical | Executes raw bash scripts sent from the SSO Manager as `root` (used for automated GitOps). |
+| **LDAP Tunnel** | `ldap_tunnel` | Moderate | Serves a local LDAP byte-pump socket (`ldap_socket`, default `/run/theta/ldap.sock`) for SSSD/PAM. The agent never parses LDAP — it forwards raw bytes to the SSO, which relays them into its own OpenLDAP. |
+| **Secrets** | `secrets` | Moderate | Renders OpenBao secrets to local files from templates (see [Secrets Engine](#secrets-engine---rendering-openbao-secrets-to-local-files) below). |
+| **IAM** | `iam` | Critical | Applies SSO-pushed node identity config: sudo rules, SSH `AuthorizedKeysCommand` keys, `/etc/security/access.conf`, and revocation (`sss_cache -E` + session kill). Every push is Ed25519-signed. |
 
 ---
 
@@ -194,6 +227,174 @@ This requires the `sso-broker` OpenBao policy to grant `secret/agent/*`. Re-run
 configured rejects every high-risk command. Earlier versions logged "skipping
 signature verification" and executed them, so an agent installed without a key
 would run `reboot`, `configure_ldap` and `arbitrary_bash` unverified.
+
+---
+
+## Secrets Engine — rendering OpenBao secrets to local files
+
+The agent can render OpenBao secrets to local files that any process on the
+host — a bash script, a systemd unit, a Node app, whatever — reads like an
+ordinary env file. The agent never holds a Vault token: it asks the SSO for the
+values over its existing WSS channel, and the SSO fetches them from OpenBao
+using its own access, scoped so the agent can only ever read its own node's
+secrets.
+
+**Node scope.** Every path an agent can request must start with
+`secret/data/nodes/<this-agent's-id>/`. The SSO enforces this server-side
+(`POST /api/v1/agent/secrets`); a request for any other node's path is
+rejected:
+
+```
+$ curl -sk https://sso.example.com/api/v1/agent/secrets \
+    -H "Authorization: Bearer <agent-token>" -H 'Content-Type: application/json' \
+    -d '{"paths":["secret/data/nodes/some-other-node-id/db"]}'
+{"status":"error","message":"path outside node scope: secret/data/nodes/some-other-node-id/db"}
+```
+
+A compromised agent can therefore never reach another host's secrets, or
+anything outside `secret/data/nodes/*`.
+
+### Walkthrough: a 3rd-party app reads a secret the agent rendered
+
+This walks through the whole path end to end, on a stack freshly brought up
+from theta-suite's own `docs/fixtures.md` demo data — the same steps work on
+any theta-suite install.
+
+**1. Enroll the host.** Directory → Install Agent → mint a join key, run the
+install command on the target host as root.
+
+<a href="images/agent-install-join-key.png" target="_blank"><img src="images/agent-install-join-key.png" alt="Install Theta Agent modal with a freshly minted join key and install command" width="80%"></a>
+
+On first connect the agent exchanges the join key for its own token + the
+SSO's public key and writes both back into `/etc/theta42/agent.yml`. Note the
+agent's id from `GET /api/agent/nodes` (or the Directory URL) — you need it for
+the next step.
+
+**2. Turn on the `secrets` capability and point it at a template.** Add to the
+host's `/etc/theta42/agent.yml`:
+
+```yaml
+secrets:
+  - template: /etc/theta/templates/db.env.tpl
+    target: /etc/theta/rendered/db.env
+    reload: ""          # optional: e.g. "systemctl reload myapp"
+
+capabilities:
+  secrets: true
+```
+
+And the template itself, `/etc/theta/templates/db.env.tpl` — placeholders are
+`{{ bao "secret/data/nodes/<agent-id>/<name>#<key>" }}`:
+
+```
+DB_USER="{{ bao "secret/data/nodes/f9a30ab0-7d8a-4b77-a4c4-6a6383d084db/db#username" }}"
+DB_PASS="{{ bao "secret/data/nodes/f9a30ab0-7d8a-4b77-a4c4-6a6383d084db/db#password" }}"
+```
+
+Restart the agent to pick up the config change.
+
+**3. Seed the secret.** From `theta-suite/` (theta-env), as the operator:
+
+```
+./setup.sh --seed-node-secret f9a30ab0-7d8a-4b77-a4c4-6a6383d084db db \
+  username=demoapp password=CorrectHorseBattery42
+```
+
+This writes to `secret/nodes/<agent-id>/db` in OpenBao (the CLI path — the HTTP
+API the agent uses sees it as `secret/data/nodes/<agent-id>/db`, matched by the
+node-scope check above). It's idempotent: it skips silently if that path is
+already seeded.
+
+**4. Trigger the render.** The Directory UI doesn't have a button for this yet
+— push it the same way any admin command goes out, `POST
+/api/agent/nodes/:id/command`. It's in the high-risk list, so the SSO signs it
+automatically:
+
+```
+curl -X POST https://sso.example.com/api/agent/nodes/f9a30ab0-7d8a-4b77-a4c4-6a6383d084db/command \
+  -H "auth-token: <admin session token>" -H 'Content-Type: application/json' \
+  -d '{"command": "render_secrets", "payload": {}}'
+```
+
+The agent logs `Received command: render_secrets` / `Rendering secret
+templates...` and atomically writes the target file at mode `0600`:
+
+```
+$ cat /etc/theta/rendered/db.env
+DB_USER="demoapp"
+DB_PASS="CorrectHorseBattery42"
+```
+
+Back in the Directory, the host's Metrics tab shows **Secrets** lit up green
+among the reported capabilities:
+
+<a href="images/agent-capabilities-metrics.png" target="_blank"><img src="images/agent-capabilities-metrics.png" alt="Directory Metrics tab showing live telemetry and the agent's reported capability badges, with Telemetry and Secrets lit green" width="80%"></a>
+
+**5. Read it from a bash app on the same host.** The rendered file is just an
+env file — no agent involvement needed to consume it:
+
+```sh
+#!/bin/sh
+. /etc/theta/rendered/db.env
+echo "DB_USER=$DB_USER"
+echo "DB_PASS=$DB_PASS"
+```
+
+**6. Read it from a Node app on the same host:**
+
+```js
+const fs = require('fs');
+const env = fs.readFileSync('/etc/theta/rendered/db.env', 'utf8');
+const db = {};
+for (const line of env.split('\n')) {
+  const m = /^(\w+)="(.*)"$/.exec(line.trim());
+  if (m) db[m[1]] = m[2];
+}
+console.log('DB_USER=' + db.DB_USER);
+console.log('DB_PASS=' + db.DB_PASS);
+```
+
+Both print the same values the template resolved — `demoapp` /
+`CorrectHorseBattery42` in this walkthrough. `theta-agent/demo/` in the
+theta-agent repo has these two scripts ready to run.
+
+### Alternative: calling the API directly
+
+Rendering to a file is the normal path — it works for any app regardless of
+language, and the secret never touches an HTTP client the app itself controls.
+But an app can also fetch its node's secrets directly, bypassing the template
+engine entirely (useful for debugging, or a process that wants to hold the
+value only in memory). This uses the **agent's own bearer token**, not an admin
+token — the same node-scope enforcement applies:
+
+```sh
+curl -sk https://sso.example.com/api/v1/agent/secrets \
+  -H "Authorization: Bearer <agent-token>" -H 'Content-Type: application/json' \
+  -d '{"paths":["secret/data/nodes/f9a30ab0-7d8a-4b77-a4c4-6a6383d084db/db"]}'
+```
+
+```js
+const token = process.env.THETA_AGENT_TOKEN; // from /etc/theta42/agent.yml
+fetch('https://sso.example.com/api/v1/agent/secrets', {
+  method: 'POST',
+  headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+  body: JSON.stringify({ paths: ['secret/data/nodes/f9a30ab0-7d8a-4b77-a4c4-6a6383d084db/db'] })
+}).then(r => r.json()).then(d => console.log(d.secrets));
+```
+
+Both return:
+
+```json
+{
+  "status": "ok",
+  "secrets": {
+    "secret/data/nodes/f9a30ab0-7d8a-4b77-a4c4-6a6383d084db/db": {
+      "username": "demoapp",
+      "password": "CorrectHorseBattery42"
+    }
+  }
+}
+```
 
 ---
 
@@ -294,5 +495,3 @@ Fix options:
 > sure the proxy has a **persistent Host record** for the real SSO domain — not
 > just the `localtest.me` placeholder — so routing survives a proxy restart
 > (an in-memory lookup cache can mask a missing Redis record for up to ~1h).
-
-

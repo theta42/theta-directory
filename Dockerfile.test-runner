@@ -47,6 +47,8 @@ COPY directory_spec.md /directory_spec.md
 COPY test_seed.js ./test_seed.js
 COPY test/seed-test-user.sh /usr/local/bin/seed-test-user
 RUN chmod +x /usr/local/bin/seed-test-user
+# End-to-end LDAP tunnel test client (docker-compose.e2e.yml)
+COPY test/tunnel_e2e.js ./test/tunnel_e2e.js
 
 # Default command: seed the test user, then run the test suite
 CMD ["sh", "-c", "seed-test-user && npm test"]

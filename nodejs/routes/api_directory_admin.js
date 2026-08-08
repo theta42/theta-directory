@@ -199,6 +199,7 @@ router.get('/resources', async (req, res, next) => {
   try {
     let resources = await Resource.list();
     resources = resources.filter(r => {
+      if (r.kind === 'host' || r.kind === 'site') return true;
       const isAuto = r.metadata?.discovery_sources?.length > 0 && !r.metadata.discovery_sources.includes('manual');
       const isManaged = r.metadata?.managed === true;
       return !isAuto || isManaged;
@@ -597,6 +598,142 @@ router.get('/audit-logs', async (req, res, next) => {
       tailFile('/var/lib/ldap/auditlog.ldif'),
     ]);
     res.json({ results: { ldap, oauth, audit } });
+  } catch (err) { next(err); }
+});
+
+// ── Resource Secrets API (OpenBao KV-v2 under secret/data/resources/<slug>/conf) ──
+const SECRET_KEY_REGEX = /^[A-Za-z0-9_]+$/;
+
+router.get('/resources/:id/secrets', async (req, res, next) => {
+  try {
+    const resource = await Resource.get(req.params.id);
+    if (!resource) return res.status(404).json({ status: 'error', message: 'resource not found' });
+    const baoConf = require('@simpleworkjs/bao-conf');
+
+    // Read resource secrets from OpenBao
+    const path = `secret/data/resources/${resource.slug}/conf`;
+    const r = await baoConf.request('GET', path);
+    let secretsMap = {};
+    if (r.ok) {
+      const body = await r.json().catch(() => ({}));
+      secretsMap = (body.data && body.data.data) || {};
+    }
+
+    // Zero-View Security: Return metadata only, NEVER return raw secret values
+    const secrets = Object.keys(secretsMap).map(key => {
+      const val = String(secretsMap[key] || '');
+      let isInherited = false;
+      let parentSlug = null;
+      let parentKey = null;
+
+      if (val.startsWith('INHERIT:')) {
+        isInherited = true;
+        const parts = val.split(':');
+        if (parts.length >= 3) {
+          parentSlug = parts[1];
+          parentKey = parts[2];
+        } else if (parts.length === 2) {
+          parentKey = parts[1];
+        }
+      }
+
+      return {
+        key,
+        hasValue: val.length > 0,
+        isInherited,
+        parentSlug,
+        parentKey
+      };
+    });
+
+    // Find all ancestor resources across any depth (Host, Site, etc.) + Global Sites
+    const parentSecrets = [];
+    const seenAncestors = new Set();
+
+    const ancestors = await Resource.findAllAncestors(resource.id).catch(() => []);
+    const sites = await Resource.list({ where: { kind: 'site' } }).catch(() => []);
+    const allAncestors = [...ancestors, ...sites];
+
+    for (const parent of allAncestors) {
+      if (!parent || parent.id === resource.id || seenAncestors.has(parent.id)) continue;
+      seenAncestors.add(parent.id);
+
+      const parentPath = `secret/data/resources/${parent.slug}/conf`;
+      const parentR = await baoConf.request('GET', parentPath);
+      if (parentR.ok) {
+        const parentBody = await parentR.json().catch(() => ({}));
+        const pMap = (parentBody.data && parentBody.data.data) || {};
+        for (const pKey of Object.keys(pMap)) {
+          parentSecrets.push({
+            parentSlug: parent.slug,
+            parentName: `${parent.name} (${parent.kind ? parent.kind.toUpperCase() : 'PARENT'})`,
+            key: pKey
+          });
+        }
+      }
+    }
+
+    res.json({ status: 'ok', resourceId: resource.id, slug: resource.slug, secrets, parentSecrets });
+  } catch (err) { next(err); }
+});
+
+router.post('/resources/:id/secrets', async (req, res, next) => {
+  try {
+    const resource = await Resource.get(req.params.id);
+    if (!resource) return res.status(404).json({ status: 'error', message: 'resource not found' });
+    const secrets = (req.body.secrets && typeof req.body.secrets === 'object') ? req.body.secrets : {};
+
+    // Validate key names (Standard Env Var format: A-Z, 0-9, underscores)
+    for (const key of Object.keys(secrets)) {
+      if (!SECRET_KEY_REGEX.test(key)) {
+        return res.status(400).json({
+          status: 'error',
+          message: `Invalid secret key '${key}'. Keys must contain only letters, numbers, and underscores (e.g. DB_PASSWORD)`
+        });
+      }
+    }
+
+    const baoConf = require('@simpleworkjs/bao-conf');
+    const path = `secret/data/resources/${resource.slug}/conf`;
+    const r = await baoConf.request('POST', path, { data: secrets });
+    if (!r.ok) {
+      return res.status(500).json({ status: 'error', message: 'failed to save secrets to OpenBao' });
+    }
+    res.json({ status: 'ok' });
+  } catch (err) { next(err); }
+});
+
+router.get('/resources/:id/grants', async (req, res, next) => {
+  try {
+    const { SharedSecretGrant } = require('../models/shared_secret_grant');
+    const { SharedSecret } = require('../models/shared_secret');
+    const resource = await Resource.get(req.params.id);
+    if (!resource) return res.status(404).json({ status: 'error', message: 'resource not found' });
+    const grants = await SharedSecretGrant.listForGrantee('resource', resource.id);
+    const sharedSecretIds = grants.map(g => g.secretId);
+    const secrets = sharedSecretIds.length ? await SharedSecret.list({ where: { id: { in: sharedSecretIds } } }) : [];
+    res.json({ status: 'ok', grants: secrets.map(s => ({ id: s.id, slug: s.slug, description: s.description })) });
+  } catch (err) { next(err); }
+});
+
+router.post('/resources/:id/grants', async (req, res, next) => {
+  try {
+    const { SharedSecretGrant } = require('../models/shared_secret_grant');
+    const { SharedSecret } = require('../models/shared_secret');
+    const resource = await Resource.get(req.params.id);
+    if (!resource) return res.status(404).json({ status: 'error', message: 'resource not found' });
+    const { secretSlug, action } = req.body || {};
+    const secret = await SharedSecret.getBySlug(secretSlug);
+    if (!secret) return res.status(404).json({ status: 'error', message: `shared secret '${secretSlug}' not found` });
+
+    if (action === 'revoke') {
+      const existing = await SharedSecretGrant.list({ where: { secretId: secret.id, granteeType: 'resource', granteeId: resource.id } });
+      for (const g of existing) await g.delete();
+      return res.json({ status: 'ok', message: 'grant revoked' });
+    } else {
+      await SharedSecretGrant.grant({ secretId: secret.id, granteeType: 'resource', granteeId: resource.id, grantedBy: req.user.uid });
+      return res.json({ status: 'ok', message: 'grant created' });
+    }
   } catch (err) { next(err); }
 });
 
