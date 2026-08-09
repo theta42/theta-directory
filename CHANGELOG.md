@@ -1,3 +1,14 @@
+# v2.0.1 - 2026-08-09
+
+### Fixed
+- **OpenBao / OpenBoa Container Exclusion**: Skip discovery of internal secret management/renewer containers so they don't populate resources catalog.
+- **Agent Version API Collection**: Added `version` tracking to Agent model and discovery handlers to record and report agent version dynamically.
+- **Console Log Cleanup**: Removed leftover `console.log` debug statements in frontend assets.
+- **Resource Save & User Cache Invalidation**: Fixed metadata merge on resource updates to prevent losing system fields, and added User cache clear to propagate user/group edits instantly.
+- **Site Status 500 Fix**: Replaced invalid ORM `Resource.findAll()` call with `Resource.list()`.
+- **Secret Filtering**: Fixed the "With Secrets" filter checkbox by ensuring `hasSecret` / `secretKeys` states are written to resource metadata and checked by EJS views.
+- **Auto-Group Spawning Prevention**: Set default `autoPromote` to false in UniFi, Docker, Proxmox, and Nmap plugins and restricted auto group creation to managed resources to prevent duplicate LDAP group generation.
+
 # v2.0.0 - 2026-08-09
 
 ### Added

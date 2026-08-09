@@ -87,6 +87,7 @@ class Agent extends Model {
 		// Survives a restart, which the in-memory map did not: an agent that is
 		// installed but currently down is now distinguishable from one that was
 		// never enrolled.
+		version: { type: 'string' },
 		last_seen: { type: 'integer' },
 		last_ip: { type: 'string' },
 		lastDiscovery: { type: 'json', default: {} },
@@ -99,6 +100,7 @@ class Agent extends Model {
 		delete data.tokenHash;
 		return {
 			...data,
+			version: data.version || (data.lastDiscovery && data.lastDiscovery.version) || (data.lastTelemetry && data.lastTelemetry.version) || 'v2.0.0',
 			lastSeen: data.last_seen ? new Date(data.last_seen * 1000).toISOString() : null,
 			connected: !!(liveState && liveState.connected),
 			// "Online" is a live-connection fact, not a stored one. A row with a

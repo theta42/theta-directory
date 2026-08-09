@@ -13,7 +13,7 @@ module.exports = {
   configSchema: [
     { key: 'targetRange', label: 'Target Range', type: 'text', required: true, placeholder: '192.168.1.0/24' },
     { key: 'location', label: 'Location / Site (optional)', type: 'site_select', required: false, placeholder: 'Default Site' },
-    { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: true }
+    { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: false }
   ],
 
   validate: async (config) => {

@@ -536,7 +536,6 @@ app.util = (function(app){
 
 		// Get the form values and work over them
 		for (let {name, value} of $(this).serializeArray()) {
-			console.log(name, value)
 			if (obj[name] === undefined) {
 				if (!value
 					&& !$(this).parent().find(`[name="${name}"]`).attr('value')
@@ -696,7 +695,6 @@ $( document ).ready(async function(){
 		const yOffset = Number($('#spa-shell').css('margin-top').replace('px', ''));
 		const y = this[0].getBoundingClientRect().top + window.scrollY - yOffset;
 
-		console.log('y', y)
 		window.scrollTo({top: y, behavior: 'smooth'});
 	};
 
@@ -726,12 +724,10 @@ function formAJAX(btn){
 			$form.trigger("reset");
 			eval($form.attr('evalAJAX')); //gets JS to run after completion
 		}else{
-			console.log('formAJAX res error', error, data)
 			if(data && data.name === 'ObjectValidateError'){
 				app.messages.action('Please fix the form errors', $form, 'danger'); //re-populate table
 			}
 			if(data && data.keys){
-				console.log('form key errors', data.keys)
 				for(let keyError of data.keys){
 					$form.find(`[name=${keyError.key}]`).validateMessage(keyError.message);
 				}

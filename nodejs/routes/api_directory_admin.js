@@ -236,7 +236,12 @@ router.get('/resources', async (req, res, next) => {
         .catch(err => console.error(`provisionResourceGroups(${r.slug}) failed:`, err.message));
     }));
 
-    res.json({ results: projectResources(resources, { fullMetadata: true }) });
+    const projected = projectResources(resources, { fullMetadata: true }).map(r => {
+      r.hasSecret = !!(r.metadata?.hasSecret || (r.metadata?.secretKeys && r.metadata.secretKeys.length > 0));
+      r.secretKeys = r.metadata?.secretKeys || [];
+      return r;
+    });
+    res.json({ results: projected });
   } catch (err) { next(err); }
 });
 
@@ -342,6 +347,9 @@ router.put('/resources/:id', async (req, res, next) => {
 
     req.body.updated_by = req.user.uid;
     req.body.updated_on = Date.now();
+    if (req.body.metadata && typeof req.body.metadata === 'object') {
+      req.body.metadata = { ...(r.metadata || {}), ...req.body.metadata };
+    }
 
     const updated = await r.update(req.body);
 
@@ -728,7 +736,16 @@ router.post('/resources/:id/secrets', async (req, res, next) => {
     if (!r.ok) {
       return res.status(500).json({ status: 'error', message: 'failed to save secrets to OpenBao' });
     }
-    res.json({ status: 'ok', keys: Object.keys(currentMap) });
+
+    const keys = Object.keys(currentMap);
+    const updatedMeta = {
+      ...(resource.metadata || {}),
+      hasSecret: keys.length > 0,
+      secretKeys: keys
+    };
+    await resource.update({ metadata: updatedMeta }).catch(() => {});
+
+    res.json({ status: 'ok', keys });
   } catch (err) { next(err); }
 });
 
@@ -867,8 +884,8 @@ let localSiteConfig = {
 
 router.get('/site-status', async (req, res, next) => {
   try {
-    const sites = await Resource.findAll({ where: { kind: 'site' } });
-    const gateResources = await Resource.findAll({ where: { subType: 'wireguard' } });
+    const sites = await Resource.list({ where: { kind: 'site' } });
+    const gateResources = await Resource.list({ where: { subType: 'wireguard' } });
 
     res.json({
       status: 'ok',
