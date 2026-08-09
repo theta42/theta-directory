@@ -810,8 +810,8 @@
     // CPU details
     const cpuDet = t.cpu_details || d.cpu_details || {};
     const cpuModel = cpuDet.model || d.cpu || 'Unknown CPU';
-    const cpuCores = cpuDet.cores || 'N/A';
-    const cpuThreads = cpuDet.threads || 'N/A';
+    const cpuCores = (cpuDet.cores != null && cpuDet.cores > 0) ? cpuDet.cores : (d.cpu_details && d.cpu_details.cores ? d.cpu_details.cores : 'N/A');
+    const cpuThreads = (cpuDet.threads != null && cpuDet.threads > 0) ? cpuDet.threads : (d.cpu_details && d.cpu_details.threads ? d.cpu_details.threads : 'N/A');
     const cpuSpeed = cpuDet.mhz ? (cpuDet.mhz >= 1000 ? (cpuDet.mhz / 1000).toFixed(2) + ' GHz' : cpuDet.mhz.toFixed(0) + ' MHz') : '';
 
     // Disks
@@ -1579,8 +1579,10 @@
       app.messages.action(`Sending '${action}' desktop command to agent...`, $('#res-modal'), 'info');
       const res = await app.api.post(`directory-admin/resources/${resourceId}/driver-action`, {
         action: 'desktop_control',
-        subAction: action,
-        user: username
+        params: {
+          subAction: action,
+          user: username
+        }
       });
       app.messages.action(`Desktop action '${action}' completed successfully!`, $('#res-modal'), 'success');
     } catch (err) {
