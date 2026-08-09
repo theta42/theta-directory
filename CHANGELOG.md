@@ -1,3 +1,13 @@
+# v2.0.0 - 2026-08-09
+
+### Added
+- **Multi-Site Master Architecture.** Multi-Site Master badge, `/api/directory-admin/site-status` API, and Master site promotion UI.
+- **Full Telemetry Dashboard Cards.** Rendered active `logged_users`, physical partitions, host details, and desktop session/power controls (Lock, Display Off, Log Out, Sleep Host).
+- **Theta Directory Rebranding.** Rebranded SSO Manager UI and documentation to Theta Directory.
+
+### Fixed
+- **Agent Action Parameter Resolution.** Standardized top-level and nested parameter parsing for agent driver actions (`api_directory_admin.js`).
+
 # v1.33.0 - 2026-08-08
 
 ### Added
