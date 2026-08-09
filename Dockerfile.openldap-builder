@@ -1,0 +1,75 @@
+# OpenLDAP-with-nestgroup builder, published to
+# ghcr.io/theta42/openldap-nestgroup:<OPENLDAP_COMMIT short hash>.
+#
+# Extracted out of Dockerfile.openldap's `ldapbuild` stage so the ~5 minute
+# from-source compile (which also depends on git.openldap.org being up)
+# happens once, here, instead of on every `docker build` of the app image --
+# including every CI run's 3-way test matrix. Dockerfile.openldap's ldapbuild
+# stage becomes `FROM ghcr.io/theta42/openldap-nestgroup:<commit>` and the
+# rest of that file (the COPY --from=ldapbuild lines) is unchanged, since
+# COPY --from also accepts an external image, not just a local stage name.
+#
+# Bumping OPENLDAP_COMMIT is a two-step change: update the ARG below, push
+# (the build-openldap-image workflow rebuilds+republishes the tag on changes
+# to this file), then update the matching FROM line in Dockerfile.openldap.
+#
+# See Dockerfile.openldap's own "OpenLDAP from source" comment for *why*
+# from-source at all (the nestgroup overlay, ITS#10161) and the LMDB format
+# note (master's 1.0.0 vs 2.6.x's 0.9.x).
+FROM node:20-alpine AS build
+
+# groff is not optional despite producing nothing we ship: the build descends
+# into doc/man unconditionally and its Makefile calls soelim, which groff
+# provides. Without it the whole `make` fails at the man-page stage
+# ("soelim: not found") long after slapd itself has compiled fine.
+RUN apk add --no-cache \
+        build-base autoconf automake libtool \
+        openssl-dev cyrus-sasl-dev \
+        git make pkgconf util-linux-dev groff
+
+# Pinned to an exact commit, not a branch tip -- see Dockerfile.openldap for
+# why (this is the directory server the whole lab authenticates against).
+ARG OPENLDAP_COMMIT=350e9eb38b2270c2bad97c61ee02e85fb8f3196d
+
+WORKDIR /src
+RUN git init -q . \
+    && git remote add origin https://git.openldap.org/openldap/openldap.git \
+    && git fetch -q --depth 1 origin "${OPENLDAP_COMMIT}" \
+    && git checkout -q FETCH_HEAD \
+    && git rev-parse HEAD > /opt-openldap-commit.txt
+
+# Overlays are built as loadable modules (=mod) because docker-entrypoint.sh
+# `moduleload`s them individually; nestgroup joins that set.
+RUN ./configure \
+        --prefix=/opt/openldap \
+        --enable-slapd \
+        --enable-modules \
+        --enable-mdb \
+        --enable-memberof=mod \
+        --enable-refint=mod \
+        --enable-ppolicy=mod \
+        --enable-dynlist=mod \
+        --enable-nestgroup=mod \
+        --enable-syncprov=mod \
+        --enable-auditlog=mod \
+        --with-tls=openssl \
+        --with-cyrus-sasl \
+    && make depend \
+    && make -j"$(nproc)" \
+    && make install
+
+# pw-sha2 provides {SSHA512}, which every existing user password is stored as.
+# It lives in contrib and is not covered by the configure flags above, so it is
+# built separately against the just-built tree -- omitting it would make every
+# user password unverifiable.
+RUN cd contrib/slapd-modules/passwd/sha2 \
+    && make prefix=/opt/openldap OPENLDAP_SRC=/src \
+    && cp .libs/pw-sha2.so* /opt/openldap/libexec/openldap/
+
+# Pure artifact holder -- no shell, no package manager, nothing but the
+# compiled tree. Dockerfile.openldap's COPY --from=ldapbuild only ever reads
+# files, never RUNs anything in this stage, so scratch is sufficient and
+# keeps the published image (and every pull of it) as small as possible.
+FROM scratch
+COPY --from=build /opt/openldap /opt/openldap
+COPY --from=build /opt-openldap-commit.txt /opt-openldap-commit.txt
