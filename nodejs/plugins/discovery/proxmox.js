@@ -94,7 +94,7 @@ module.exports = {
     { key: 'tokenId',     label: 'Token ID',     type: 'text',     required: true, placeholder: 'user@pam!token' },
     { key: 'tokenSecret', label: 'Token Secret', type: 'password', required: true, secret: true },
     { key: 'location',    label: 'Location / Site (optional)', type: 'site_select', required: false, placeholder: 'Default Site' },
-    { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: true }
+    { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: false }
   ],
 
   // "Test" button in the UI: hit the unauthenticated version endpoint with the

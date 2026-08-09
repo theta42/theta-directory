@@ -118,6 +118,7 @@ class AgentManager {
 
   async handleDiscovery(agent, payload) {
     const discovery = {
+      version: payload.version || payload.agent_version || 'v2.0.0',
       hostname: payload.hostname || '',
       ip_addresses: Array.isArray(payload.ip_addresses) ? payload.ip_addresses : [],
       public_ip: payload.public_ip || '',
@@ -136,7 +137,7 @@ class AgentManager {
       // is the authoritative source for what it will actually do.
       capabilities: payload.capabilities || {}
     };
-    await this.touch(agent, { lastDiscovery: discovery });
+    await this.touch(agent, { version: discovery.version, lastDiscovery: discovery });
     await this.applyDiscoveryToDirectory(agent, discovery);
   }
 
@@ -333,102 +334,6 @@ class AgentManager {
       // Never let a directory write break the agent connection.
       console.error(`[AgentManager] discovery -> directory failed for agent ${agent.id}:`, err.message);
     }
-  }
-
-  async handleTelemetry(agent, payload) {
-    await this.touch(agent, {
-      lastTelemetry: {
-        cpu_usage_percent: payload.cpu_usage_percent || 0,
-        ram_usage_percent: payload.ram_usage_percent || 0,
-        disk_usage_percent: payload.disk_usage_percent || 0,
-        zfs_health: payload.zfs_health || 'N/A',
-        gpu_usage_percent: payload.gpu_usage_percent ?? -1,
-        timestamp: payload.timestamp || new Date().toISOString()
-      }
-    });
-  }
-
-  async handleHeartbeat(agent, payload, ws) {
-    await this.touch(agent);
-    try {
-      ws.send(JSON.stringify({
-        type: 'heartbeat_ack',
-        payload: { timestamp: new Date().toISOString() }
-      }));
-    } catch (e) {}
-  }
-
-  async handleResponse(agent, payload) {
-    const state = this.live.get(agent.id);
-    if (state) {
-      state.lastResponse = {
-        status: payload.status || 'ok',
-        message: payload.message || '',
-        output: payload.output || '',
-        timestamp: new Date().toISOString()
-      };
-    }
-    await this.touch(agent);
-  }
-
-  async sendCommand(agent, commandType, payload = {}, isHighRisk = false) {
-    const state = this.live.get(agent.id);
-    if (!state || !state.ws || state.ws.readyState !== 1) {
-      throw new Error(`Agent "${agent.name}" is not connected`);
-    }
-
-    const finalPayload = { ...payload };
-    if (isHighRisk) finalPayload.signature = await this.signPayload(finalPayload);
-
-    const message = { type: commandType, payload: finalPayload };
-    state.ws.send(JSON.stringify(message));
-    return message;
-  }
-
-  // Live view for one agent, for merging into its row.
-  liveState(agentId) {
-    const state = this.live.get(agentId);
-    if (!state) return { connected: false, lastResponse: null };
-    return {
-      connected: !!(state.ws && state.ws.readyState === 1),
-      ipAddress: state.ipAddress,
-      connectedAt: state.connectedAt,
-      lastResponse: state.lastResponse || null
-    };
-  }
-
-  // Find connected/enrolled agent bound to a resource ID (or inherited from parent Host).
-  async getAgentForResource(resourceId) {
-    if (!resourceId) return null;
-    const rows = await Agent.list().catch(() => []);
-    let agent = rows.find(a => a.resourceId === resourceId);
-    if (!agent) {
-      try {
-        const { Resource } = require('../models/resource');
-        const { ResourceEdge } = require('../models/resource');
-        const res = await Resource.get(resourceId);
-        if (res && res.kind === 'service') {
-          const edges = await ResourceEdge.list({ where: { childId: resourceId } });
-          for (const edge of edges) {
-            const parentRes = await Resource.get(edge.parentId);
-            if (parentRes && parentRes.kind === 'host') {
-              agent = rows.find(a => a.resourceId === parentRes.id || (parentRes.metadata && parentRes.metadata.agentId === a.id));
-              if (agent) break;
-            }
-          }
-        }
-      } catch (err) {
-        console.error('[AgentManager] parent agent lookup error:', err.message);
-      }
-    }
-    if (!agent) return null;
-    return agent.toPublic(this.liveState(agent.id));
-  }
-
-  // Every enrolled agent, connected or not.
-  async listAgents() {
-    const rows = await Agent.list();
-    return rows.map(a => a.toPublic(this.liveState(a.id)));
   }
 }
 

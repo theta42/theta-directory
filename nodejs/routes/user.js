@@ -222,10 +222,12 @@ router.put('/:uid', async function(req, res, next){
 			req.body.manager = req.body.manager.split('\n').map(s => s.trim()).filter(Boolean);
 		}
 
-		return res.json({
-			results: await user.update(req.body),
-			message: `Updated ${req.params.uid} user`
+		const updatedUser = await user.update(req.body);
+		User.clearCache();
 
+		return res.json({
+			results: updatedUser,
+			message: `Updated ${req.params.uid} user`
 		});
 	}catch(error){
 		next(error);
