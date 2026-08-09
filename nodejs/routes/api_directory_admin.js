@@ -784,7 +784,8 @@ router.post('/resources/:id/driver-action', async (req, res, next) => {
     if (!resource) return res.status(404).json({ status: 'error', message: 'resource not found' });
     const { action, params } = req.body || {};
     if (!action) return res.status(400).json({ status: 'error', message: 'action is required' });
-    const result = await DriverRegistry.execAction(resource, action, params || {});
+    const actionParams = params || req.body || {};
+    const result = await DriverRegistry.execAction(resource, action, actionParams);
     res.json({ status: 'ok', resourceId: resource.id, result });
   } catch (err) { next(err); }
 });
