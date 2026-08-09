@@ -856,4 +856,60 @@ router.post('/discovered/merge', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── Multi-Site & Master Node Status Endpoints ────────────────────────────────
+let localSiteConfig = {
+  isMaster: process.env.IS_MASTER ? (process.env.IS_MASTER === 'true') : true,
+  masterUrl: process.env.MASTER_URL || '',
+  siteSlug: process.env.SITE_SLUG || 'site-default',
+  wanConnected: true
+};
+
+router.get('/site-status', async (req, res, next) => {
+  try {
+    const sites = await Resource.findAll({ where: { kind: 'site' } });
+    const gateResources = await Resource.findAll({ where: { subType: 'wireguard' } });
+
+    res.json({
+      status: 'ok',
+      config: {
+        isMaster: localSiteConfig.isMaster,
+        masterUrl: localSiteConfig.masterUrl,
+        siteSlug: localSiteConfig.siteSlug,
+        wanConnected: localSiteConfig.wanConnected,
+        siteMode: localSiteConfig.isMaster ? 'master' : 'spoke'
+      },
+      sitesCount: sites.length,
+      sites: sites.map(s => ({ id: s.id, name: s.name, slug: s.slug })),
+      gatewaysCount: gateResources.length
+    });
+  } catch (err) { next(err); }
+});
+
+router.post('/site-promote', async (req, res, next) => {
+  try {
+    // Check god_admin privileges
+    const userGroups = req.user && req.user.groups ? req.user.groups : [];
+    const isGodAdmin = userGroups.includes('god_admin') || userGroups.includes(SUPER_ADMIN_GROUP);
+    if (!isGodAdmin) {
+      return res.status(403).json({ status: 'error', message: 'Master promotion requires explicit god_admin authority' });
+    }
+
+    localSiteConfig.isMaster = true;
+    localSiteConfig.masterUrl = '';
+    
+    console.log(`[MULTI-SITE] Node promoted to MASTER by user ${req.user ? req.user.uid : 'admin'}`);
+
+    res.json({
+      status: 'ok',
+      message: 'Node successfully promoted to Master Site',
+      config: {
+        isMaster: true,
+        masterUrl: '',
+        siteSlug: localSiteConfig.siteSlug,
+        siteMode: 'master'
+      }
+    });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
