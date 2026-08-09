@@ -1,17 +1,10 @@
-# SSO Manager
+# Theta Directory
 
-A self-hosted **OpenID Connect provider** with a bundled **OpenLDAP directory**
-and a web management UI — for home labs and small businesses that want their own
-identity provider instead of a hosted one.
+A production-grade, self-hosted **OpenID Connect provider**, **Resource Directory & IAM Engine**, and bundled **OpenLDAP directory** with a modern web console — designed for home-labs and enterprise infrastructure that demand total sovereignty over their identity, secrets, and resource catalog.
 
-It gives you one place to manage your users and groups, one login (OIDC) that
-your modern apps can use, and one LDAP directory your older or odder apps can
-bind to directly. Everything runs on your own hardware; there is no
-phone-home, no hosted control plane, and no per-user pricing.
+It provides a single source of truth for identity (OIDC + LDAP), host/service directory inventory, access control groups, and secrets management running entirely on your own hardware without third-party cloud lock-in.
 
-> Setting up the whole stack (this SSO + the [theta42/proxy](https://github.com/theta42/proxy)
-> in front of it) with one command? Skip to [theta-env](https://github.com/theta42/theta-env)
-> — its `setup.sh` wires the two together and generates the config for you.
+> Setting up the full stack (Theta Directory + [Theta Proxy](https://github.com/theta42/proxy) + [Theta Gateway](https://github.com/theta42/jump-host)) with one command? See [theta-suite / theta-env](https://github.com/theta42/theta-suite) — its `./setup.sh` wires everything together automatically.
 
 **Documentation:** [https://theta42.github.io/sso-manager-node/](https://theta42.github.io/sso-manager-node/)
 
