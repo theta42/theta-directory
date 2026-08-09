@@ -1,3 +1,8 @@
+# v2.0.2 - 2026-08-09
+
+### Fixed
+- **README rebranding & standalone-install cleanup.** Removed the "Why this over the alternatives" section and stale links to the old per-repo GitHub Pages site (`theta42.github.io/sso-manager-node/`); documentation and secrets links now point at the unified `theta42.github.io/theta-suite/` site. Made explicit that Theta Directory is deployed as part of Theta Suite and isn't installed or run on its own. Added the agent capability/install screenshots to the gallery.
+
 # v2.0.1 - 2026-08-09
 
 ### Fixed
