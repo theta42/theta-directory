@@ -310,7 +310,7 @@ class DiscoveryReconciler {
     if (autoPromote) {
       const { Group } = require('../models/group_ldap');
       for (const res of resources) {
-        if (!res._actualId) continue;
+        if (!res._actualId || res.metadata?.managed !== true) continue;
         const accessGroup = `${res.slug}_access`;
         const adminGroup = `${res.slug}_admin`;
         try {

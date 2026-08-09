@@ -687,6 +687,7 @@
   var agentsUnavailable = false;
 
   async function loadResources() {
+    directoryUserCache = null;
     try {
       const [resResources, resGroups, resEdges, resAccess, resAgents] = await Promise.all([
         app.api.get('directory-admin/resources'),
@@ -1140,7 +1141,8 @@
     const secretsOnly = $('#toggle-secrets-only').is(':checked');
 
     let filtered = rawResources.filter(r => {
-      if (secretsOnly && !r.hasSecret) {
+      const hasSec = !!(r.hasSecret || r.metadata?.hasSecret || (r.secretKeys && r.secretKeys.length > 0) || (r.metadata?.secretKeys && r.metadata.secretKeys.length > 0));
+      if (secretsOnly && !hasSec) {
         return false;
       }
       if (!filter) return true;
@@ -1642,8 +1644,8 @@
   }
 
   var directoryUserCache = null;
-  async function loadDirectoryUsers() {
-    if (!directoryUserCache) {
+  async function loadDirectoryUsers(force) {
+    if (!directoryUserCache || force) {
       const data = await app.user.list();
       directoryUserCache = data.results;
     }
