@@ -1,8 +1,10 @@
-#!/bin/sh
+#!/bin/bash
 set -e
 
 # --- Configuration ---
-BINARY_URL="${BINARY_URL:-}"
+# In a real environment, these would be derived from the script's download URL
+# or passed as additional arguments. For now, we use the most recent release.
+BINARY_URL="https://github.com/theta42/theta-agent/releases/latest/download/theta-agent-linux-amd64"
 CONFIG_DIR="/etc/theta42"
 CONFIG_FILE="$CONFIG_DIR/agent.yml"
 BIN_PATH="/usr/local/bin/theta-agent"
@@ -13,8 +15,8 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 NC='\033[0m' # No Color
 
-log() { echo "${GREEN}[+]${NC} $1"; }
-error() { echo "${RED}[!]${NC} $1"; exit 1; }
+log() { echo -e "${GREEN}[+]${NC} $1"; }
+error() { echo -e "${RED}[!]${NC} $1"; exit 1; }
 
 # 1. Root check
 if [ "$(id -u 2>/dev/null || echo 1)" -ne 0 ]; then
@@ -66,10 +68,17 @@ while [ $# -gt 0 ]; do
       TOKEN="$2"
       shift 2
       ;;
+    # Base64 of the SSO's raw Ed25519 public key. The agent verifies high-risk
+    # commands (reboot, configure_ldap, arbitrary_bash, update_binary) against
+    # it and REFUSES them when it is absent, so an install without this key can
+    # stream telemetry but cannot be acted on.
     --public-key)
       PUBLIC_KEY="$2"
       shift 2
       ;;
+    # The one credential an operator hands out. The server exchanges it for a
+    # per-agent token on first connect, which the agent writes back into
+    # agent.yml -- so this is all you need to add a host.
     --join-key)
       JOIN_KEY="$2"
       shift 2
@@ -88,27 +97,53 @@ done
 # Validation: require credentials ONLY if config file does not already exist
 if [ ! -f "$CONFIG_FILE" ] && [ -z "$B64_CONFIG" ] && { [ -z "$URL" ] || { [ -z "$TOKEN" ] && [ -z "$JOIN_KEY" ]; }; }; then
   error "Missing required configuration. Provide a base64 encoded config, or --url with either --join-key or --token."
+  echo "Usage examples:"
+  echo "  sh install.sh \"BASE64_CONFIG\""
+  echo "  sh install.sh --url \"https://sso.local\" --join-key \"tjk_...\" --install-sssd"
+  echo "  sh install.sh --url \"https://sso.local\" --token \"ISSUED_TOKEN\" --public-key \"BASE64_KEY\""
+  echo ""
+  echo "--join-key is the normal path: the host enrolls itself on first connect"
+  echo "and the SSO issues it its own token + public key, which the agent writes"
+  echo "back into agent.yml. Get a key from Directory -> Install Agent."
   exit 1
 fi
 
-# 3. Resolve binary URL dynamically if not specified
-if [ -z "$BINARY_URL" ]; then
-  if [ -n "$URL" ]; then
-    BINARY_URL="${URL%/}/resources/theta-agent/theta-agent-linux-amd64"
-  elif [ -n "$B64_CONFIG" ]; then
-    EXTRACTED_URL=$(echo "$B64_CONFIG" | base64 -d 2>/dev/null | grep -E '^\s*server_url:' | awk -F'"' '{print $2}' | tr -d ' ' || true)
-    if [ -n "$EXTRACTED_URL" ]; then
-      HTTP_URL=$(echo "$EXTRACTED_URL" | sed -e 's/^wss:\/\//https:\/\//' -e 's/^ws:\/\//http:\/\//')
-      BINARY_URL="${HTTP_URL%/}/resources/theta-agent/theta-agent-linux-amd64"
-    fi
-  fi
-fi
-if [ -z "$BINARY_URL" ]; then
-  BINARY_URL="https://sso.example.com/resources/theta-agent/theta-agent-linux-amd64"
-fi
+log "Starting Theta Agent installation..."
 
-log "Downloading binary from $BINARY_URL..."
-curl -fsSL "$BINARY_URL" -o "$BIN_PATH.tmp" || error "Failed to download binary."
+# Architecture and OS detection
+OS_NAME="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH_NAME="$(uname -m)"
+BINARY_NAME="theta-agent-linux-amd64"
+
+case "$OS_NAME" in
+  linux*)
+    case "$ARCH_NAME" in
+      x86_64|amd64) BINARY_NAME="theta-agent-linux-amd64" ;;
+      aarch64|arm64) BINARY_NAME="theta-agent-linux-arm64" ;;
+      armv7*|armhf) BINARY_NAME="theta-agent-linux-armv7" ;;
+      *) BINARY_NAME="theta-agent-linux-amd64" ;;
+    esac
+    ;;
+  darwin*)
+    case "$ARCH_NAME" in
+      x86_64|amd64) BINARY_NAME="theta-agent-darwin-amd64" ;;
+      arm64|aarch64) BINARY_NAME="theta-agent-darwin-arm64" ;;
+      *) BINARY_NAME="theta-agent-darwin-arm64" ;;
+    esac
+    ;;
+  mingw*|msys*|cygwin*)
+    case "$ARCH_NAME" in
+      aarch64|arm64) BINARY_NAME="theta-agent-windows-arm64.exe" ;;
+      *) BINARY_NAME="theta-agent-windows-amd64.exe" ;;
+    esac
+    ;;
+esac
+
+BINARY_URL="https://github.com/theta42/theta-agent/releases/latest/download/${BINARY_NAME}"
+
+# 3. Install binary
+log "Detected OS: $OS_NAME ($ARCH_NAME) -> Downloading binary $BINARY_NAME..."
+curl -fsSL "$BINARY_URL" -o "$BIN_PATH.tmp" || error "Failed to download binary from $BINARY_URL"
 chmod +x "$BIN_PATH.tmp"
 mv -f "$BIN_PATH.tmp" "$BIN_PATH"
 
@@ -140,6 +175,15 @@ else
   log "Preserving existing configuration at $CONFIG_FILE"
 fi
 chmod 600 "$CONFIG_FILE"
+
+# An agent with no public_key cannot verify signed commands and will refuse
+# every one of them. That is the safe default, but it is silent at run time, so
+# say it plainly here where the operator is watching.
+if ! grep -qE '^public_key:[[:space:]]*"[^"]+"' "$CONFIG_FILE" 2>/dev/null; then
+  log "WARNING: no public_key configured — this agent will report telemetry but"
+  log "         REFUSE reboot / configure_ldap / arbitrary_bash / update_binary."
+  log "         Re-run with --public-key \"<base64 key>\" (shown at enrollment)."
+fi
 
 # 4b. Ensure SSSD dependencies are installed if configure_ldap is enabled
 if [ "$INSTALL_SSSD" -eq 1 ] || grep -qE -i 'configure_ldap:[[:space:]]*true' "$CONFIG_FILE" 2>/dev/null; then
