@@ -1,3 +1,13 @@
+# v2.0.3 - 2026-08-09
+
+### Fixed
+- **Directory tab showed unpromoted discoveries.** `GET /api/directory-admin/resources` unconditionally admitted every `kind: 'host'` resource, and every discovery plugin (UniFi, Proxmox, nmap) creates its finds as `kind: 'host'` — so unchecking "Auto-promote to Directory" on a plugin never actually kept undiscovered/unpromoted devices out of the Directory tab, only out of the LDAP-group auto-provisioning. Now only `site` resources are unconditionally shown; anything else that discovery ever touched requires `metadata.managed === true` (set by promotion, an agent, or merging into an already-managed resource).
+- **`GET /api/directory-admin/site-status` 500'd.** Queried `Resource.list({ where: { subType: 'wireguard' } })`, but `subType` only ever lives in `metadata.subType` (every driver/discovery plugin reads it that way) — never a top-level DB column, so SQLite raised `no such column: Resource.subType`. Filters in JS over `metadata.subType` now.
+- **Discovered Inventory had no way to review ignored devices.** Added a "Show ignored" toggle (off by default) to the tab, so `metadata.ignored === true` rows stay hidden from routine triage but remain reachable.
+
+### Chore
+- **Untracked `nodejs/config/inventory.sqlite`.** It's the app's default runtime DB (`nodejs/models/index.js` falls back to this path when no external DB is configured), not a fixture — it had been committed by mistake across 13 prior releases, churning on every local run. Removed from tracking and gitignored.
+
 # v2.0.2 - 2026-08-09
 
 ### Fixed

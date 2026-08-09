@@ -199,10 +199,17 @@ router.get('/resources', async (req, res, next) => {
   try {
     let resources = await Resource.list();
     resources = resources.filter(r => {
-      if (r.kind === 'host' || r.kind === 'site') return true;
-      const isAuto = r.metadata?.discovery_sources?.length > 0 && !r.metadata.discovery_sources.includes('manual');
+      // Sites are structural containers, not discovery output -- always shown.
+      if (r.kind === 'site') return true;
+      // A resource discovery ever touched only belongs in the Directory once
+      // it's explicitly managed (created by an agent, promoted by a user, or
+      // merged into an already-managed resource). Until then it's pending
+      // review in the Discovered Inventory tab. Anything discovery never
+      // touched (created directly through this admin UI) has no
+      // discovery_sources and is always shown.
+      const isDiscovered = r.metadata?.discovery_sources?.length > 0;
       const isManaged = r.metadata?.managed === true;
-      return !isAuto || isManaged;
+      return !isDiscovered || isManaged;
     });
     // Even admins never receive secret metadata (e.g. client_secret_hash) over
     // the wire; projectResources strips it unconditionally.
@@ -885,7 +892,8 @@ let localSiteConfig = {
 router.get('/site-status', async (req, res, next) => {
   try {
     const sites = await Resource.list({ where: { kind: 'site' } });
-    const gateResources = await Resource.list({ where: { subType: 'wireguard' } });
+    const allResources = await Resource.list();
+    const gateResources = allResources.filter(r => r.metadata && r.metadata.subType === 'wireguard');
 
     res.json({
       status: 'ok',
