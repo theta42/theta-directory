@@ -17,7 +17,7 @@ module.exports = {
     { key: 'user',     label: 'Username',       type: 'text',     required: true },
     { key: 'password', label: 'Password',       type: 'password', required: true, secret: true },
     { key: 'location', label: 'Location / Site (optional)', type: 'site_select', required: false, placeholder: 'Default Site' },
-    { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: true }
+    { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: false }
   ],
 
   // "Test": attempt the UDM login (falls back to the legacy controller login);

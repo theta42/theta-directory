@@ -15,7 +15,7 @@ module.exports = {
     { key: 'stackProject', label: 'Own compose project', type: 'text', required: false, placeholder: 'theta-suite' },
     { key: 'hostSlug', label: 'Parent host slug', type: 'text', required: false, placeholder: 'host_<hostname>' },
     { key: 'location', label: 'Location / Site (optional)', type: 'site_select', required: false, placeholder: 'Default Site' },
-    { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: true }
+    { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: false }
   ],
 
   validate: async (config) => {
@@ -78,7 +78,11 @@ module.exports = {
               const ports = (c.Ports || []).map(p => p.PublicPort ? `${p.PublicPort}:${p.PrivatePort}` : `${p.PrivatePort}`).join(', ');
               const isOwnStack = !!(stackProject && composeProject === stackProject);
 
-              const isIgnored = name.includes('openbao') || name.includes('bao-renewer') || composeService.includes('openbao') || composeService.includes('bao-renewer');
+              const isIgnored = /openbao|openboa|bao-renewer/i.test(name) || /openbao|openboa|bao-renewer/i.test(composeService);
+
+              if (isIgnored) {
+                continue;
+              }
 
               resources.push({
                 kind: 'container',
