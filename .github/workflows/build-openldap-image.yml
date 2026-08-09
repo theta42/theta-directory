@@ -1,0 +1,58 @@
+name: Build OpenLDAP Base Image
+
+# Publishes ghcr.io/theta42/openldap-nestgroup, the prebuilt slapd-with-
+# nestgroup image Dockerfile.openldap's `ldapbuild` stage pulls FROM instead
+# of compiling from source on every build (see Dockerfile.openldap-builder
+# for why, and the ~5 minute + git.openldap.org-dependent cost it replaces).
+#
+# Runs only when the builder Dockerfile changes -- bumping OPENLDAP_COMMIT in
+# it is the only reason this image should ever need rebuilding -- or on
+# manual dispatch.
+on:
+  push:
+    branches: [master]
+    paths:
+      - 'Dockerfile.openldap-builder'
+      - '.github/workflows/build-openldap-image.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Single source of truth for the tag: the ARG default in the Dockerfile
+      # itself, not a value duplicated into this workflow.
+      - name: Resolve pinned OpenLDAP commit
+        id: commit
+        run: |
+          commit=$(grep -oP '^ARG OPENLDAP_COMMIT=\K[0-9a-f]+' Dockerfile.openldap-builder)
+          if [ -z "$commit" ]; then
+            echo "::error::Could not resolve OPENLDAP_COMMIT from Dockerfile.openldap-builder"
+            exit 1
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v2
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          file: ./Dockerfile.openldap-builder
+          build-args: |
+            OPENLDAP_COMMIT=${{ steps.commit.outputs.commit }}
+          push: true
+          tags: |
+            ghcr.io/theta42/openldap-nestgroup:${{ steps.commit.outputs.commit }}
+            ghcr.io/theta42/openldap-nestgroup:latest
