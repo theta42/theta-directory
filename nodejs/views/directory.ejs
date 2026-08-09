@@ -39,9 +39,12 @@
             <div class="tab-pane fade show active" id="directory-tab-pane" role="tabpanel" aria-labelledby="directory-tab">
               <div class="border-0">
 				<div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-				    <div>
-    					<i class="fa-solid fa-server"></i> Directory Management
+				    <div class="d-flex align-items-center gap-2">
+    					<span><i class="fa-solid fa-server"></i> Directory Management</span>
     					<a href="/docs/groups" class="text-reset ms-1" title="Group & permission model"><i class="fa-solid fa-circle-question"></i></a>
+                        <span id="site-node-badge" class="badge bg-dark text-warning border border-warning shadow-sm" style="cursor: pointer;" onclick="openSiteStatusModal()" title="Click to view Multi-Site & Gateway status">
+                            <i class="fa-solid fa-crown me-1 text-warning"></i> Master Site
+                        </span>
     				</div>
 					<div class="d-flex flex-wrap gap-2 align-items-center">
                         <div class="btn-group btn-group-sm shadow-sm" role="group" aria-label="Expand or collapse the whole tree">
@@ -3239,9 +3242,92 @@
     }
   }
 
+  // ── Multi-Site & Master Node Controls ─────────────────────────────────────
+  async function refreshSiteStatus() {
+    try {
+      const res = await app.api.get('directory-admin/site-status');
+      if (res && res.config) {
+        const isMaster = res.config.isMaster;
+        const $badge = $('#site-node-badge');
+        if (isMaster) {
+          $badge.attr('class', 'badge bg-dark text-warning border border-warning shadow-sm')
+                .html('<i class="fa-solid fa-crown me-1 text-warning"></i> Master Site');
+        } else {
+          $badge.attr('class', 'badge bg-secondary text-info border border-info shadow-sm')
+                .html('<i class="fa-solid fa-bolt me-1 text-info"></i> Spoke Site (Read-Only)');
+        }
+      }
+    } catch (e) { console.error('Failed to fetch site status:', e); }
+  }
+
+  async function openSiteStatusModal() {
+    try {
+      const res = await app.api.get('directory-admin/site-status');
+      const cfg = res.config || {};
+      const isMaster = cfg.isMaster;
+      
+      let html = '<div class="p-2">' +
+        '<div class="card mb-3 shadow-sm border-' + (isMaster ? 'warning' : 'info') + '">' +
+          '<div class="card-body">' +
+            '<h5 class="card-title d-flex align-items-center justify-content-between">' +
+              '<span>' + (isMaster ? '👑 <strong>Master Site Node</strong>' : '⚡ <strong>Spoke Site Node</strong>') + '</span>' +
+              '<span class="badge bg-' + (isMaster ? 'warning text-dark' : 'info text-dark') + '">' + esc(cfg.siteMode || 'master') + '</span>' +
+            '</h5>' +
+            '<p class="card-text text-muted small mb-2">Multi-site directory & replication state for this node.</p>' +
+            '<table class="table table-sm text-start mb-0">' +
+              '<tr><th>Local Site Slug:</th><td><code>' + esc(cfg.siteSlug || 'site-default') + '</code></td></tr>' +
+              '<tr><th>Master Authority URL:</th><td>' + (cfg.masterUrl ? ('<code>' + esc(cfg.masterUrl) + '</code>') : '<em>(This Node is Master)</em>') + '</td></tr>' +
+              '<tr><th>WAN Sync Health:</th><td><span class="badge bg-success"><i class="fa-solid fa-check me-1"></i> Online / Operational</span></td></tr>' +
+              '<tr><th>Registered Sites:</th><td><span class="badge bg-primary">' + (res.sitesCount || 0) + ' sites</span></td></tr>' +
+              '<tr><th>Theta Gateways:</th><td><span class="badge bg-dark">' + (res.gatewaysCount || 0) + ' active gateways</span></td></tr>' +
+            '</table>' +
+          '</div>' +
+        '</div>' +
+        '<div class="alert alert-secondary small mb-3">' +
+          '<i class="fa-solid fa-network-wired me-1"></i> <strong>WireGuard Gateway Mesh & NETMAP</strong>: Inter-site routing operates via <code>theta-gateway</code> subnets (<code>10.x.0.0/16</code>) with default NETMAP shadow translations (<code>10.x.168.0/24 &rarr; 192.168.1.0/24</code>).' +
+        '</div>';
+
+      if (!isMaster) {
+        html += '<div class="card border-danger shadow-sm mt-3">' +
+          '<div class="card-body text-center">' +
+            '<h6 class="text-danger fw-bold"><i class="fa-solid fa-triangle-exclamation me-1"></i> Promote Node to Master Authority</h6>' +
+            '<p class="small text-muted mb-2">Requires explicit <code>god_admin</code> authorization. Spoke nodes remain in Spoke mode automatically during WAN outages to prevent split-brain errors.</p>' +
+            '<button class="btn btn-sm btn-danger shadow-sm" onclick="promoteCurrentSiteToMaster()">' +
+              '<i class="fa-solid fa-crown me-1"></i> Promote This Node to Master' +
+            '</button>' +
+          '</div>' +
+        '</div>';
+      }
+
+      html += '</div>';
+
+      app.modal.show('Multi-Site & Network Gateway Status', html, [], 'modal-lg');
+    } catch (e) {
+      app.messages.toast('Error fetching site status: ' + e.message, 'danger');
+    }
+  }
+
+  async function promoteCurrentSiteToMaster() {
+    const confirmed = await app.messages.confirm(
+      'Are you sure you want to promote this site node to Master? This grants single write authority for directory catalog changes.',
+      app.modal.body(), 'danger'
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await app.api.post('directory-admin/site-promote', {});
+      app.messages.toast(res.message || 'Node promoted to Master Site', 'success');
+      app.modal.close();
+      refreshSiteStatus();
+    } catch (e) {
+      app.messages.action('Promotion failed: ' + (e.message || e), app.modal.body(), 'danger');
+    }
+  }
+
   $(document).ready(function(){
     loadDiscoveryResources();
     loadDiscoveryPlugins();
+    refreshSiteStatus();
     // Keep the host status dots live: refresh the agent join periodically and on
     // socket.io agent.* broadcasts (dedicated socket — the app default is P2PSub).
     refreshAgents();
