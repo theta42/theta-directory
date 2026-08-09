@@ -91,6 +91,12 @@ secrets.js
 # they must never be committed. The empty *.example templates ARE tracked.
 config/*-secrets.js
 
+# Default sqlite ORM storage (nodejs/models/index.js falls back to this path
+# when no external DB is configured via conf.orm) -- live runtime data, not a
+# fixture. Was committed by mistake across many prior releases. NB: this is
+# nodejs/config/, distinct from the root ./config/ secrets dir above.
+nodejs/config/*.sqlite
+
 # Jekyll build artifact (GitHub Pages builds remotely; ignore locally)
 docs/_site
 

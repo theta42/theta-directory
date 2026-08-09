@@ -136,6 +136,10 @@
               <i class="fa-solid fa-network-wired"></i> Network Discovery Dashboard
             </div>
             <div class="d-flex flex-wrap gap-2 align-items-center">
+              <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" id="discovery-show-ignored" onchange="renderDiscoveryTable()">
+                <label class="form-check-label small" for="discovery-show-ignored">Show ignored</label>
+              </div>
               <input type="text" id="discovery-search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search resources..." onkeyup="renderDiscoveryTable()" style="width: 250px;">
             </div>
           </div>
@@ -2258,11 +2262,14 @@
 
   function renderDiscoveryTable() {
     const search = $('#discovery-search-filter').val().toLowerCase();
+    const showIgnored = $('#discovery-show-ignored').is(':checked');
     const filtered = allDiscoveryResources.filter(r => {
       if (search && !r.name.toLowerCase().includes(search) && !r.slug.toLowerCase().includes(search)) return false;
       // Directory contains managed items; Discovered Inventory only shows unmanaged/pending items awaiting promotion
       const isExplicitManaged = r.metadata && (r.metadata.managed === true || r.metadata.managed === 'true');
       if (isExplicitManaged || r.kind === 'site' || r.kind === 'service') return false;
+      const isIgnored = r.metadata && (r.metadata.ignored === true || r.metadata.ignored === 'true');
+      if (isIgnored && !showIgnored) return false;
       return true;
     });
 
