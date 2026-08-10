@@ -1,3 +1,9 @@
+# v2.1.1 - 2026-08-10
+
+### Fixed
+- **"Master Site" button errored with `app.modal.show is not a function`.** The multi-site status modal used the legacy `app.modal.show()` signature; the app exposes `app.modal.open({ title, bodyHtml, size })`. The site-status request itself worked — only the rendering call was wrong.
+- **Agents with no discovery yet showed a fake `v2.0.0`.** Three hardcoded fallbacks now report `unknown` instead, so a host whose agent hasn't connected isn't presented as an old version.
+
 # v2.1.0 - 2026-08-10
 
 ### Added
