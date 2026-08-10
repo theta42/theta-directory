@@ -25,8 +25,10 @@ const permission = require('../utils/permission');
 const conf = require('@simpleworkjs/conf');
 const { Resource, ResourceEdge } = require('../models/resource');
 const { SiteJoinKey } = require('../models/site_join_key');
+const User = require('../models/user');
+const { Agent } = require('../models/agent');
 const siteConfig = require('../utils/site_config');
-const { importDirectory, ldapAddArgs, baseDnFrom } = require('../utils/site_join');
+const { importDirectory, ldapAddArgs, baseDnFrom, siteIsFresh } = require('../utils/site_join');
 
 const execFileAsync = promisify(execFile);
 const router = express.Router();
@@ -77,6 +79,19 @@ router.post('/export', async (req, res, next) => {
       resources: (resources || []).map(r => (r.toJSON ? r.toJSON() : r)),
       edges: (edges || []).map(e => (e.toJSON ? e.toJSON() : e))
     });
+  } catch (e) { next(e); }
+});
+
+// ── Ping (MASTER side, Bearer site-join-key; no admin session) ─────────────
+// Lightweight reachability probe a spoke uses for WAN-health — deliberately
+// cheap (no LDAP dump / catalog), unlike /export.
+router.post('/ping', async (req, res, next) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const rawKey = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    const key = await SiteJoinKey.authenticate(rawKey);
+    if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
+    res.json({ status: 'ok', siteSlug: siteConfig.get().siteSlug, ts: Math.floor(Date.now() / 1000) });
   } catch (e) { next(e); }
 });
 
@@ -157,6 +172,14 @@ router.post('/join', async (req, res, next) => {
     if (!cfg.isMaster) {
       return res.status(400).json({ status: 'error', message: 'this node is already a spoke (re-join is not supported)' });
     }
+    // Only a fresh install may join — a directory with real users must not be
+    // merged into a master's (that is the destructive case).
+    if (!(await siteIsFresh({ User, Agent }))) {
+      return res.status(409).json({
+        status: 'error',
+        message: 'This directory already has users/agents. Only a fresh install may join a site (re-provision the host to adopt a master directory).'
+      });
+    }
 
     const base = String(masterUrl).replace(/\/+$/, '');
     const controller = new AbortController();
@@ -201,8 +224,11 @@ router.post('/join', async (req, res, next) => {
       ldapNote = 'skipped/failed: ' + e.message;
     }
 
-    // 3. Persist the spoke role (survives restarts).
-    siteConfig.save({ isMaster: false, masterUrl: base, siteSlug: exportData.siteSlug || cfg.siteSlug });
+    // 3. Persist the spoke role (survives restarts). The join key is kept so
+    //    the spoke can run WAN-health checks (and, in a later layer, proxy
+    //    writes) against the master — it is a spoke-to-master credential, not
+    //    a shared secret.
+    siteConfig.save({ isMaster: false, masterUrl: base, siteSlug: exportData.siteSlug || cfg.siteSlug, masterJoinKey: joinKey });
 
     logAudit('joined', {
       actor: req.user.uid,

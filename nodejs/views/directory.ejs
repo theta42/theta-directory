@@ -3336,7 +3336,9 @@
             '<table class="table table-sm text-start mb-0">' +
               '<tr><th>Local Site Slug:</th><td><code>' + esc(cfg.siteSlug || 'site-default') + '</code></td></tr>' +
               '<tr><th>Master Authority URL:</th><td>' + (cfg.masterUrl ? ('<code>' + esc(cfg.masterUrl) + '</code>') : '<em>(This Node is Master)</em>') + '</td></tr>' +
-              '<tr><th>WAN Sync Health:</th><td><span class="badge bg-success"><i class="fa-solid fa-check me-1"></i> Online / Operational</span></td></tr>' +
+              '<tr><th>WAN Sync Health:</th><td>' + (res.config.wanConnected === false
+                ? '<span class="badge bg-danger"><i class="fa-solid fa-xmark me-1"></i> Offline / Disconnected</span>'
+                : '<span class="badge bg-success"><i class="fa-solid fa-check me-1"></i> Online / Operational</span>') + '</td></tr>' +
               '<tr><th>Registered Sites:</th><td><span class="badge bg-primary">' + (res.sitesCount || 0) + ' sites</span></td></tr>' +
               '<tr><th>Theta Gateways:</th><td><span class="badge bg-dark">' + (res.gatewaysCount || 0) + ' active gateways</span></td></tr>' +
             '</table>' +
@@ -3345,6 +3347,38 @@
         '<div class="alert alert-secondary small mb-3">' +
           '<i class="fa-solid fa-network-wired me-1"></i> <strong>WireGuard Gateway Mesh & NETMAP</strong>: Inter-site routing operates via <code>theta-gateway</code> subnets (<code>10.x.0.0/16</code>) with default NETMAP shadow translations (<code>10.x.168.0/24 &rarr; 192.168.1.0/24</code>).' +
         '</div>';
+
+      // Fresh install (no users/resources yet): offer to JOIN an existing
+      // master site instead of seeding a new directory.
+      if (isMaster && cfg.canJoin) {
+        html += '<div class="card border-primary shadow-sm mt-3">' +
+          '<div class="card-body">' +
+            '<h6 class="fw-bold"><i class="fa-solid fa-link me-1 text-primary"></i> Join an Existing Site (Spoke)</h6>' +
+            '<p class="small text-muted mb-2">This is a fresh install. Join an existing (master) deployment to run as a read-only spoke of its directory — paste the master URL and a site join key minted there.</p>' +
+            '<div class="row g-2">' +
+              '<div class="col-md-7"><input type="text" id="site-join-url" class="form-control form-control-sm" placeholder="Master Directory URL (e.g. https://sso.master.example.com)"></div>' +
+              '<div class="col-md-5"><input type="text" id="site-join-key" class="form-control form-control-sm font-monospace" placeholder="Site join key (stj_...)"></div>' +
+            '</div>' +
+            '<button class="btn btn-sm btn-primary mt-2" onclick="joinCurrentSiteToMaster()"><i class="fa-solid fa-link me-1"></i> Join Site</button>' +
+          '</div>' +
+        '</div>';
+      }
+
+      // A master mints the site join keys spokes present when joining.
+      if (isMaster) {
+        html += '<div class="card mt-3">' +
+          '<div class="card-header py-2 fw-bold small"><i class="fa-solid fa-key me-1"></i> Site Join Keys <span class="text-muted">(for spokes to adopt this directory)</span></div>' +
+          '<div class="card-body py-2">' +
+            '<div class="d-flex gap-2 align-items-end mb-2">' +
+              '<div class="flex-grow-1"><input type="text" id="site-join-key-label" class="form-control form-control-sm" placeholder="label (e.g. staten-island)"></div>' +
+              '<button class="btn btn-sm btn-success" onclick="mintSiteJoinKey()"><i class="fa-solid fa-plus me-1"></i> Mint key</button>' +
+            '</div>' +
+            '<div id="site-join-key-result" class="mb-2"></div>' +
+            '<table class="table table-sm table-hover mb-0 small"><thead><tr><th>Label</th><th>Prefix</th><th>Used</th><th>Status</th><th class="text-end"></th></tr></thead><tbody id="site-join-key-tbody"></tbody></table>' +
+          '</div>' +
+        '</div>';
+        loadSiteJoinKeys();
+      }
 
       if (!isMaster) {
         html += '<div class="card border-danger shadow-sm mt-3">' +
@@ -3381,6 +3415,71 @@
     } catch (e) {
       app.messages.action('Promotion failed: ' + (e.message || e), app.modal.body(), 'danger');
     }
+  }
+
+  // ── Site join (spoke adopts a master directory) ───────────────────────────
+  async function joinCurrentSiteToMaster() {
+    const masterUrl = ($('#site-join-url').val() || '').trim();
+    const joinKey = ($('#site-join-key').val() || '').trim();
+    if (!masterUrl || !joinKey) {
+      return app.messages.toast('Enter the master Directory URL and a site join key', 'warning');
+    }
+    const confirmed = await app.messages.confirm(
+      'Join ' + masterUrl + ' as a read-only spoke? This adopts its directory (users, groups, resources).',
+      app.modal.body(), 'warning'
+    );
+    if (!confirmed) return;
+
+    try {
+      const res = await app.api.post('site/join', { masterUrl, joinKey });
+      app.messages.toast(res.message || 'Joined master site', 'success');
+      app.modal.close();
+      refreshSiteStatus();
+    } catch (e) {
+      app.messages.action('Join failed: ' + (e.message || e), app.modal.body(), 'danger');
+    }
+  }
+
+  async function loadSiteJoinKeys() {
+    try {
+      const res = await app.api.get('site/join-keys');
+      const rows = (res.joinKeys || []).map(k => {
+        const status = k.revoked
+          ? '<span class="badge bg-secondary">revoked</span>'
+          : '<span class="badge bg-success">active</span>';
+        const revoke = k.revoked
+          ? ''
+          : '<button class="btn btn-sm btn-outline-danger" onclick="revokeSiteJoinKey(\'' + k.id + '\')"><i class="fa-solid fa-ban me-1"></i>Revoke</button>';
+        return '<tr><td>' + esc(k.label) + '</td><td><code>' + esc(k.keyPrefix) + '</code></td><td>' + (k.use_count || 0) + '</td><td>' + status + '</td><td class="text-end">' + revoke + '</td></tr>';
+      }).join('');
+      $('#site-join-key-tbody').html(rows);
+    } catch (e) { console.error('load site join keys:', e); }
+  }
+
+  async function mintSiteJoinKey() {
+    const label = ($('#site-join-key-label').val() || '').trim() || 'default';
+    try {
+      const res = await app.api.post('site/join-keys', { label });
+      $('#site-join-key-result').html(
+        '<div class="alert alert-warning small p-2 mb-0">Key created (shown once, copy it now): <code class="user-select-all">' + res.key + '</code>' +
+        '<button class="btn btn-sm btn-outline-secondary ms-2" onclick="copySiteJoinKey(this)"><i class="fa-solid fa-copy me-1"></i>Copy</button></div>'
+      );
+      loadSiteJoinKeys();
+    } catch (e) { app.messages.toast('Mint failed: ' + (e.message || e), 'danger'); }
+  }
+
+  function copySiteJoinKey(btn) {
+    const code = $(btn).closest('div').find('code').text();
+    navigator.clipboard.writeText(code).then(() => {
+      $(btn).html('<i class="fa-solid fa-check me-1"></i>Copied!');
+    });
+  }
+
+  async function revokeSiteJoinKey(id) {
+    try {
+      await app.api.post('site/join-keys/' + id + '/revoke', {});
+      loadSiteJoinKeys();
+    } catch (e) { app.messages.toast('Revoke failed: ' + (e.message || e), 'danger'); }
   }
 
   $(document).ready(function(){

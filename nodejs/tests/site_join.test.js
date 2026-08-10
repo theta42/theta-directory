@@ -1,6 +1,6 @@
 'use strict';
 
-const { scalarResource, scalarEdge, importDirectory, ldapAddArgs, baseDnFrom } = require('../utils/site_join');
+const { scalarResource, scalarEdge, importDirectory, ldapAddArgs, baseDnFrom, siteIsFresh } = require('../utils/site_join');
 
 // In-memory model stubs so importDirectory can be exercised without a DB.
 function makeStore() {
@@ -118,4 +118,33 @@ test('baseDnFrom prefers stack.ldapBaseDn and falls back to the bind DN', () => 
   expect(baseDnFrom({ stack: { ldapBaseDn: 'dc=stack,dc=com' } })).toBe('dc=stack,dc=com');
   expect(baseDnFrom({ ldap: { bindDN: 'cn=admin,dc=example,dc=com' } })).toBe('dc=example,dc=com');
   expect(baseDnFrom({ ldap: { bindDN: 'cn=admin' } })).toBe('');
+});
+
+// The fresh-install guard: only no-users-beyond-admin + no-agents may join.
+test('siteIsFresh is true with only the bootstrap admin and no agents', async () => {
+  const User = { listDetail: async () => [{ uid: 'admin', isServiceAccount: false }] };
+  const Agent = { list: async () => [] };
+  expect(await siteIsFresh({ User, Agent })).toBe(true);
+});
+
+test('siteIsFresh is false with a second real user', async () => {
+  const User = { listDetail: async () => [{ uid: 'admin' }, { uid: 'bob' }] };
+  const Agent = { list: async () => [] };
+  expect(await siteIsFresh({ User, Agent })).toBe(false);
+});
+
+test('siteIsFresh is false with an enrolled agent', async () => {
+  const User = { listDetail: async () => [{ uid: 'admin' }] };
+  const Agent = { list: async () => [{ id: 'a1' }] };
+  expect(await siteIsFresh({ User, Agent })).toBe(false);
+});
+
+test('siteIsFresh ignores service accounts', async () => {
+  const User = { listDetail: async () => [
+    { uid: 'admin' },
+    { uid: 'sso-svc', isServiceAccount: true },
+    { uid: 'ldapclient', isServiceAccount: true }
+  ] };
+  const Agent = { list: async () => [] };
+  expect(await siteIsFresh({ User, Agent })).toBe(true);
 });
