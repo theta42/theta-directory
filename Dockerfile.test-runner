@@ -50,6 +50,8 @@ COPY test/seed-test-user.sh /usr/local/bin/seed-test-user
 RUN chmod +x /usr/local/bin/seed-test-user
 # End-to-end LDAP tunnel test client (docker-compose.e2e.yml)
 COPY test/tunnel_e2e.js ./test/tunnel_e2e.js
+# End-to-end multi-site join test client (docker-compose.multisite-e2e.yml)
+COPY test/multisite_join_e2e.js ./test/multisite_join_e2e.js
 
 # Default command: seed the test user, then run the test suite
 CMD ["sh", "-c", "seed-test-user && npm test"]
