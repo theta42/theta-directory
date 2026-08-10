@@ -252,6 +252,23 @@ router.get('/resources', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── Spoke read-only enforcement ─────────────────────────────────────────────
+// On a joined spoke the catalog is a copy of the master's; directory writes
+// must go to the master (MULTI_SITE_SPEC.md — spoke = read-only catalog). Any
+// mutating request below this point is rejected on a spoke with a pointer to
+// the master. (site-status / site-promote live AFTER this middleware and are
+// not directory writes.)
+router.use((req, res, next) => {
+  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+    const cfg = siteConfig.get();
+    if (!cfg.isMaster) {
+      const hint = cfg.masterUrl ? ' Directory writes must go to the master at ' + cfg.masterUrl + '.' : '';
+      return res.status(403).json({ status: 'error', message: 'This node is a spoke (read-only catalog).' + hint });
+    }
+  }
+  next();
+});
+
 router.post('/resources', async (req, res, next) => {
   try {
     if (!req.body.hostId && req.body.parentSlug) {
@@ -887,6 +904,30 @@ router.post('/discovered/merge', async (req, res, next) => {
 // MASTER_URL / SITE_SLUG only seed the defaults. site-promote and the
 // /api/site/join flow both write to it.
 const siteConfig = require('../utils/site_config');
+const { siteIsFresh } = require('../utils/site_join');
+const { Agent } = require('../models/agent');
+
+// probeMasterHealth checks whether this (spoke) node can reach its master over
+// the site join key. The master's /api/site/ping is deliberately lightweight.
+async function probeMasterHealth(cfg) {
+  if (cfg.isMaster) return true;
+  if (!cfg.masterUrl || !cfg.masterJoinKey) return false;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const resp = await fetch(String(cfg.masterUrl).replace(/\/+$/, '') + '/api/site/ping', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + cfg.masterJoinKey, 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: controller.signal
+    });
+    return resp.ok;
+  } catch (e) {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 router.get('/site-status', async (req, res, next) => {
   try {
@@ -895,14 +936,20 @@ router.get('/site-status', async (req, res, next) => {
     const gateResources = allResources.filter(r => r.metadata && r.metadata.subType === 'wireguard');
 
     const cfg = siteConfig.get();
+    const wanConnected = await probeMasterHealth(cfg);
+    let canJoin = false;
+    if (cfg.isMaster) {
+      canJoin = await siteIsFresh({ User, Agent }).catch(() => false);
+    }
     res.json({
       status: 'ok',
       config: {
         isMaster: cfg.isMaster,
         masterUrl: cfg.masterUrl,
         siteSlug: cfg.siteSlug,
-        wanConnected: cfg.wanConnected,
-        siteMode: cfg.isMaster ? 'master' : 'spoke'
+        wanConnected,
+        siteMode: cfg.isMaster ? 'master' : 'spoke',
+        canJoin
       },
       sitesCount: sites.length,
       sites: sites.map(s => ({ id: s.id, name: s.name, slug: s.slug })),

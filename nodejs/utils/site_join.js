@@ -101,4 +101,25 @@ function baseDnFrom(conf) {
   return m ? m[1] : '';
 }
 
-module.exports = { scalarResource, scalarEdge, importDirectory, ldapAddArgs, baseDnFrom };
+// siteIsFresh reports whether this deployment may join a master site
+// (MULTI_SITE_SPEC.md): no users beyond the bootstrap admin and no enrolled
+// agents. The bootstrap always seeds a handful of default resources (site →
+// host → sso/proxy services), so resources are NOT the signal — the operator's
+// rule is "no users". A directory with real users must never be merged into a
+// master's; that is the destructive case this guard prevents.
+async function siteIsFresh({ User, Agent }) {
+  const agents = (Agent && Agent.list ? await Agent.list().catch(() => []) : []);
+  if (agents && agents.length > 0) return false;
+  if (User && typeof User.listDetail === 'function') {
+    try {
+      const users = await User.listDetail();
+      const real = (users || []).filter(u => !u.isServiceAccount);
+      return real.length <= 1; // at most the bootstrap admin
+    } catch (e) {
+      // LDAP unreachable — fall back to the agent-only check.
+    }
+  }
+  return true;
+}
+
+module.exports = { scalarResource, scalarEdge, importDirectory, ldapAddArgs, baseDnFrom, siteIsFresh };
