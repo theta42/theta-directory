@@ -3360,7 +3360,7 @@
 
       html += '</div>';
 
-      app.modal.show('Multi-Site & Network Gateway Status', html, [], 'modal-lg');
+      app.modal.open({ title: 'Multi-Site & Network Gateway Status', bodyHtml: html, size: 'lg' });
     } catch (e) {
       app.messages.toast('Error fetching site status: ' + e.message, 'danger');
     }
