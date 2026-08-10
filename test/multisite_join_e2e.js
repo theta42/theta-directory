@@ -92,11 +92,24 @@ userPassword: ${hash}
   await execFileAsync('ldapadd', ['-x', '-H', `ldap://${ldapHost}:389`, '-D', bindDn, '-w', LDAP_ADMIN_PASS], { input: ldif })
     .catch((e) => { if (!/Already exists/.test(e.stderr || '')) throw e; });
 
-  for (const group of ['app_sso_admin']) {
+  // god_admin is needed for site-promote (SUPER_ADMIN_GROUP, utils/permission.js).
+  for (const group of ['app_sso_admin', 'god_admin']) {
     const modLdif = `dn: cn=${group},ou=groups,${baseDn}\nchangetype: modify\nadd: member\nmember: cn=${ADMIN_UID},ou=people,${baseDn}\n`;
-    await execFileAsync('ldapmodify', ['-x', '-H', `ldap://${ldapHost}:389`, '-D', bindDn, '-w', LDAP_ADMIN_PASS], { input: modLdif })
-      .catch((e) => { if (!/[Tt]ype or value exists/.test(e.stderr || '')) throw e; });
+    try {
+      await execFileAsync('ldapmodify', ['-x', '-H', `ldap://${ldapHost}:389`, '-D', bindDn, '-w', LDAP_ADMIN_PASS], { input: modLdif });
+      console.log(`    (added ${ADMIN_UID} to ${group} on ${ldapHost})`);
+    } catch (e) {
+      if (!/[Tt]ype or value exists/.test(e.stderr || '')) {
+        console.error(`    FAILED adding ${ADMIN_UID} to ${group} on ${ldapHost}: ${e.stderr || e.message}`);
+        throw e;
+      }
+      console.log(`    (${ADMIN_UID} already in ${group} on ${ldapHost})`);
+    }
   }
+
+  const verify = await execFileAsync('ldapsearch', ['-x', '-H', `ldap://${ldapHost}:389`, '-D', bindDn, '-w', LDAP_ADMIN_PASS,
+    '-b', `cn=god_admin,ou=groups,${baseDn}`, 'member']);
+  console.log(`    god_admin members on ${ldapHost}:\n${verify.stdout}`);
 }
 
 async function login(url) {
@@ -233,6 +246,43 @@ async function main() {
   step('Verifying master itself is unaffected (still isMaster:true, no writes blocked)');
   const { body: masterCfg } = await api(MASTER_URL, '/api/site/config', { token: masterToken });
   if (masterCfg.config.isMaster !== true) fail('master flipped away from isMaster:true unexpectedly');
+
+  step('Promoting the spoke to master (coordinated handoff -- must demote the old master too)');
+  const promoteRes = await api(SPOKE_URL, '/api/directory-admin/site-promote', {
+    method: 'POST',
+    token: spokeToken,
+    body: { selfUrl: 'http://spoke:3001' }
+  });
+  if (promoteRes.status !== 200) fail(`promotion failed: ${promoteRes.status} ${JSON.stringify(promoteRes.body)}`);
+  if (promoteRes.body.handoff !== 'previous master demoted') {
+    fail(`expected the old master to be demoted as part of promotion, got handoff=${JSON.stringify(promoteRes.body.handoff)}`);
+  }
+
+  step('Verifying the newly-promoted node is master');
+  const { body: newMasterCfg } = await api(SPOKE_URL, '/api/site/config', { token: spokeToken });
+  if (newMasterCfg.config.isMaster !== true) fail(`newly-promoted node should be isMaster:true, got ${JSON.stringify(newMasterCfg.config)}`);
+
+  step('Verifying the old master was actually demoted to a spoke of the new master');
+  const { body: oldMasterCfg } = await api(MASTER_URL, '/api/site/config', { token: masterToken });
+  if (oldMasterCfg.config.isMaster !== false) fail(`old master should be isMaster:false after being demoted, got ${JSON.stringify(oldMasterCfg.config)}`);
+  if (oldMasterCfg.config.masterUrl !== 'http://spoke:3001') {
+    fail(`old master's masterUrl should now point at the new master, got ${JSON.stringify(oldMasterCfg.config.masterUrl)}`);
+  }
+
+  step('Verifying the (now-demoted) old master rejects writes, and the new master accepts them');
+  const oldMasterWrite = await api(MASTER_URL, '/api/directory-admin/resources', {
+    method: 'POST',
+    token: masterToken,
+    body: { name: 'Should Be Rejected Post-Demotion', slug: 'host_e2e_should_reject_2', kind: 'host' }
+  });
+  if (oldMasterWrite.status !== 403) fail(`expected 403 writing to the demoted old master, got ${oldMasterWrite.status} ${JSON.stringify(oldMasterWrite.body)}`);
+
+  const newMasterWrite = await api(SPOKE_URL, '/api/directory-admin/resources', {
+    method: 'POST',
+    token: spokeToken,
+    body: { name: 'E2E Post-Promotion Host', slug: 'host_e2e_postpromotion', kind: 'host', parentSlug: 'site_e2e' }
+  });
+  if (newMasterWrite.status !== 200) fail(`expected the newly-promoted master to accept writes, got ${newMasterWrite.status} ${JSON.stringify(newMasterWrite.body)}`);
 
   if (failed) {
     console.error('MULTISITE E2E: one or more checks failed (see above)');
