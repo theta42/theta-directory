@@ -1,3 +1,17 @@
+# v2.4.0 - 2026-08-10
+
+### Added
+- **Live catalog replication.** A spoke now stays in sync after joining instead of only getting a one-time snapshot: it registers its own endpoint with the master at join time (`POST /api/site/spokes`, Bearer the site join key), and every successful master catalog write fires a fire-and-forget push (`utils/site_replicate.js`) at every registered spoke, concurrently — one unreachable spoke never blocks or delays delivery to another. The spoke's `POST /api/site/resync` handler re-runs the same tested export-pull-and-import path used at join time rather than applying a partial diff.
+- **Identical-directory agent-signing key.** `POST /api/site/export` now best-effort includes the master's agent-signing key; a spoke adopts it via `agent_keys.adopt()` on both join and every resync, so any site's `sso-manager-node` can validly sign a command for any agent enrolled at any other site (a deliberate blast-radius tradeoff for this deployment's small, trusted scale — see `theta-suite`'s `docs/MULTI_SITE_SPEC.md` §2).
+- **Coordinated master promotion.** `POST /api/directory-admin/site-promote` now demotes the previous master as part of the same action (mints it a fresh join key, calls its new `POST /api/site/demote`) instead of leaving a manual two-step gap where two nodes could both believe they're master. Best-effort: an unreachable old master (the WAN-outage scenario this control exists for) never blocks the local promotion — the response's `handoff` field reports what happened.
+- **Master Site modal UI**: new "Live Replication" (spoke) / "Registered Spokes" (master) status rows; the join form gained a "this site's own reachable URL" field (prefilled from the browser origin) wired to the `selfUrl` the join API already supported but the UI never sent — a UI-driven join previously never registered for live replication, only the `setup.sh` bootstrap path did; the promote button's success toast now reports the actual handoff result.
+- New `nodejs/models/site_spoke.js` (registered spokes + their push tokens) and `docker-compose.multisite-e2e.yml` + `test/multisite_join_e2e.js` (real two-container master+spoke regression test covering join, live replication, promotion, and demotion end to end).
+
+### Fixed
+- **`site-promote`'s god_admin check was dead on arrival.** It read `req.user.groups`, a field nothing in the codebase ever populates (every other admin gate resolves membership live via `permission.byGroup()`/`Group.list(user.dn)`, which also handles nested-group membership) — the check silently evaluated to an empty array on every request, so promotion returned 403 for every user, including a real god_admin, since it shipped in v2.0.0. Only surfaced by the live e2e test, not by inspection.
+- **The read-only write-gate blocked `site-promote` on a spoke before its handler could run** — the one mutating request a spoke must be able to make to itself. Exempted `/site-promote` from the gate.
+- **`GET /api/site/config` was returning `masterJoinKey` and `replicationPushToken`** — live credentials — directly in the JSON response to any admin session. Replaced with boolean derivatives (`hasMasterJoinKey`, `liveReplication`).
+
 # v2.3.0 - 2026-08-10
 
 ### Added

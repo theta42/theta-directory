@@ -2,6 +2,7 @@
 const router = require('express').Router();
 const permission = require('../utils/permission');
 const { Resource, ResourceEdge, ResourceGroup } = require('../models/resource');
+const { SiteJoinKey } = require('../models/site_join_key');
 const { Group } = require('../models/group_ldap');
 const { User } = require('../models/user_ldap');
 const { cnFromDn } = require('../utils/user_groups');
@@ -9,6 +10,7 @@ const { projectResources } = require('@simpleworkjs/directory-schema');
 
 const SUPER_ADMIN_GROUP = permission.SUPER_ADMIN_GROUP;
 const groups = require('../utils/groups');
+const meshReplicate = require('../utils/site_replicate');
 
 // Make `childCn` a member of `parentCn`, i.e. everyone in the child is
 // transitively in the parent. Idempotent and non-fatal: "already a member" is
@@ -252,19 +254,38 @@ router.get('/resources', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ── Spoke read-only enforcement ─────────────────────────────────────────────
+// ── Spoke read-only enforcement + live replication trigger ──────────────────
 // On a joined spoke the catalog is a copy of the master's; directory writes
 // must go to the master (MULTI_SITE_SPEC.md — spoke = read-only catalog). Any
 // mutating request below this point is rejected on a spoke with a pointer to
 // the master. (site-status / site-promote live AFTER this middleware and are
 // not directory writes.)
+//
+// On the MASTER, a successful mutation here fires a fire-and-forget resync
+// push (utils/site_replicate.js) at every registered spoke, so the shipped
+// join flow's one-time snapshot doesn't go stale the moment the catalog
+// changes. Fires on res.on('finish') (after the response is actually sent,
+// status known) rather than before the handler runs, so a write that fails
+// validation never triggers a pointless replication round-trip.
+// /site-promote is deliberately exempt below: it's the ONE mutating request a
+// spoke must be able to make to itself (that's the entire point -- a spoke
+// promoting itself to master). Without this exemption the gate 403s the
+// promotion request before it ever reaches the handler, since this
+// middleware is registered ahead of router.post('/site-promote', ...) later
+// in the file and Express matches router.use() against every path.
 router.use((req, res, next) => {
-  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+  const mutating = ['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method);
+  if (mutating && req.path !== '/site-promote') {
     const cfg = siteConfig.get();
     if (!cfg.isMaster) {
       const hint = cfg.masterUrl ? ' Directory writes must go to the master at ' + cfg.masterUrl + '.' : '';
       return res.status(403).json({ status: 'error', message: 'This node is a spoke (read-only catalog).' + hint });
     }
+    res.on('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        meshReplicate.replicateToSpokes(`${req.method} ${req.path}`);
+      }
+    });
   }
   next();
 });
@@ -906,6 +927,7 @@ router.post('/discovered/merge', async (req, res, next) => {
 const siteConfig = require('../utils/site_config');
 const { siteIsFresh } = require('../utils/site_join');
 const { Agent } = require('../models/agent');
+const { SiteSpoke } = require('../models/site_spoke');
 
 // probeMasterHealth checks whether this (spoke) node can reach its master over
 // the site join key. The master's /api/site/ping is deliberately lightweight.
@@ -941,6 +963,13 @@ router.get('/site-status', async (req, res, next) => {
     if (cfg.isMaster) {
       canJoin = await siteIsFresh({ User, Agent }).catch(() => false);
     }
+    // registeredSpokesCount (master) / liveReplication (spoke): surfaces
+    // whether live replication is actually wired up, not just whether the
+    // join itself succeeded -- a spoke that joined without `selfUrl` (e.g.
+    // via an older bootstrap, or the UI form before it grew the field) is
+    // fully joined but silently stuck on the one-time snapshot, which was
+    // otherwise invisible anywhere in the UI.
+    const registeredSpokesCount = cfg.isMaster ? await SiteSpoke.list().then(l => l.length).catch(() => 0) : 0;
     res.json({
       status: 'ok',
       config: {
@@ -949,7 +978,9 @@ router.get('/site-status', async (req, res, next) => {
         siteSlug: cfg.siteSlug,
         wanConnected,
         siteMode: cfg.isMaster ? 'master' : 'spoke',
-        canJoin
+        canJoin,
+        liveReplication: !cfg.isMaster ? !!cfg.replicationPushToken : undefined,
+        registeredSpokesCount
       },
       sitesCount: sites.length,
       sites: sites.map(s => ({ id: s.id, name: s.name, slug: s.slug })),
@@ -960,21 +991,67 @@ router.get('/site-status', async (req, res, next) => {
 
 router.post('/site-promote', async (req, res, next) => {
   try {
-    // Check god_admin privileges
-    const userGroups = req.user && req.user.groups ? req.user.groups : [];
-    const isGodAdmin = userGroups.includes('god_admin') || userGroups.includes(SUPER_ADMIN_GROUP);
+    // god_admin privilege check. This used to read req.user.groups, which
+    // nothing in the codebase ever populates -- User.get() (what
+    // Auth.checkToken returns as req.user) has no .groups field; every other
+    // admin gate in this app resolves membership live via
+    // permission.byGroup()/Group.list(user.dn), which also correctly
+    // resolves NESTED group membership (a user who is god_admin via a nested
+    // group, not just direct membership). The old check silently evaluated
+    // to an empty array for every request, making this endpoint
+    // unreachable for ANY user -- caught by the multi-site e2e promotion
+    // test (docker-compose.multisite-e2e.yml), not by inspection.
+    const isGodAdmin = await permission.byGroup(req.user, [SUPER_ADMIN_GROUP]).catch(() => false);
     if (!isGodAdmin) {
       return res.status(403).json({ status: 'error', message: 'Master promotion requires explicit god_admin authority' });
     }
 
-    siteConfig.save({ isMaster: true, masterUrl: '' });
+    // MULTI_SITE_SPEC.md §3.2: promotion is ONE coordinated action, never a
+    // manual two-step "demote the old one first" — if we currently know a
+    // master (we were a spoke), hand it off before flipping ourselves. This
+    // is best-effort: an unreachable old master (the whole point of the
+    // WAN-outage promotion scenario §3 describes) must never block a
+    // god_admin's local promotion, it's just reported so the operator can
+    // reconcile it manually.
+    const beforeCfg = siteConfig.get();
+    let handoffNote = 'no previous master on file (already master, or fresh install)';
+    if (!beforeCfg.isMaster && beforeCfg.masterUrl && beforeCfg.masterJoinKey) {
+      try {
+        const { raw: freshKey } = await SiteJoinKey.issue({
+          label: 'promotion-handoff-' + new Date().toISOString().slice(0, 10),
+          createdBy: req.user ? req.user.uid : 'admin'
+        });
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 15000);
+        let resp;
+        try {
+          resp = await fetch(beforeCfg.masterUrl + '/api/site/demote', {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + beforeCfg.masterJoinKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({ newMasterUrl: (req.body && req.body.selfUrl) || '', newJoinKey: freshKey }),
+            signal: controller.signal
+          });
+        } finally { clearTimeout(timer); }
+        handoffNote = resp.ok ? 'previous master demoted' : ('previous master demote failed: HTTP ' + resp.status);
+      } catch (e) {
+        handoffNote = 'previous master unreachable (' + e.message + ') — promoted locally anyway; reconcile it manually once it\'s back';
+      }
+    }
 
-    console.log(`[MULTI-SITE] Node promoted to MASTER by user ${req.user ? req.user.uid : 'admin'}`);
+    siteConfig.save({ isMaster: true, masterUrl: '', masterJoinKey: undefined });
+
+    console.log(`[MULTI-SITE] Node promoted to MASTER by user ${req.user ? req.user.uid : 'admin'} (handoff: ${handoffNote})`);
+
+    // Fire-and-forget: let every known spoke know a new master exists so
+    // their next resync targets it. (They'll also learn this the hard way if
+    // their old-master resync calls start failing, but this speeds it up.)
+    meshReplicate.replicateToSpokes('master-promoted');
 
     const cfg = siteConfig.get();
     res.json({
       status: 'ok',
       message: 'Node successfully promoted to Master Site',
+      handoff: handoffNote,
       config: {
         isMaster: true,
         masterUrl: '',
