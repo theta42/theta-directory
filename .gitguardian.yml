@@ -1,0 +1,12 @@
+# GitGuardian configuration (ggshield / GitGuardian GH checks).
+#
+# The generic-password detector false-positives on LDAP admin bind credentials
+# being READ from runtime config (sso-secrets.js / /config/site.json) — e.g.
+# `const x = conf.ldap && conf.ldap.bindPassword` in the multi-site join flow.
+# That is the correct pattern (never a hardcoded secret); ignore the variable
+# reference, not the actual value.
+version: 2
+ignore:
+  - name: generic-password
+    match: |
+      conf\.ldap\s*&&\s*conf\.ldap\.bindPassword
