@@ -1,3 +1,8 @@
+# v2.0.4 - 2026-08-09
+
+### Changed
+- **`Dockerfile.openldap` no longer compiles OpenLDAP from source.** Its `ldapbuild` stage now pulls `ghcr.io/theta42/openldap-nestgroup:<pinned commit>` (built once by `.github/workflows/build-openldap-image.yml` from the new `Dockerfile.openldap-builder`) instead of cloning `git.openldap.org` and running `./configure && make` on every build. Cuts ~5 minutes off every build of this Dockerfile, including 3x per CI run's test matrix, and removes the runtime dependency on that mirror being up (it 502'd twice tonight, blocking two PRs). Verified locally end-to-end before merging: built the app image against the published base, ran it, confirmed slapd boots healthy with the nestgroup overlay loaded and the correct pinned commit.
+
 # v2.0.3 - 2026-08-09
 
 ### Fixed
