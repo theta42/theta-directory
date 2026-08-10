@@ -927,6 +927,7 @@ router.post('/discovered/merge', async (req, res, next) => {
 const siteConfig = require('../utils/site_config');
 const { siteIsFresh } = require('../utils/site_join');
 const { Agent } = require('../models/agent');
+const { SiteSpoke } = require('../models/site_spoke');
 
 // probeMasterHealth checks whether this (spoke) node can reach its master over
 // the site join key. The master's /api/site/ping is deliberately lightweight.
@@ -962,6 +963,13 @@ router.get('/site-status', async (req, res, next) => {
     if (cfg.isMaster) {
       canJoin = await siteIsFresh({ User, Agent }).catch(() => false);
     }
+    // registeredSpokesCount (master) / liveReplication (spoke): surfaces
+    // whether live replication is actually wired up, not just whether the
+    // join itself succeeded -- a spoke that joined without `selfUrl` (e.g.
+    // via an older bootstrap, or the UI form before it grew the field) is
+    // fully joined but silently stuck on the one-time snapshot, which was
+    // otherwise invisible anywhere in the UI.
+    const registeredSpokesCount = cfg.isMaster ? await SiteSpoke.list().then(l => l.length).catch(() => 0) : 0;
     res.json({
       status: 'ok',
       config: {
@@ -970,7 +978,9 @@ router.get('/site-status', async (req, res, next) => {
         siteSlug: cfg.siteSlug,
         wanConnected,
         siteMode: cfg.isMaster ? 'master' : 'spoke',
-        canJoin
+        canJoin,
+        liveReplication: !cfg.isMaster ? !!cfg.replicationPushToken : undefined,
+        registeredSpokesCount
       },
       sitesCount: sites.length,
       sites: sites.map(s => ({ id: s.id, name: s.name, slug: s.slug })),

@@ -3339,6 +3339,10 @@
               '<tr><th>WAN Sync Health:</th><td>' + (res.config.wanConnected === false
                 ? '<span class="badge bg-danger"><i class="fa-solid fa-xmark me-1"></i> Offline / Disconnected</span>'
                 : '<span class="badge bg-success"><i class="fa-solid fa-check me-1"></i> Online / Operational</span>') + '</td></tr>' +
+              (!isMaster ? '<tr><th>Live Replication:</th><td>' + (cfg.liveReplication
+                ? '<span class="badge bg-success"><i class="fa-solid fa-bolt me-1"></i> Live (catalog updates push automatically)</span>'
+                : '<span class="badge bg-warning text-dark"><i class="fa-solid fa-triangle-exclamation me-1"></i> Snapshot only (re-join to register for live updates)</span>') + '</td></tr>' : '') +
+              (isMaster ? '<tr><th>Registered Spokes:</th><td><span class="badge bg-success">' + (cfg.registeredSpokesCount || 0) + ' receiving live updates</span></td></tr>' : '') +
               '<tr><th>Registered Sites:</th><td><span class="badge bg-primary">' + (res.sitesCount || 0) + ' sites</span></td></tr>' +
               '<tr><th>Theta Gateways:</th><td><span class="badge bg-dark">' + (res.gatewaysCount || 0) + ' active gateways</span></td></tr>' +
             '</table>' +
@@ -3358,6 +3362,10 @@
             '<div class="row g-2">' +
               '<div class="col-md-7"><input type="text" id="site-join-url" class="form-control form-control-sm" placeholder="Master Directory URL (e.g. https://sso.master.example.com)"></div>' +
               '<div class="col-md-5"><input type="text" id="site-join-key" class="form-control form-control-sm font-monospace" placeholder="Site join key (stj_...)"></div>' +
+            '</div>' +
+            '<div class="mt-2">' +
+              '<label class="form-label small mb-1">This site\'s own reachable URL <span class="text-muted">(so the master can push live updates here — leave blank to only get a one-time snapshot)</span></label>' +
+              '<input type="text" id="site-join-self-url" class="form-control form-control-sm" value="' + esc(window.location.origin) + '">' +
             '</div>' +
             '<button class="btn btn-sm btn-primary mt-2" onclick="joinCurrentSiteToMaster()"><i class="fa-solid fa-link me-1"></i> Join Site</button>' +
           '</div>' +
@@ -3408,8 +3416,9 @@
     if (!confirmed) return;
 
     try {
-      const res = await app.api.post('directory-admin/site-promote', {});
-      app.messages.toast(res.message || 'Node promoted to Master Site', 'success');
+      const res = await app.api.post('directory-admin/site-promote', { selfUrl: window.location.origin });
+      const handoffOk = res.handoff === 'previous master demoted' || /no previous master/.test(res.handoff || '');
+      app.messages.toast((res.message || 'Node promoted to Master Site') + ' — ' + (res.handoff || ''), handoffOk ? 'success' : 'warning');
       app.modal.close();
       refreshSiteStatus();
     } catch (e) {
@@ -3421,6 +3430,7 @@
   async function joinCurrentSiteToMaster() {
     const masterUrl = ($('#site-join-url').val() || '').trim();
     const joinKey = ($('#site-join-key').val() || '').trim();
+    const selfUrl = ($('#site-join-self-url').val() || '').trim();
     if (!masterUrl || !joinKey) {
       return app.messages.toast('Enter the master Directory URL and a site join key', 'warning');
     }
@@ -3431,8 +3441,11 @@
     if (!confirmed) return;
 
     try {
-      const res = await app.api.post('site/join', { masterUrl, joinKey });
-      app.messages.toast(res.message || 'Joined master site', 'success');
+      const res = await app.api.post('site/join', { masterUrl, joinKey, ...(selfUrl ? { selfUrl } : {}) });
+      const replicationNote = res.replication && res.replication.live
+        ? ' Live replication is active.'
+        : ' Snapshot only — this site will not receive live updates (' + ((res.replication && res.replication.note) || 'no selfUrl given') + ').';
+      app.messages.toast((res.message || 'Joined master site') + replicationNote, res.replication && res.replication.live ? 'success' : 'warning');
       app.modal.close();
       refreshSiteStatus();
     } catch (e) {
