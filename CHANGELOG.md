@@ -1,3 +1,17 @@
+# v2.3.0 - 2026-08-10
+
+### Added
+- **Multi-site join — UI + enforcement** (completes the join layer started in v2.2.0):
+  - **Master Site modal**: a fresh install (no users beyond the bootstrap admin, no agents) gets a **"Join an Existing Site"** form (master URL + site join key); a master gets a **Site Join Keys** manager (mint/revoke/list, key shown once, copy button); **WAN Sync Health** now reflects a live probe of the master.
+  - `POST /api/site/ping` (Bearer site-join-key): lightweight master reachability probe for WAN health.
+  - **Spoke read-only**: directory-write routes (resources, edges, groups, secrets, grants, driver actions, discovery merges) return `403` pointing at the master once a node is a spoke.
+  - **Fresh-install guard**: `/api/site/join` refuses unless the directory has no users beyond the admin and no enrolled agents (`siteIsFresh`); `site-status` exposes `canJoin` so the UI only offers join when it's actually allowed.
+  - The spoke persists the join key (`masterJoinKey`) in `/config/site.json` for WAN health + future write-proxy.
+- **Unit tests**: `siteIsFresh` cases (admin-only, second user, enrolled agent, service accounts ignored).
+
+### Fixed
+- **Branch-protection check name**: the lint job that `master` requires is literally named "Syntax check bootstrap.js"; the multi-site bootstrap script is checked by that same job.
+
 # v2.2.0 - 2026-08-10
 
 ### Added
