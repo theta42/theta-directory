@@ -118,7 +118,7 @@ class AgentManager {
 
   async handleDiscovery(agent, payload) {
     const discovery = {
-      version: payload.version || payload.agent_version || 'v2.0.0',
+      version: payload.version || payload.agent_version || 'unknown',
       hostname: payload.hostname || '',
       ip_addresses: Array.isArray(payload.ip_addresses) ? payload.ip_addresses : [],
       public_ip: payload.public_ip || '',

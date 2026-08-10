@@ -42,7 +42,7 @@ class ThetaAgentDriver extends BaseDriver {
       status: 'online',
       driver: this.name,
       agentId: agent.id,
-      agentVersion: agent.version || (telemetry && telemetry.version) || 'v2.0.0',
+      agentVersion: agent.version || (telemetry && telemetry.version) || 'unknown',
       lastSeen: agent.lastSeen,
       system: {
         cpu: telemetry.cpu || null,
