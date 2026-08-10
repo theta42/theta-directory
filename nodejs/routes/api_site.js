@@ -219,9 +219,23 @@ router.use(async (req, res, next) => {
 });
 
 // Current multi-site role (master/spoke, site slug, master URL).
+// Never sent to the client: masterJoinKey and replicationPushToken are live
+// credentials, not display data. Callers get boolean derivatives instead
+// (hasMasterJoinKey, liveReplication) -- enough to render UI state without
+// putting a secret in a browser response.
 router.get('/config', async (req, res, next) => {
-  try { res.json({ status: 'ok', config: siteConfig.get() }); }
-  catch (e) { next(e); }
+  try {
+    const cfg = siteConfig.get();
+    const { masterJoinKey, replicationPushToken, ...safe } = cfg;
+    res.json({
+      status: 'ok',
+      config: {
+        ...safe,
+        hasMasterJoinKey: !!masterJoinKey,
+        liveReplication: !!replicationPushToken
+      }
+    });
+  } catch (e) { next(e); }
 });
 
 // ── Site join key management (admin) ────────────────────────────────────────
