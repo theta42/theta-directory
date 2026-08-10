@@ -170,6 +170,40 @@ router.post('/resync', async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
+// ── Demote (called on the OLD master; Bearer site-join-key; no admin session)
+// MULTI_SITE_SPEC.md §3.2: promoting a spoke must be a single coordinated
+// action, never a two-step "hope nobody's master for a while" gap. The node
+// being promoted calls this on whatever it currently believes is master,
+// using the join-key credential it already holds from when it joined --
+// authenticating "demote me" is exactly the same trust relationship as
+// authenticating "let me pull an export," so no new credential type is
+// needed for THIS direction. (The new master's future ability to push
+// replication/resync to the newly-demoted node is a separate credential --
+// newJoinKey below -- since that's the master->spoke direction, same as
+// every other spoke registration.)
+router.post('/demote', async (req, res, next) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const rawKey = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    const key = await SiteJoinKey.authenticate(rawKey);
+    if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
+
+    const cfg = siteConfig.get();
+    if (!cfg.isMaster) {
+      return res.status(400).json({ status: 'error', message: 'this node is already a spoke' });
+    }
+    const { newMasterUrl, newJoinKey } = req.body || {};
+    if (!newMasterUrl || !newJoinKey) {
+      return res.status(400).json({ status: 'error', message: 'newMasterUrl and newJoinKey are required' });
+    }
+
+    const base = String(newMasterUrl).replace(/\/+$/, '');
+    siteConfig.save({ isMaster: false, masterUrl: base, masterJoinKey: newJoinKey });
+    logAudit('demoted', { demotedBy: key.keyPrefix, newMasterUrl: base });
+    res.json({ status: 'ok', message: 'Demoted to spoke of ' + base });
+  } catch (e) { next(e); }
+});
+
 // ── Everything below requires an admin session ──────────────────────────────
 router.use(middleware.auth);
 router.use(async (req, res, next) => {
