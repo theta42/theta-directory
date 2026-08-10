@@ -90,10 +90,34 @@ function status() {
 	return { available: !!cached, error: loadError };
 }
 
+// Overwrite the stored key with material handed over by a master (multi-site
+// "identical directories" — MULTI_SITE_SPEC.md §2). Every site sharing one
+// signing key is what lets any site's sso-manager validly sign a command for
+// an agent enrolled at any other site, at the accepted cost that compromising
+// ANY one site's OpenBao is equivalent to compromising all of them for agent
+// command authority. That tradeoff was deliberately accepted for this
+// deployment's scale (a handful of trusted sites) -- do not call this to sync
+// keys across a boundary where sites don't trust each other equally.
+//
+// Idempotent: adopting the same key material twice (e.g. on every resync
+// ping) is a no-op past the first call.
+async function adopt({ privateKeyPem, publicKeyPem }) {
+	if (!privateKeyPem || !publicKeyPem) throw new Error('adopt() requires both privateKeyPem and publicKeyPem');
+	if (cached && cached.privateKeyPem === privateKeyPem && cached.publicKeyPem === publicKeyPem) {
+		return cached; // already holding this exact key -- nothing to do
+	}
+	const material = { privateKeyPem, publicKeyPem };
+	await baoConf.set(PATH, material);
+	cached = { ...material, publicKeyBase64: rawPublicKeyBase64(publicKeyPem) };
+	loadError = null;
+	console.log('[agent_keys] adopted signing key from master (multi-site identical-directory sync)');
+	return cached;
+}
+
 // Test seam: drop the in-process cache.
 function _reset() {
 	cached = null;
 	loadError = null;
 }
 
-module.exports = { load, status, rawPublicKeyBase64, _reset, PATH };
+module.exports = { load, status, adopt, rawPublicKeyBase64, _reset, PATH };

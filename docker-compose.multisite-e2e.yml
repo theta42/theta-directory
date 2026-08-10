@@ -1,0 +1,69 @@
+# End-to-end test of the real, shipped multi-site join flow (docs/site-join.md).
+#
+# Spins up two full all-in-one instances (app + bundled slapd each, like
+# docker-compose.repl-test.yml) — "master" and "spoke" — plus a client that
+# drives the actual HTTP API a human/operator would use: mint a site join key
+# on master, join from spoke, verify the spoke adopted the catalog, went
+# read-only, and reports live WAN health.
+#
+#   docker compose -f docker-compose.multisite-e2e.yml up --build --abort-on-container-exit
+#   # exit code 0 = MULTISITE E2E PASS
+#
+# slapcat (used by POST /api/site/export) only sees the LDAP data of the
+# container it runs in, so this MUST use the all-in-one image (master and
+# spoke each carry their own slapd) — the split ldap+redis+app harness used
+# by docker-compose.test.yml/e2e.yml won't exercise export/join at all.
+
+services:
+  master:
+    build:
+      context: .
+      dockerfile: Dockerfile.openldap
+    container_name: multisite_e2e_master
+    environment:
+      - LDAP_BASE_DN=dc=master,dc=test
+      - LDAP_ADMIN_PASS=secret
+      - ORG_NAME=E2E Master
+      - app_oauth__jwtSecret=e2e-multisite-master-jwt-secret
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health >/dev/null 2>&1"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+      start_period: 5s
+
+  spoke:
+    build:
+      context: .
+      dockerfile: Dockerfile.openldap
+    container_name: multisite_e2e_spoke
+    environment:
+      - LDAP_BASE_DN=dc=spoke,dc=test
+      - LDAP_ADMIN_PASS=secret
+      - ORG_NAME=E2E Spoke
+      - app_oauth__jwtSecret=e2e-multisite-spoke-jwt-secret
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health >/dev/null 2>&1"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+      start_period: 5s
+
+  client:
+    build:
+      context: .
+      dockerfile: Dockerfile.test-runner
+    command: ["sh", "-c", "node test/multisite_join_e2e.js"]
+    environment:
+      - MASTER_URL=http://master:3001
+      - SPOKE_URL=http://spoke:3001
+      - MASTER_LDAP_HOST=master
+      - MASTER_BASE_DN=dc=master,dc=test
+      - SPOKE_LDAP_HOST=spoke
+      - SPOKE_BASE_DN=dc=spoke,dc=test
+      - LDAP_ADMIN_PASS=secret
+    depends_on:
+      master:
+        condition: service_healthy
+      spoke:
+        condition: service_healthy

@@ -399,3 +399,7 @@ The Directory incorporates a **4-tier Driver Resolution Engine** (`services/driv
 - `POST /api/directory-admin/resources/:id/driver-action` — Execute management action (`{ action, params }`)
 - `GET /api/directory-admin/resources/:id/driver-logs` — Tail log output (`?lines=100`)
 
+## 11. Multi-Site
+
+This directory can run across multiple sites (one **master** with write authority, any number of **spoke** read-only replicas that stay live-synced after joining), coordinate master promotion, and share the agent-signing key across sites. Full design and operational detail: [`docs/site-join.md`](docs/site-join.md) and, at the suite level, `theta-suite`'s `docs/MULTI_SITE_SPEC.md`.
+

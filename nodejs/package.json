@@ -1,6 +1,6 @@
 {
   "name": "t42-theta-directory",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "A very simple LDAP management and SSO system",
   "author": [
     {
@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node ./bin/www",
     "dev": "npx nodemon --ignore public/ ./bin/www",
-    "test": "NODE_ENV=test jest tests/groups.test.js tests/subtypes.test.js tests/site_join.test.js tests/site_config.test.js --forceExit"
+    "test": "NODE_ENV=test jest tests/groups.test.js tests/subtypes.test.js tests/site_join.test.js tests/site_config.test.js tests/site_replicate.test.js --forceExit"
   },
   "jest": {
     "testEnvironment": "node",
