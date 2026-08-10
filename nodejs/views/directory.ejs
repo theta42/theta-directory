@@ -1,4 +1,4 @@
-<%- include('top') %>
+﻿<%- include('top') %>
 
 <style>
   /* The caret's rotation is driven by a class on the BUTTON, not by swapping
@@ -63,7 +63,7 @@
                         </select>
                         <div class="input-group input-group-sm shadow-sm" style="width: 230px;">
                             <span class="input-group-text" title="What can this user reach?"><i class="fa-solid fa-user-shield"></i></span>
-                            <input type="text" id="user-access-uid" class="form-control" placeholder="uid…" list="access-uid-list"
+                            <input type="text" id="user-access-uid" class="form-control" placeholder="uidâ€¦" list="access-uid-list"
                                    onkeydown="if(event.key==='Enter'){openUserAccessModal();}">
                             <datalist id="access-uid-list"></datalist>
                             <button class="btn btn-outline-secondary" onclick="openUserAccessModal()">Check</button>
@@ -314,14 +314,14 @@
         <label class="form-label font-weight-bold"><i class="fa-solid fa-wand-magic-sparkles me-1 text-primary"></i>Preset Subtype Template</label>
         <select id="res-subtype-template" class="form-select shadow-sm me-2 mb-2" onchange="applySubtypeTemplate()">
           <option value="">-- Custom / Manual --</option>
-          <option value="docker">📦 Docker Engine / Container</option>
-          <option value="systemd">⚙️ Linux Systemd Service</option>
-          <option value="postgresql">🗄️ PostgreSQL Database</option>
-          <option value="redis">🔴 Redis In-Memory Cache</option>
-          <option value="proxmox">🖥️ Proxmox VE Hypervisor</option>
-          <option value="wireguard">🛡️ WireGuard VPN Tunnel</option>
-          <option value="unifi">📶 UniFi Network Controller</option>
-          <option value="k8s">☸️ Kubernetes Cluster Node</option>
+          <option value="docker">ðŸ“¦ Docker Engine / Container</option>
+          <option value="systemd">âš™ï¸ Linux Systemd Service</option>
+          <option value="postgresql">ðŸ—„ï¸ PostgreSQL Database</option>
+          <option value="redis">ðŸ”´ Redis In-Memory Cache</option>
+          <option value="proxmox">ðŸ–¥ï¸ Proxmox VE Hypervisor</option>
+          <option value="wireguard">ðŸ›¡ï¸ WireGuard VPN Tunnel</option>
+          <option value="unifi">ðŸ“¶ UniFi Network Controller</option>
+          <option value="k8s">â˜¸ï¸ Kubernetes Cluster Node</option>
         </select>
         <label class="form-label">Sub Type</label>
         <input type="text" id="res-subtype" class="form-control shadow-sm" placeholder="e.g. docker, systemd, postgresql...">
@@ -602,7 +602,7 @@
         </div>
 
         <div class="alert alert-warning border-0 shadow-sm p-2 small mt-2 mb-0" id="gen-secret-notice" style="display:none">
-          <i class="fa-solid fa-shield-halved text-warning me-1"></i> Generated secret is shown in the field above. Click <strong>Save Secret</strong> to store in OpenBao — secret values will not be displayed again once saved.
+          <i class="fa-solid fa-shield-halved text-warning me-1"></i> Generated secret is shown in the field above. Click <strong>Save Secret</strong> to store in OpenBao â€” secret values will not be displayed again once saved.
         </div>
       </div>
 
@@ -718,7 +718,7 @@
 
       rawResources = [];
       for (const r of resResources.results) {
-        r.hostName = '—';
+        r.hostName = 'â€”';
         r.parentId = null;
         const parentEdge = allEdges.find(e => e.childId === r.id);
         if (parentEdge) {
@@ -770,13 +770,13 @@
     }
     if (a.revoked) { n.agentColor = '#6c757d'; n.agentStatusTitle = 'Agent enrollment revoked'; return; }
     if (!a.isOnline) {
-      const seen = (a.lastSeen || a.last_seen) ? ' — last seen ' + timeAgo(a.lastSeen || new Date(a.last_seen * 1000).toISOString()) : '';
+      const seen = (a.lastSeen || a.last_seen) ? ' â€” last seen ' + timeAgo(a.lastSeen || new Date(a.last_seen * 1000).toISOString()) : '';
       n.agentColor = '#dc3545'; n.agentStatusTitle = 'Agent enrolled but offline' + seen; return;
     }
     const t = a.lastTelemetry || {};
     const high = (t.cpu_usage_percent > 80) || (t.ram_usage_percent > 80) || (t.disk_usage_percent > 90);
     n.agentColor = high ? '#ffc107' : '#198754';
-    n.agentStatusTitle = high ? 'Connected — high load' : 'Connected — healthy';
+    n.agentStatusTitle = high ? 'Connected â€” high load' : 'Connected â€” healthy';
   }
 
   // Agent tab body for the resource modal.
@@ -1112,7 +1112,7 @@
   async function openUserAccessModal() {
     const uid = ($('#user-access-uid').val() || '').trim();
     if (!uid) return;
-    app.modal.open({ title: 'Access for ' + uid, bodyHtml: '<p class="text-muted">Loading…</p>' });
+    app.modal.open({ title: 'Access for ' + uid, bodyHtml: '<p class="text-muted">Loadingâ€¦</p>' });
     try {
       const res = await app.api.get('directory-admin/user-access/' + encodeURIComponent(uid));
       const data = res.results;
@@ -1202,7 +1202,7 @@
          }
          n.indentHtml = indentHtml;
          n.depth = depth;
-         n.displayName = (n.name && n.name.length > 16) ? n.name.substring(0, 16) + '…' : (n.name || '');
+         n.displayName = (n.name && n.name.length > 16) ? n.name.substring(0, 16) + 'â€¦' : (n.name || '');
          // A leaf gets a spacer of the same width, so names stay aligned down
          // the column instead of jittering by whether a row has children.
          n.caretHtml = n.children.length
@@ -1231,7 +1231,7 @@
     applyTreeCollapse();
   }
   
-  // ── Collapsible tree ───────────────────────────────────────────────────────
+  // â”€â”€ Collapsible tree â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Which nodes are collapsed, by resource id. Persisted so the shape of the
   // tree survives a refresh (and the Directory self-heal reload that follows
   // most edits) -- a tree that re-expands every time is worse than no tree.
@@ -1506,14 +1506,14 @@
         <div class="p-3">
           <p class="small text-muted mb-2">Search and select an existing Directory resource to merge IP addresses, network interfaces, and OS telemetry into:</p>
           <div class="mb-3">
-            <input type="text" class="form-control mb-2 shadow-sm" id="merge-search-input" placeholder="🔍 Type to filter resources..." oninput="filterMergeTargets()">
+            <input type="text" class="form-control mb-2 shadow-sm" id="merge-search-input" placeholder="ðŸ” Type to filter resources..." oninput="filterMergeTargets()">
             <input type="hidden" id="merge-target-id" value="${targets[0] ? targets[0].id : ''}">
             <div class="list-group overflow-auto border rounded shadow-sm" id="merge-targets-list" style="max-height: 240px;">
               ${targets.map((r, i) => `
                 <button type="button" class="list-group-item list-group-item-action p-2 merge-item-btn ${i===0 ? 'active' : ''}" data-id="${r.id}" onclick="selectMergeTarget(this)">
                   <div class="d-flex justify-content-between align-items-center">
                     <strong>${esc(r.name)}</strong>
-                    <span class="badge bg-secondary">${esc(r.kind)}${r.metadata?.subType ? ' · ' + esc(r.metadata.subType) : ''}</span>
+                    <span class="badge bg-secondary">${esc(r.kind)}${r.metadata?.subType ? ' Â· ' + esc(r.metadata.subType) : ''}</span>
                   </div>
                   ${r.metadata?.ip ? `<small class="font-monospace text-muted d-block">${esc(r.metadata.ip)}</small>` : ''}
                 </button>
@@ -1915,7 +1915,7 @@
     $select.append('<option value="">-- Select Parent Resource Secret --</option>');
     currentParentSecretsList.forEach(p => {
       const valStr = `INHERIT:${p.parentSlug}:${p.key}`;
-      const labelStr = `${p.parentName || p.parentSlug} → ${p.key}`;
+      const labelStr = `${p.parentName || p.parentSlug} â†’ ${p.key}`;
       $select.append(`<option value="${esc(valStr)}">${esc(labelStr)}</option>`);
     });
   }
@@ -2064,7 +2064,7 @@
         await loadResources();
         loadDiscoveryResources();
         app.modal.close();
-        app.messages.toast('Promoted ' + slug + (res && res.groups ? ' — created groups: ' + res.groups.join(', ') : ''), 'success');
+        app.messages.toast('Promoted ' + slug + (res && res.groups ? ' â€” created groups: ' + res.groups.join(', ') : ''), 'success');
       } catch (err) {
         promoteSlug = slug;
         app.messages.action('Failed to promote: ' + (err.message || err), app.modal.body(), 'danger');
@@ -2232,7 +2232,7 @@
 
   async function deleteResource(id) {
     // Called from the outer table's row button, not from inside the resource
-    // modal — target the page's own card so the confirm/error renders
+    // modal â€” target the page's own card so the confirm/error renders
     // somewhere actually visible.
     const $target = $('#resources-list');
     const ok = await app.messages.confirm('Are you sure you want to delete this resource? All relationships will be destroyed.', $target, 'danger');
@@ -2343,16 +2343,44 @@
       joinCmd = `curl -fsSL ${joinUrl}/resources/theta-agent/install.sh | sh -s -- --url "${joinUrl}" --join-key "${mintedJoinKey}"`;
     } else if (selectedKeyId) {
       const k = agentJoinKeys.find(x => x.id === selectedKeyId);
-      joinCmd = `curl -fsSL ${joinUrl}/resources/theta-agent/install.sh | sh -s -- --url "${joinUrl}" --join-key "${k ? k.keyPrefix : ''}…"\n\n# Paste the full value of this key -- it was only shown when created.\n# If you no longer have it, create a new key above.`;
+      joinCmd = `curl -fsSL ${joinUrl}/resources/theta-agent/install.sh | sh -s -- --url "${joinUrl}" --join-key "${k ? k.keyPrefix : ''}â€¦"\n\n# Paste the full value of this key -- it was only shown when created.\n# If you no longer have it, create a new key above.`;
     } else {
       joinCmd = '# Create a join key above, or select one you already have the value for.';
     }
     $('#agent-join-command').text(joinCmd);
 
+    // Windows: the installer is a GitHub release artifact (built by the
+    // theta-agent release workflow â€” nothing binary lives in this repo). It
+    // takes the same values as /SERVER_URL /JOIN_KEY command-line params.
+    const WIN_SETUP = 'theta-agent-2.1.0-windows-amd64-setup.exe';
+    const WIN_SETUP_URL = `https://github.com/theta42/theta-agent/releases/latest/download/${WIN_SETUP}`;
+    function winInstallCmd(url, args) {
+      return [
+        `$url = '${url}'`,
+        `$setup = "$env:TEMP\\ta-setup.exe"`,
+        `Invoke-WebRequest "${WIN_SETUP_URL}" -OutFile $setup`,
+        `Start-Process -Wait $setup -ArgumentList ${args}`
+      ].join('\n');
+    }
+    let joinCmdWin;
+    if (mintedJoinKey) {
+      joinCmdWin = winInstallCmd(joinUrl, `'/SILENT', "/SERVER_URL=$url", '/JOIN_KEY=${mintedJoinKey}'`);
+    } else if (selectedKeyId) {
+      const k = agentJoinKeys.find(x => x.id === selectedKeyId);
+      joinCmdWin = `# Paste the full value of this key -- it was only shown when created.\n# If you no longer have it, create a new key above.\n` + winInstallCmd(joinUrl, `'/SILENT', "/SERVER_URL=$url", '/JOIN_KEY=<KEY>'`);
+    } else {
+      joinCmdWin = '# Create a join key above, or select one you already have the value for.';
+    }
+    $('#agent-join-command-win').text(joinCmdWin);
+
     const pubKey = (pendingEnrollment && pendingEnrollment.publicKey) || '';
     const quickCmd = `curl -fsSL ${quickUrl}/resources/theta-agent/install.sh | sh -s -- --url "${quickUrl}" --token "${quickToken}"`
       + (pubKey ? ` --public-key "${pubKey}"` : '');
     $('#agent-quick-command').text(quickCmd);
+
+    const quickCmdWin = winInstallCmd(quickUrl,
+      `'/SILENT', "/SERVER_URL=$url", '/AUTH_TOKEN=${quickToken}'` + (pubKey ? `, '/PUBLIC_KEY=${pubKey}'` : ''));
+    $('#agent-quick-command-win').text(quickCmdWin);
 
     const customUrl = ($('#agent-custom-url').val() || window.location.origin).replace(/\/+$/, '');
     const customToken = $('#agent-custom-token').val() || '';
@@ -2388,8 +2416,11 @@
       const b64Config = btoa(yamlStr);
       const customCmd = `curl -fsSL ${customUrl}/resources/theta-agent/install.sh | sh -s -- "${b64Config}"`;
       $('#agent-custom-command').text(customCmd);
+      const customCmdWin = winInstallCmd(customUrl, `'/SILENT', "/B64_CONFIG=${b64Config}"`);
+      $('#agent-custom-command-win').text(customCmdWin);
     } catch (e) {
       $('#agent-custom-command').text('Error encoding config to Base64');
+      $('#agent-custom-command-win').text('Error encoding config to Base64');
     }
   }
 
@@ -2442,7 +2473,7 @@
       </ul>
 
       <div class="tab-content mb-3">
-        <!-- ── Join key: one credential, host enrolls itself ────────────── -->
+        <!-- â”€â”€ Join key: one credential, host enrolls itself â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
         <div class="tab-pane fade show active" id="agent-mode-join" role="tabpanel">
           <div class="card border-success">
             <div class="card-header py-2 fw-bold small bg-success-subtle">
@@ -2452,14 +2483,14 @@
               <p class="small text-muted mb-3">
                 Run this on any host and it enrolls itself. The SSO issues that host its own
                 token and public key on first connect, and the agent writes both into its
-                <code>agent.yml</code> — nothing to copy back and forth. One key works for as
+                <code>agent.yml</code> â€” nothing to copy back and forth. One key works for as
                 many hosts as you like; each still gets its own revocable identity.
               </p>
               <div class="d-flex gap-2 align-items-end mb-3">
                 <div class="flex-grow-1">
                   <label class="form-label small fw-bold mb-1">Existing join keys</label>
                   <select id="agent-join-key-select" class="form-select form-select-sm" onchange="updateAgentCommands()"></select>
-                  <div class="form-text small">A key's value is shown only when it is created — mint a new one if you don't have it saved.</div>
+                  <div class="form-text small">A key's value is shown only when it is created â€” mint a new one if you don't have it saved.</div>
                 </div>
                 <button class="btn btn-sm btn-success" onclick="mintAgentJoinKey()">
                   <i class="fa-solid fa-plus me-1"></i> New join key
@@ -2469,9 +2500,14 @@
 
               <label class="form-label small fw-bold mb-1">Run on the target host (as root):</label>
               <pre class="bg-dark text-light p-3 rounded font-monospace small mb-2 text-wrap text-break" id="agent-join-command" style="user-select: all;"></pre>
+              <label class="form-label small fw-bold mb-1">Windows (PowerShell, as Administrator):</label>
+              <pre class="bg-dark text-light p-3 rounded font-monospace small mb-2 text-wrap text-break" id="agent-join-command-win" style="user-select: all;"></pre>
               <div class="d-flex justify-content-end">
                 <button class="btn btn-sm btn-success" id="btn-copy-join" onclick="copyAgentCommand('agent-join-command', 'btn-copy-join')">
                   <i class="fa-solid fa-copy me-1"></i> Copy install command
+                </button>
+                <button class="btn btn-sm btn-outline-success ms-2" id="btn-copy-join-win" onclick="copyAgentCommand('agent-join-command-win', 'btn-copy-join-win')">
+                  <i class="fa-solid fa-copy me-1"></i> Copy (Windows)
                 </button>
               </div>
             </div>
@@ -2500,7 +2536,7 @@
           </div>
         </div>
 
-        <!-- ── Pre-register: bind to a host resource up front ───────────── -->
+        <!-- â”€â”€ Pre-register: bind to a host resource up front â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
         <div class="tab-pane fade" id="agent-mode-pre" role="tabpanel">
 
       <div class="card border-primary mb-3" id="agent-enroll-card">
@@ -2547,11 +2583,11 @@
       </ul>
 
       <div class="tab-content" id="agent-install-tab-content">
-        <!-- ── Tab 1: Quick Install ──────────────────────────────────────── -->
+        <!-- â”€â”€ Tab 1: Quick Install â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
         <div class="tab-pane fade show active" id="tab-quick-pane" role="tabpanel">
           <div class="row g-2 mb-3">
             <div class="col-md-6">
-              <label class="form-label small fw-bold mb-1">SSO Server URL</label>
+              <label class="form-label small fw-bold mb-1">Theta Directory URL</label>
               <input type="text" id="agent-quick-url" class="form-control form-control-sm" value="${currentOrigin}" oninput="updateAgentCommands()">
             </div>
             <div class="col-md-6">
@@ -2566,18 +2602,25 @@
           <div class="position-relative mb-2">
             <pre class="bg-dark text-light p-3 rounded font-monospace small mb-0 text-wrap text-break" id="agent-quick-command" style="user-select: all;"></pre>
           </div>
+          <label class="form-label small fw-bold mb-1 mt-2">Windows (PowerShell, as Administrator):</label>
+          <div class="position-relative mb-2">
+            <pre class="bg-dark text-light p-3 rounded font-monospace small mb-0 text-wrap text-break" id="agent-quick-command-win" style="user-select: all;"></pre>
+          </div>
           <div class="d-flex justify-content-end">
             <button class="btn btn-sm btn-success" id="btn-copy-quick" onclick="copyAgentCommand('agent-quick-command', 'btn-copy-quick')">
               <i class="fa-solid fa-copy me-1"></i> Copy Quick Install Command
             </button>
+            <button class="btn btn-sm btn-outline-success ms-2" id="btn-copy-quick-win" onclick="copyAgentCommand('agent-quick-command-win', 'btn-copy-quick-win')">
+              <i class="fa-solid fa-copy me-1"></i> Copy (Windows)
+            </button>
           </div>
         </div>
 
-        <!-- ── Tab 2: Custom Config Wizard ────────────────────────────────── -->
+        <!-- â”€â”€ Tab 2: Custom Config Wizard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ -->
         <div class="tab-pane fade" id="tab-custom-pane" role="tabpanel">
           <div class="row g-2 mb-3">
             <div class="col-md-5">
-              <label class="form-label small fw-bold mb-1">SSO Server URL</label>
+              <label class="form-label small fw-bold mb-1">Theta Directory URL</label>
               <input type="text" id="agent-custom-url" class="form-control form-control-sm" value="${currentOrigin}" oninput="updateAgentCommands()">
             </div>
             <div class="col-md-4">
@@ -2645,10 +2688,15 @@
               <pre class="bg-light text-dark p-3 rounded border font-monospace small mb-0" id="agent-yaml-preview"></pre>
             </div>
           </div>
+          <label class="form-label small fw-bold mb-1 mt-2">Windows (PowerShell, as Administrator):</label>
+          <pre class="bg-dark text-light p-3 rounded font-monospace small mb-2 text-wrap text-break" id="agent-custom-command-win" style="user-select: all;"></pre>
 
           <div class="d-flex justify-content-end">
             <button class="btn btn-sm btn-success" id="btn-copy-custom" onclick="copyAgentCommand('agent-custom-command', 'btn-copy-custom')">
               <i class="fa-solid fa-copy me-1"></i> Copy Base64 Command
+            </button>
+            <button class="btn btn-sm btn-outline-success ms-2" id="btn-copy-custom-win" onclick="copyAgentCommand('agent-custom-command-win', 'btn-copy-custom-win')">
+              <i class="fa-solid fa-copy me-1"></i> Copy (Windows)
             </button>
           </div>
         </div>
@@ -2669,12 +2717,12 @@
     // Only hosts can carry an agent -- the API rejects anything else, so don't
     // offer it here.
     const $sel = $('#agent-enroll-resource').empty();
-    $sel.append('<option value="">(not bound — bind later)</option>');
+    $sel.append('<option value="">(not bound â€” bind later)</option>');
     rawResources
       .filter(r => r.kind === 'host')
       .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
       .forEach(r => {
-        const taken = agentsByResource[r.id] ? ' — already has an agent' : '';
+        const taken = agentsByResource[r.id] ? ' â€” already has an agent' : '';
         $sel.append($('<option>').val(r.id).text((r.name || r.slug) + taken).prop('disabled', !!agentsByResource[r.id]));
       });
 
@@ -2701,12 +2749,12 @@
 
       const $sel = $('#agent-join-key-select').empty();
       if (!agentJoinKeys.length) {
-        $sel.append('<option value="">No join keys yet — create one</option>');
+        $sel.append('<option value="">No join keys yet â€” create one</option>');
       } else {
-        $sel.append('<option value="">Select a key…</option>');
+        $sel.append('<option value="">Select a keyâ€¦</option>');
         agentJoinKeys.forEach(k => {
           const used = k.use_count ? `${k.use_count} host${k.use_count === 1 ? '' : 's'}` : 'unused';
-          $sel.append($('<option>').val(k.id).text(`${k.label} (${k.keyPrefix}…, ${used})`));
+          $sel.append($('<option>').val(k.id).text(`${k.label} (${k.keyPrefix}â€¦, ${used})`));
         });
       }
 
@@ -2716,7 +2764,7 @@
         $tbody.append('<tr><td colspan="6" class="text-muted">No join keys yet.</td></tr>');
       } else {
         agentJoinKeysAll.forEach(k => {
-          const created = k.created_on ? new Date(k.created_on * 1000).toLocaleDateString() : '—';
+          const created = k.created_on ? new Date(k.created_on * 1000).toLocaleDateString() : 'â€”';
           const used = k.use_count ? `${k.use_count} host${k.use_count === 1 ? '' : 's'}` : '0 hosts';
           const status = k.revoked
             ? '<span class="badge bg-secondary">Revoked</span>'
@@ -2725,7 +2773,7 @@
             `<button class="btn btn-outline-warning btn-sm" title="Revoke -- stops it enrolling new hosts; already-joined hosts are unaffected" onclick="confirmAgentJoinKeyAction(this, '${k.id}', 'revoke')"><i class="fa-solid fa-ban"></i></button>`;
           const $row = $('<tr>').attr('data-join-key-row', k.id).append(
             $('<td>').text(k.label),
-            $('<td>').append($('<code>').text(k.keyPrefix + '…')),
+            $('<td>').append($('<code>').text(k.keyPrefix + 'â€¦')),
             $('<td>').text(created),
             $('<td>').append($('<a href="#">').text(used).on('click', function(e) { e.preventDefault(); viewAgentJoinKeyHosts(k.id, k.label); })),
             $('<td>').html(status),
@@ -2744,7 +2792,7 @@
   }
 
   async function viewAgentJoinKeyHosts(id, label) {
-    const $out = $('#agent-join-key-hosts').show().html('<i class="fa-solid fa-spinner fa-spin"></i> Loading…');
+    const $out = $('#agent-join-key-hosts').show().html('<i class="fa-solid fa-spinner fa-spin"></i> Loadingâ€¦');
     try {
       const res = await app.api.get(`agent/join-keys/${id}/agents`);
       const body = (res && (res.results || res)) || {};
@@ -2756,7 +2804,7 @@
       const rows = agents.map(a => {
         const dot = a.isOnline ? 'text-success' : 'text-muted';
         const seen = a.last_seen ? new Date(a.last_seen * 1000).toLocaleString() : 'never';
-        return `<tr><td><i class="fa-solid fa-circle ${dot}" style="font-size:8px"></i> ${esc(a.name)}</td><td>${esc(a.enrolled_on ? new Date(a.enrolled_on * 1000).toLocaleDateString() : '—')}</td><td>${esc(seen)}</td></tr>`;
+        return `<tr><td><i class="fa-solid fa-circle ${dot}" style="font-size:8px"></i> ${esc(a.name)}</td><td>${esc(a.enrolled_on ? new Date(a.enrolled_on * 1000).toLocaleDateString() : 'â€”')}</td><td>${esc(seen)}</td></tr>`;
       }).join('');
       $out.html(
         `<div class="small fw-bold mb-1">Hosts joined with ${esc(label)}:</div>` +
@@ -2809,7 +2857,7 @@
       $('#agent-join-key-result').show().html(
         '<div class="alert alert-success py-2 small mb-3">'
         + '<i class="fa-solid fa-circle-check me-1"></i><strong>Join key created.</strong> '
-        + 'It is shown <strong>once</strong> — only its hash is stored. It is already in the command below.'
+        + 'It is shown <strong>once</strong> â€” only its hash is stored. It is already in the command below.'
         + '</div>'
         + '<label class="form-label small fw-bold mb-1">Join key</label>'
         + '<div class="input-group input-group-sm mb-3">'
@@ -2833,7 +2881,7 @@
       app.messages.toast('Give the agent a name first.', 'warning');
       return;
     }
-    const $btn = $('#agent-enroll-btn').prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin me-1"></i> Enrolling…');
+    const $btn = $('#agent-enroll-btn').prop('disabled', true).html('<i class="fa-solid fa-spinner fa-spin me-1"></i> Enrollingâ€¦');
     try {
       const res = await app.api.post('agent/enroll', { name, resourceId });
       const body = res && (res.results || res);
@@ -2856,7 +2904,7 @@
         keyWarn +
         '<div class="alert alert-success py-2 small mb-2">'
         + '<i class="fa-solid fa-circle-check me-1"></i><strong>Enrolled.</strong> '
-        + 'This token is shown <strong>once</strong> — only its hash is stored. '
+        + 'This token is shown <strong>once</strong> â€” only its hash is stored. '
         + 'If you lose it, rotate the agent to issue a new one.</div>'
         + '<label class="form-label small fw-bold mb-1">Agent token</label>'
         + '<div class="input-group input-group-sm mb-2">'
@@ -2948,7 +2996,7 @@
       : '';
     const log = p.lastLog || '(no log captured for this run)';
     app.modal.open({
-      title: 'Run log — ' + (p.name || p.slug),
+      title: 'Run log â€” ' + (p.name || p.slug),
       size: 'lg',
       bodyHtml: body + '<pre class="p-2 mb-0 bg-light border" style="max-height:55vh;overflow:auto;white-space:pre-wrap;font-size:.85rem;">' + esc(log) + '</pre>',
     });
@@ -2977,16 +3025,16 @@
 
   var discoveryPluginTypes = [];
 
-  // ── Discovery plugin config helpers (ported from plugins.ejs) ─────────────
+  // â”€â”€ Discovery plugin config helpers (ported from plugins.ejs) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // Stored value is always a 5-field cron string; the dropdown picks a preset
-  // and "Custom…" reveals the raw input. Config fields are driven by each
+  // and "Customâ€¦" reveals the raw input. Config fields are driven by each
   // plugin type's configSchema so per-plugin settings (e.g. Proxmox url /
   // tokenId / tokenSecret) are collected at create time.
   var DP_CRON_PRESETS = [
     { key: 'hourly', label: 'Hourly',           cron: '0 * * * *' },
     { key: 'daily',  label: 'Daily (midnight)',  cron: '0 0 * * *' },
     { key: 'weekly', label: 'Weekly (Sun)',      cron: '0 0 * * 0' },
-    { key: 'custom', label: 'Custom…',           cron: null },
+    { key: 'custom', label: 'Customâ€¦',           cron: null },
   ];
   function dpCronKeyFor(cron) {
     var m = DP_CRON_PRESETS.filter(function(p){ return p.cron === cron; })[0];
@@ -3059,7 +3107,7 @@
         var ph = f.placeholder ? (' placeholder="' + esc(f.placeholder) + '"') : '';
         var val = '';
         if (!f.secret && values[f.key] != null) val = ' value="' + esc(values[f.key]) + '"';
-        if (f.secret && values.__isEdit) ph = ' placeholder="unchanged — type a new value to replace"';
+        if (f.secret && values.__isEdit) ph = ' placeholder="unchanged â€” type a new value to replace"';
         html += '<div class="mb-3"><label class="form-label fw-bold">' + label + '</label>' +
           '<input type="' + inputType + '" class="form-control" id="' + prefix + f.key + '"' + req + ph + val + '></div>';
       }
@@ -3146,7 +3194,7 @@
         <div class="mb-3">
           <label class="form-label fw-bold">Plugin Type</label>
           <input type="text" class="form-control" value="${esc(p.pluginType)}" disabled>
-          <div class="form-text">The type is fixed once an instance exists — create a new instance to use a different one.</div>
+          <div class="form-text">The type is fixed once an instance exists â€” create a new instance to use a different one.</div>
         </div>
         <div class="mb-3">
           <label class="form-label fw-bold">Instance Name</label>
@@ -3168,7 +3216,7 @@
           <button class="btn btn-primary" onclick="saveEditedDiscoveryPlugin('${p.id}')">Save changes</button>
         </div>
       `;
-      app.modal.open({ title: 'Edit Discovery Plugin — ' + p.name, bodyHtml: bodyHtml, size: 'lg' });
+      app.modal.open({ title: 'Edit Discovery Plugin â€” ' + p.name, bodyHtml: bodyHtml, size: 'lg' });
     });
   }
 
@@ -3253,7 +3301,7 @@
     }
   }
 
-  // ── Multi-Site & Master Node Controls ─────────────────────────────────────
+  // â”€â”€ Multi-Site & Master Node Controls â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   async function refreshSiteStatus() {
     try {
       const res = await app.api.get('directory-admin/site-status');
@@ -3281,7 +3329,7 @@
         '<div class="card mb-3 shadow-sm border-' + (isMaster ? 'warning' : 'info') + '">' +
           '<div class="card-body">' +
             '<h5 class="card-title d-flex align-items-center justify-content-between">' +
-              '<span>' + (isMaster ? '👑 <strong>Master Site Node</strong>' : '⚡ <strong>Spoke Site Node</strong>') + '</span>' +
+              '<span>' + (isMaster ? 'ðŸ‘‘ <strong>Master Site Node</strong>' : 'âš¡ <strong>Spoke Site Node</strong>') + '</span>' +
               '<span class="badge bg-' + (isMaster ? 'warning text-dark' : 'info text-dark') + '">' + esc(cfg.siteMode || 'master') + '</span>' +
             '</h5>' +
             '<p class="card-text text-muted small mb-2">Multi-site directory & replication state for this node.</p>' +
@@ -3340,7 +3388,7 @@
     loadDiscoveryPlugins();
     refreshSiteStatus();
     // Keep the host status dots live: refresh the agent join periodically and on
-    // socket.io agent.* broadcasts (dedicated socket — the app default is P2PSub).
+    // socket.io agent.* broadcasts (dedicated socket â€” the app default is P2PSub).
     refreshAgents();
     setInterval(refreshAgents, 30000);
     try {
