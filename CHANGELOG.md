@@ -1,3 +1,11 @@
+# v2.1.0 - 2026-08-10
+
+### Added
+- **Windows install commands in the Install Agent modal.** The Directory → Install Agent modal now emits PowerShell one-liners alongside the bash ones for the join-key, pre-register, and custom-config flows. Each downloads the fully-offline theta-agent `setup.exe` from its GitHub release and passes the same values the bash flow uses (`/SERVER_URL`, `/JOIN_KEY`, `/AUTH_TOKEN`, `/PUBLIC_KEY`, or `/B64_CONFIG`), so a Windows host enrolls with the same one-command flow as Linux. Complements the theta-agent v2.1.0 Windows release.
+
+### Removed
+- **Large binaries from `nodejs/public/resources/theta-agent/`.** The agent/tray/helper/setup binaries are now built on GitHub Actions and attached to the theta-agent GitHub release as artifacts; `install.sh` and the modal download them from `releases/latest/download/`. Nothing binary lives in this repo anymore (the small `install.sh` bootstrap script remains).
+
 # v2.0.4 - 2026-08-09
 
 ### Changed
