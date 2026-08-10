@@ -1,3 +1,18 @@
+# v2.2.0 - 2026-08-10
+
+### Added
+- **Multi-site join — server endpoints.** A spoke can join an existing master directory:
+  - **Site join keys** (`stj_…`): mint/revoke/delete under `/api/site/join-keys` (hashed at rest, shown once — same model as agent join keys).
+  - `POST /api/site/export` (master, Bearer site-join-key, no admin session): returns the LDAP tree (`slapcat` LDIF) + resource catalog + siteSlug + baseDn.
+  - `POST /api/site/join` (spoke, admin): `{ masterUrl, joinKey }` pulls the master export, imports resources (upsert by slug) + LDAP (`ldapadd -c`), and persists the spoke role. Refused if already a spoke.
+  - **Persisted site role**: `isMaster`/`masterUrl`/`siteSlug` now live in `/config/site.json` (env seeds defaults) instead of Node memory, so a restart no longer silently reverts a spoke to master. `site-status`/`site-promote` read/write it.
+  - Docs: `docs/site-join.md` (flow, endpoints, planned `setup.env` vars) registered in the docs router.
+  - The UI + `setup.sh` wiring for join is the next layer; this pass is server-only.
+- **Unit tests** for the join helpers (`tests/site_join.test.js`) and persisted config (`tests/site_config.test.js`) — pure logic, in-memory stubs, added to `npm test`.
+
+### Fixed
+- **Multi-site modal text was mojibake.** The Master/Spoke emojis (👑/⚡) in `views/directory.ejs` were UTF-8 that had been round-tripped through cp1252; restored. All other views verified byte-accurate clean.
+
 # v2.1.1 - 2026-08-10
 
 ### Fixed
