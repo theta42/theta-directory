@@ -21,6 +21,7 @@ const { SharedSecret } = require('./shared_secret');
 const { SharedSecretGrant } = require('./shared_secret_grant');
 const { VaultAppToken } = require('./vault_app_token');
 const { Agent, AgentJoinKey } = require('./agent');
+const { SiteJoinKey } = require('./site_join_key');
 async function initORM() {
   const ormConf = conf.orm || {
     dialect: 'sqlite',
@@ -35,7 +36,7 @@ async function initORM() {
       conf: { orm: ormConf },
       models: [
         Resource, ResourceEdge, ResourceGroup, AccessRequest, Webhook, PluginInstance,
-        SharedSecret, SharedSecretGrant, VaultAppToken, Agent, AgentJoinKey,
+        SharedSecret, SharedSecretGrant, VaultAppToken, Agent, AgentJoinKey, SiteJoinKey,
         Token, AuthToken, InviteToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken
       ]
     });

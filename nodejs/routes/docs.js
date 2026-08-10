@@ -42,6 +42,7 @@ const DOCS = {
 	discovery:       {title: 'Discovery & Inventory',  file: path.join(__dirname, '../../docs/discovery.md')},
 	vault:           {title: 'Vault Secrets',           file: path.join(__dirname, '../../docs/vault.md')},
 	groups:          {title: 'Groups & Permissions',   file: path.join(__dirname, '../../docs/groups.md')},
+	'site-join':     {title: 'Multi-Site: Joining a Spoke', file: path.join(__dirname, '../../docs/site-join.md')},
 
 	overview:        {title: 'Overview',        file: path.join(__dirname, '../../README.md')},
 	changelog:       {title: 'Changelog',       file: path.join(__dirname, '../../CHANGELOG.md')},
