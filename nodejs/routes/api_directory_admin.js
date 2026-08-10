@@ -9,6 +9,7 @@ const { projectResources } = require('@simpleworkjs/directory-schema');
 
 const SUPER_ADMIN_GROUP = permission.SUPER_ADMIN_GROUP;
 const groups = require('../utils/groups');
+const meshReplicate = require('../utils/site_replicate');
 
 // Make `childCn` a member of `parentCn`, i.e. everyone in the child is
 // transitively in the parent. Idempotent and non-fatal: "already a member" is
@@ -252,19 +253,32 @@ router.get('/resources', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// ── Spoke read-only enforcement ─────────────────────────────────────────────
+// ── Spoke read-only enforcement + live replication trigger ──────────────────
 // On a joined spoke the catalog is a copy of the master's; directory writes
 // must go to the master (MULTI_SITE_SPEC.md — spoke = read-only catalog). Any
 // mutating request below this point is rejected on a spoke with a pointer to
 // the master. (site-status / site-promote live AFTER this middleware and are
 // not directory writes.)
+//
+// On the MASTER, a successful mutation here fires a fire-and-forget resync
+// push (utils/site_replicate.js) at every registered spoke, so the shipped
+// join flow's one-time snapshot doesn't go stale the moment the catalog
+// changes. Fires on res.on('finish') (after the response is actually sent,
+// status known) rather than before the handler runs, so a write that fails
+// validation never triggers a pointless replication round-trip.
 router.use((req, res, next) => {
-  if (['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method)) {
+  const mutating = ['POST', 'PUT', 'DELETE', 'PATCH'].includes(req.method);
+  if (mutating) {
     const cfg = siteConfig.get();
     if (!cfg.isMaster) {
       const hint = cfg.masterUrl ? ' Directory writes must go to the master at ' + cfg.masterUrl + '.' : '';
       return res.status(403).json({ status: 'error', message: 'This node is a spoke (read-only catalog).' + hint });
     }
+    res.on('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        meshReplicate.replicateToSpokes(`${req.method} ${req.path}`);
+      }
+    });
   }
   next();
 });

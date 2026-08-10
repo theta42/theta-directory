@@ -175,14 +175,17 @@ async function main() {
   if (keyRes.status !== 200 || !keyRes.body.key) fail(`join-key mint failed: ${keyRes.status} ${JSON.stringify(keyRes.body)}`);
   const joinKey = keyRes.body.key;
 
-  step('Joining spoke to master');
+  step('Joining spoke to master (with selfUrl, to register for live replication)');
   const joinRes = await api(SPOKE_URL, '/api/site/join', {
     method: 'POST',
     token: spokeToken,
     // master's own container-internal URL, as the spoke would reach it over the network
-    body: { masterUrl: 'http://master:3001', joinKey }
+    body: { masterUrl: 'http://master:3001', joinKey, selfUrl: 'http://spoke:3001' }
   });
   if (joinRes.status !== 200) fail(`join failed: ${joinRes.status} ${JSON.stringify(joinRes.body)}`);
+  if (!joinRes.body.replication || joinRes.body.replication.live !== true) {
+    fail(`expected join to register for live replication, got ${JSON.stringify(joinRes.body.replication)}`);
+  }
 
   step('Verifying spoke persisted isMaster:false + masterUrl after join');
   const { body: spokeCfg } = await api(SPOKE_URL, '/api/site/config', { token: spokeToken });
@@ -202,6 +205,24 @@ async function main() {
     body: { name: 'Should Be Rejected', slug: 'host_e2e_should_reject', kind: 'host' }
   });
   if (writeAttempt.status !== 403) fail(`expected 403 writing to spoke post-join, got ${writeAttempt.status} ${JSON.stringify(writeAttempt.body)}`);
+
+  step('Creating a resource on master AFTER join, to verify LIVE replication (not just the one-time join snapshot)');
+  const postJoinRes = await api(MASTER_URL, '/api/directory-admin/resources', {
+    method: 'POST',
+    token: masterToken,
+    body: { name: 'E2E Post-Join Host', slug: 'host_e2e_postjoin', kind: 'host', parentSlug: 'site_e2e' }
+  });
+  if (postJoinRes.status !== 200) fail(`creating post-join resource on master failed: ${postJoinRes.status} ${JSON.stringify(postJoinRes.body)}`);
+
+  step('Waiting for the fire-and-forget resync push to reach the spoke');
+  let liveReplicated = false;
+  for (let i = 0; i < 20; i++) {
+    const r = await api(SPOKE_URL, '/api/directory-admin/resources', { token: spokeToken });
+    const slugs = (r.body.results || r.body.resources || r.body || []).map((x) => x.slug);
+    if (slugs.includes('host_e2e_postjoin')) { liveReplicated = true; break; }
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  if (!liveReplicated) fail('post-join resource never appeared on the spoke -- live replication did not fire (or resync did not apply it)');
 
   step('Verifying WAN health ping from spoke to master succeeds');
   const statusRes = await api(SPOKE_URL, '/api/directory-admin/site-status', { token: spokeToken });
