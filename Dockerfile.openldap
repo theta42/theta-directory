@@ -22,6 +22,12 @@
 # GIT_COMMIT=$(git -C sso-manager-node rev-parse --short HEAD), computed on
 # the host where the submodule resolves correctly.
 ARG GIT_COMMIT=""
+# Pinned OpenLDAP commit this build expects -- must match the tag of the
+# published builder image below. Bumping it is a two-step change: rebuild +
+# push ghcr.io/theta42/openldap-nestgroup:<new commit> from
+# Dockerfile.openldap-builder (see that file), then update this default (or
+# pass --build-arg OPENLDAP_COMMIT=<new commit> here).
+ARG OPENLDAP_COMMIT=350e9eb38b2270c2bad97c61ee02e85fb8f3196d
 FROM node:20-alpine AS gitinfo
 ARG GIT_COMMIT
 WORKDIR /repo
@@ -33,9 +39,9 @@ RUN if [ -n "$GIT_COMMIT" ]; then \
         && git rev-parse --short HEAD > /commit.txt; } 2>/dev/null || echo unknown > /commit.txt; \
     fi
 
-# ── OpenLDAP from source ─────────────────────────────────────────────────────
-# We build slapd from OpenLDAP master rather than installing Alpine's packages,
-# for exactly one feature: the `nestgroup` overlay (ITS#10161, Howard Chu,
+# ── OpenLDAP, prebuilt ────────────────────────────────────────────────────────
+# We run slapd from OpenLDAP master rather than Alpine's packaged release, for
+# exactly one feature: the `nestgroup` overlay (ITS#10161, Howard Chu,
 # 2024-03-21), which evaluates nested groups server-side. Nothing in any 2.6.x
 # release can do this -- verified: 2.6.13 ships 26 overlay modules and
 # nestgroup is not among them -- and the alternative is resolving nesting
@@ -46,64 +52,14 @@ RUN if [ -n "$GIT_COMMIT" ]; then \
 # 0.9.x used by 2.6.x cannot read, and vice versa
 # ("MDB_INVALID: File is not an LMDB file"). Moving an existing directory onto
 # this image is a slapcat/slapadd migration, not a restart. See DEPLOYMENT.md.
-FROM node:20-alpine AS ldapbuild
-
-# groff is not optional despite producing nothing we ship: the build descends
-# into doc/man unconditionally and its Makefile calls soelim, which groff
-# provides. Without it the whole `make` fails at the man-page stage
-# ("soelim: not found") long after slapd itself has compiled fine.
-RUN apk add --no-cache \
-        build-base autoconf automake libtool \
-        openssl-dev cyrus-sasl-dev \
-        git make pkgconf util-linux-dev groff
-
-# Pinned to an exact commit, not a branch tip. This is the directory server the
-# whole lab authenticates against; an unpinned `master` would mean every image
-# rebuild silently ships whatever landed upstream that morning, and a bad day on
-# master would take out logins with no way to tell what changed.
 #
-# TODO: drop this whole from-source stage once nestgroup ships in a release.
-# It is master-only today (ITS#10161, 2024-03-21); the 2.7 roadmap has slipped
-# from Fall 2024 to Fall 2025 and is still unreleased. When 2.7 lands with
-# nestgroup, revert to `apk add openldap openldap-overlay-nestgroup ...` --
-# the entrypoint already probes for nestgroup.so and needs no change, and the
-# app already keys off app_ldap__nestedGroupsServerSide either way.
-ARG OPENLDAP_COMMIT=350e9eb38b2270c2bad97c61ee02e85fb8f3196d
-
-WORKDIR /src
-RUN git init -q . \
-    && git remote add origin https://git.openldap.org/openldap/openldap.git \
-    && git fetch -q --depth 1 origin "${OPENLDAP_COMMIT}" \
-    && git checkout -q FETCH_HEAD \
-    && git rev-parse HEAD > /opt-openldap-commit.txt
-
-# Overlays are built as loadable modules (=mod) because docker-entrypoint.sh
-# `moduleload`s them individually; nestgroup joins that set.
-RUN ./configure \
-        --prefix=/opt/openldap \
-        --enable-slapd \
-        --enable-modules \
-        --enable-mdb \
-        --enable-memberof=mod \
-        --enable-refint=mod \
-        --enable-ppolicy=mod \
-        --enable-dynlist=mod \
-        --enable-nestgroup=mod \
-        --enable-syncprov=mod \
-        --enable-auditlog=mod \
-        --with-tls=openssl \
-        --with-cyrus-sasl \
-    && make depend \
-    && make -j"$(nproc)" \
-    && make install
-
-# pw-sha2 provides {SSHA512}, which every existing user password is stored as.
-# It lives in contrib and is not covered by the configure flags above, so it is
-# built separately against the just-built tree -- omitting it would make every
-# user password unverifiable.
-RUN cd contrib/slapd-modules/passwd/sha2 \
-    && make prefix=/opt/openldap OPENLDAP_SRC=/src \
-    && cp .libs/pw-sha2.so* /opt/openldap/libexec/openldap/
+# The from-source compile (~5 min, and a dependency on git.openldap.org being
+# reachable) used to happen right here, on every build of this Dockerfile --
+# including 3x per CI run's test matrix. It's now built once, tagged by the
+# pinned commit above, in Dockerfile.openldap-builder -- see that file for the
+# actual compile steps and the TODO on dropping from-source entirely once
+# nestgroup ships in a release.
+FROM ghcr.io/theta42/openldap-nestgroup:${OPENLDAP_COMMIT} AS ldapbuild
 
 FROM node:20-alpine
 
