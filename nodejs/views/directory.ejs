@@ -2349,10 +2349,38 @@
     }
     $('#agent-join-command').text(joinCmd);
 
+    // Windows: the installer is a GitHub release artifact (built by the
+    // theta-agent release workflow — nothing binary lives in this repo). It
+    // takes the same values as /SERVER_URL /JOIN_KEY command-line params.
+    const WIN_SETUP = 'theta-agent-2.1.0-windows-amd64-setup.exe';
+    const WIN_SETUP_URL = `https://github.com/theta42/theta-agent/releases/latest/download/${WIN_SETUP}`;
+    function winInstallCmd(url, args) {
+      return [
+        `$url = '${url}'`,
+        `$setup = "$env:TEMP\\ta-setup.exe"`,
+        `Invoke-WebRequest "${WIN_SETUP_URL}" -OutFile $setup`,
+        `Start-Process -Wait $setup -ArgumentList ${args}`
+      ].join('\n');
+    }
+    let joinCmdWin;
+    if (mintedJoinKey) {
+      joinCmdWin = winInstallCmd(joinUrl, `'/SILENT', "/SERVER_URL=$url", '/JOIN_KEY=${mintedJoinKey}'`);
+    } else if (selectedKeyId) {
+      const k = agentJoinKeys.find(x => x.id === selectedKeyId);
+      joinCmdWin = `# Paste the full value of this key -- it was only shown when created.\n# If you no longer have it, create a new key above.\n` + winInstallCmd(joinUrl, `'/SILENT', "/SERVER_URL=$url", '/JOIN_KEY=<KEY>'`);
+    } else {
+      joinCmdWin = '# Create a join key above, or select one you already have the value for.';
+    }
+    $('#agent-join-command-win').text(joinCmdWin);
+
     const pubKey = (pendingEnrollment && pendingEnrollment.publicKey) || '';
     const quickCmd = `curl -fsSL ${quickUrl}/resources/theta-agent/install.sh | sh -s -- --url "${quickUrl}" --token "${quickToken}"`
       + (pubKey ? ` --public-key "${pubKey}"` : '');
     $('#agent-quick-command').text(quickCmd);
+
+    const quickCmdWin = winInstallCmd(quickUrl,
+      `'/SILENT', "/SERVER_URL=$url", '/AUTH_TOKEN=${quickToken}'` + (pubKey ? `, '/PUBLIC_KEY=${pubKey}'` : ''));
+    $('#agent-quick-command-win').text(quickCmdWin);
 
     const customUrl = ($('#agent-custom-url').val() || window.location.origin).replace(/\/+$/, '');
     const customToken = $('#agent-custom-token').val() || '';
@@ -2388,8 +2416,11 @@
       const b64Config = btoa(yamlStr);
       const customCmd = `curl -fsSL ${customUrl}/resources/theta-agent/install.sh | sh -s -- "${b64Config}"`;
       $('#agent-custom-command').text(customCmd);
+      const customCmdWin = winInstallCmd(customUrl, `'/SILENT', "/B64_CONFIG=${b64Config}"`);
+      $('#agent-custom-command-win').text(customCmdWin);
     } catch (e) {
       $('#agent-custom-command').text('Error encoding config to Base64');
+      $('#agent-custom-command-win').text('Error encoding config to Base64');
     }
   }
 
@@ -2469,9 +2500,14 @@
 
               <label class="form-label small fw-bold mb-1">Run on the target host (as root):</label>
               <pre class="bg-dark text-light p-3 rounded font-monospace small mb-2 text-wrap text-break" id="agent-join-command" style="user-select: all;"></pre>
+              <label class="form-label small fw-bold mb-1">Windows (PowerShell, as Administrator):</label>
+              <pre class="bg-dark text-light p-3 rounded font-monospace small mb-2 text-wrap text-break" id="agent-join-command-win" style="user-select: all;"></pre>
               <div class="d-flex justify-content-end">
                 <button class="btn btn-sm btn-success" id="btn-copy-join" onclick="copyAgentCommand('agent-join-command', 'btn-copy-join')">
                   <i class="fa-solid fa-copy me-1"></i> Copy install command
+                </button>
+                <button class="btn btn-sm btn-outline-success ms-2" id="btn-copy-join-win" onclick="copyAgentCommand('agent-join-command-win', 'btn-copy-join-win')">
+                  <i class="fa-solid fa-copy me-1"></i> Copy (Windows)
                 </button>
               </div>
             </div>
@@ -2566,9 +2602,16 @@
           <div class="position-relative mb-2">
             <pre class="bg-dark text-light p-3 rounded font-monospace small mb-0 text-wrap text-break" id="agent-quick-command" style="user-select: all;"></pre>
           </div>
+          <label class="form-label small fw-bold mb-1 mt-2">Windows (PowerShell, as Administrator):</label>
+          <div class="position-relative mb-2">
+            <pre class="bg-dark text-light p-3 rounded font-monospace small mb-0 text-wrap text-break" id="agent-quick-command-win" style="user-select: all;"></pre>
+          </div>
           <div class="d-flex justify-content-end">
             <button class="btn btn-sm btn-success" id="btn-copy-quick" onclick="copyAgentCommand('agent-quick-command', 'btn-copy-quick')">
               <i class="fa-solid fa-copy me-1"></i> Copy Quick Install Command
+            </button>
+            <button class="btn btn-sm btn-outline-success ms-2" id="btn-copy-quick-win" onclick="copyAgentCommand('agent-quick-command-win', 'btn-copy-quick-win')">
+              <i class="fa-solid fa-copy me-1"></i> Copy (Windows)
             </button>
           </div>
         </div>
@@ -2645,10 +2688,15 @@
               <pre class="bg-light text-dark p-3 rounded border font-monospace small mb-0" id="agent-yaml-preview"></pre>
             </div>
           </div>
+          <label class="form-label small fw-bold mb-1 mt-2">Windows (PowerShell, as Administrator):</label>
+          <pre class="bg-dark text-light p-3 rounded font-monospace small mb-2 text-wrap text-break" id="agent-custom-command-win" style="user-select: all;"></pre>
 
           <div class="d-flex justify-content-end">
             <button class="btn btn-sm btn-success" id="btn-copy-custom" onclick="copyAgentCommand('agent-custom-command', 'btn-copy-custom')">
               <i class="fa-solid fa-copy me-1"></i> Copy Base64 Command
+            </button>
+            <button class="btn btn-sm btn-outline-success ms-2" id="btn-copy-custom-win" onclick="copyAgentCommand('agent-custom-command-win', 'btn-copy-custom-win')">
+              <i class="fa-solid fa-copy me-1"></i> Copy (Windows)
             </button>
           </div>
         </div>
