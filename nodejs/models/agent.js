@@ -100,7 +100,7 @@ class Agent extends Model {
 		delete data.tokenHash;
 		return {
 			...data,
-			version: data.version || (data.lastDiscovery && data.lastDiscovery.version) || (data.lastTelemetry && data.lastTelemetry.version) || 'v2.0.0',
+			version: data.version || (data.lastDiscovery && data.lastDiscovery.version) || (data.lastTelemetry && data.lastTelemetry.version) || 'unknown',
 			lastSeen: data.last_seen ? new Date(data.last_seen * 1000).toISOString() : null,
 			connected: !!(liveState && liveState.connected),
 			// "Online" is a live-connection fact, not a stored one. A row with a
