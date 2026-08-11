@@ -172,6 +172,12 @@ async function main() {
   });
   if (siteRes.status !== 200) fail(`seeding pre-join site on master failed: ${siteRes.status} ${JSON.stringify(siteRes.body)}`);
 
+  step('Verifying the Directory site Resource\'s slug synced into the multi-site replication identity');
+  const { body: masterCfgAfterSite } = await api(MASTER_URL, '/api/site/config', { token: masterToken });
+  if (masterCfgAfterSite.config.siteSlug !== 'site_e2e') {
+    fail(`expected site_config's siteSlug to sync to the new site Resource's slug (site_e2e), got ${JSON.stringify(masterCfgAfterSite.config.siteSlug)}`);
+  }
+
   const seedRes = await api(MASTER_URL, '/api/directory-admin/resources', {
     method: 'POST',
     token: masterToken,
@@ -228,6 +234,19 @@ async function main() {
   }
   const selfInOwnPeerList = (spokeLdapCfg.peers || []).some(p => p.ldapServerId === spokeLdapCfg.ldapServerId);
   if (selfInOwnPeerList) fail(`spoke's own peer list should not include itself, got ${JSON.stringify(spokeLdapCfg.peers)}`);
+
+  step('Verifying the master\'s own site-status surfaces LDAP status + per-spoke detail (Multi-Site modal data)');
+  const { body: masterStatus } = await api(MASTER_URL, '/api/directory-admin/site-status', { token: masterToken });
+  if (!masterStatus.ldap || masterStatus.ldap.advertisedServerId !== 1) {
+    fail(`master's site-status should report ldap.advertisedServerId 1, got ${JSON.stringify(masterStatus.ldap)}`);
+  }
+  if (masterStatus.ldap.peersCount !== 1) {
+    fail(`master's site-status should report exactly 1 LDAP peer (the spoke), got ${JSON.stringify(masterStatus.ldap)}`);
+  }
+  const statusSpokeEntry = (masterStatus.spokes || []).find(s => s.endpoint === 'http://spoke:3001');
+  if (!statusSpokeEntry || typeof statusSpokeEntry.ldapServerId !== 'number') {
+    fail(`master's site-status spokes list should include the spoke with an ldapServerId, got ${JSON.stringify(masterStatus.spokes)}`);
+  }
 
   step('Verifying the spoke adopted the master\'s pre-join catalog');
   const spokeResources = await api(SPOKE_URL, '/api/directory-admin/resources', { token: spokeToken });
