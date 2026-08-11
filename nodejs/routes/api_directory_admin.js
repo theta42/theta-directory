@@ -365,6 +365,25 @@ router.post('/resources', async (req, res, next) => {
     const ancestorSite = await Resource.findAncestorSiteSlug(r.id);
     if (r.kind === 'site') {
       await ensureSiteGroups(r.slug, req.user.dn, r.name, r.id);
+      // Two previously-unrelated "site slug" concepts: this Resource's own
+      // slug (the Directory catalog's site container -- what every group
+      // name and the resource tree actually use) vs. site_config.js's
+      // siteSlug (the multi-site replication identity shown on the
+      // Multi-Site modal, sourced only from a separately-set SITE_SLUG env
+      // var). They coincidentally share the name "site slug" but nothing
+      // ever kept them in sync -- a real deployment could show "E2E Site"
+      // in the Directory tree and "site-default" on the Multi-Site modal
+      // for the exact same node. Sync them here, the moment this node's own
+      // site Resource is created (bootstrap.js's first call), so there's
+      // one real identity instead of two that can drift apart. Only for a
+      // still-default master: never overwrite a real multi-site identity a
+      // join/promote has already established, and a spoke's replication
+      // identity is the master's to assign, not this node's own resource
+      // creation to decide.
+      const cfg = siteConfig.get();
+      if (cfg.isMaster && cfg.siteSlug === 'site-default') {
+        siteConfig.save({ siteSlug: r.slug });
+      }
     } else if (gKind && ancestorSite) {
       await ensureSiteGroups(ancestorSite, req.user.dn, r.name); // backfill site tier if missing
       await provisionResourceGroups(r, gKind, ancestorSite, req.user.dn);

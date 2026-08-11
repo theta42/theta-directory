@@ -172,6 +172,12 @@ async function main() {
   });
   if (siteRes.status !== 200) fail(`seeding pre-join site on master failed: ${siteRes.status} ${JSON.stringify(siteRes.body)}`);
 
+  step('Verifying the Directory site Resource\'s slug synced into the multi-site replication identity');
+  const { body: masterCfgAfterSite } = await api(MASTER_URL, '/api/site/config', { token: masterToken });
+  if (masterCfgAfterSite.config.siteSlug !== 'site_e2e') {
+    fail(`expected site_config's siteSlug to sync to the new site Resource's slug (site_e2e), got ${JSON.stringify(masterCfgAfterSite.config.siteSlug)}`);
+  }
+
   const seedRes = await api(MASTER_URL, '/api/directory-admin/resources', {
     method: 'POST',
     token: masterToken,
