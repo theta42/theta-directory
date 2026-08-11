@@ -1,5 +1,5 @@
 require('./setup');
-const { Resource } = require('../models/resource');
+const { Resource, ResourceGroup } = require('../models/resource');
 const { DiscoveryReconciler } = require('../services/discovery_reconciler');
 
 describe('DiscoveryReconciler', () => {
@@ -71,5 +71,28 @@ describe('DiscoveryReconciler', () => {
     // Interface array should be merged/updated
     expect(merged.metadata.interfaces).toHaveLength(1);
     expect(merged.metadata.interfaces[0].ip).toBe('10.0.0.6'); // Updated IP
+  });
+
+  it('does not duplicate access/admin groups across repeated autoPromote passes', async () => {
+    // Regression: autoPromote used to call ResourceGroup.create() directly
+    // with no existence check, so reconciling the same managed resource
+    // more than once (e.g. a Proxmox cluster reporting one LXC from
+    // multiple nodes) accumulated duplicate access/admin rows every pass.
+    const payload = {
+      resources: [{
+        kind: 'host',
+        name: 'LXC 127',
+        slug: 'lxc-127',
+        metadata: { interfaces: [{ mac: '00:11:22:33:44:99', ip: '10.0.0.99' }] }
+      }]
+    };
+
+    await DiscoveryReconciler.reconcile('plugin-A', payload, { autoPromote: true });
+    await DiscoveryReconciler.reconcile('plugin-A', payload, { autoPromote: true });
+    await DiscoveryReconciler.reconcile('plugin-A', payload, { autoPromote: true });
+
+    const resource = (await Resource.list()).find((r) => r.slug === 'lxc-127');
+    const groups = await ResourceGroup.list({ where: { resourceId: resource.id } });
+    expect(groups.map((g) => g.groupCn).sort()).toEqual(['lxc-127_access', 'lxc-127_admin']);
   });
 });
