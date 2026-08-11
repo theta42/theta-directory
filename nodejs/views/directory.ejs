@@ -3332,7 +3332,11 @@
               '<span>' + (isMaster ? '👑 <strong>Master Site Node</strong>' : '⚡ <strong>Spoke Site Node</strong>') + '</span>' +
               '<span class="badge bg-' + (isMaster ? 'warning text-dark' : 'info text-dark') + '">' + esc(cfg.siteMode || 'master') + '</span>' +
             '</h5>' +
-            '<p class="card-text text-muted small mb-2">Multi-site directory & replication state for this node.</p>' +
+            '<p class="card-text text-muted small mb-2">Multi-site directory & replication state for this node. ' +
+              '<a href="https://theta42.github.io/theta-suite/sso/multi-site.html" target="_blank" rel="noopener"><i class="fa-solid fa-book me-1"></i>Directory join docs</a>' +
+              ' &middot; ' +
+              '<a href="https://theta42.github.io/theta-suite/jump-host/mesh.html" target="_blank" rel="noopener"><i class="fa-solid fa-book me-1"></i>Gateway mesh docs</a>' +
+            '</p>' +
             '<table class="table table-sm text-start mb-0">' +
               '<tr><th>Local Site Slug:</th><td><code>' + esc(cfg.siteSlug || 'site-default') + '</code></td></tr>' +
               '<tr><th>Master Authority URL:</th><td>' + (cfg.masterUrl ? ('<code>' + esc(cfg.masterUrl) + '</code>') : '<em>(This Node is Master)</em>') + '</td></tr>' +
@@ -3344,7 +3348,9 @@
                 : '<span class="badge bg-warning text-dark"><i class="fa-solid fa-triangle-exclamation me-1"></i> Snapshot only (re-join to register for live updates)</span>') + '</td></tr>' : '') +
               (isMaster ? '<tr><th>Registered Spokes:</th><td><span class="badge bg-success">' + (cfg.registeredSpokesCount || 0) + ' receiving live updates</span></td></tr>' : '') +
               '<tr><th>Registered Sites:</th><td><span class="badge bg-primary">' + (res.sitesCount || 0) + ' sites</span></td></tr>' +
-              '<tr><th>Theta Gateways:</th><td><span class="badge bg-dark">' + (res.gatewaysCount || 0) + ' active gateways</span></td></tr>' +
+              '<tr><th>Theta Gateways:</th><td>' + (res.gatewaysCount == null
+                ? '<span class="badge bg-secondary" title="' + esc(res.gatewaysNote || 'not configured') + '"><i class="fa-solid fa-question me-1"></i> Unknown (jump-host integration not configured)</span>'
+                : '<span class="badge bg-dark">' + res.gatewaysCount + ' active gateway' + (res.gatewaysCount === 1 ? '' : 's') + '</span>') + '</td></tr>' +
             '</table>' +
           '</div>' +
         '</div>' +
