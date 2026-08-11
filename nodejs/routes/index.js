@@ -122,6 +122,13 @@ router.get('/users', async function(req, res, next) {
   res.render('users', {...values});
 });
 
+// Directory migration wizard. Like every other page here this renders the shell
+// for anyone; the data behind it is admin-gated in routes/api_ldif_import.js and
+// the view calls app.auth.forceLogin before it fetches anything.
+router.get('/users/import', async function(req, res, next) {
+  res.render('ldif_import', {...values});
+});
+
 router.get('/login', async function(req, res, next) {
   res.render('login', {...values, redirect: req.query.redirect});
 });

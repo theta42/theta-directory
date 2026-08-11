@@ -1,0 +1,584 @@
+<%- include('top') %>
+<script type="text/javascript">
+	// Directory migration wizard. See docs/ldif-import.md.
+	//
+	// The staged plan lives server-side in Redis; this page holds only what it
+	// needs to render, and never sees a password hash -- the API strips them and
+	// sends the scheme name instead.
+	var state = { importId: null, profile: null, plan: null, targets: [] };
+
+	const esc = (s) => $('<div>').text(s == null ? '' : String(s)).html();
+
+	function step(n){
+		document.querySelectorAll('[data-step]').forEach(function(el){
+			el.classList.toggle('d-none', Number(el.dataset.step) !== n);
+		});
+		document.querySelectorAll('[data-step-btn]').forEach(function(el){
+			const i = Number(el.dataset.stepBtn);
+			el.classList.toggle('active', i === n);
+			el.classList.toggle('text-muted', i > n && !state.plan);
+		});
+		window.scrollTo({ top: 0, behavior: 'smooth' });
+	}
+
+	function note(message, kind){
+		const box = document.getElementById('notice');
+		box.className = 'alert alert-' + (kind || 'info');
+		box.innerHTML = message;
+		box.style.display = '';
+	}
+	function clearNote(){ document.getElementById('notice').style.display = 'none'; }
+
+	// ── Step 1: readiness + upload ──────────────────────────────────────────
+
+	async function loadReadiness(){
+		try{
+			const data = await app.api.get('ldif-import/readiness');
+			const box = document.getElementById('readiness');
+			if(data.clean){
+				box.className = 'alert alert-success';
+				box.innerHTML = '<i class="fa-solid fa-circle-check"></i> This directory has no user accounts other than yours — ready to import.' +
+					' <span class="text-muted">' + data.groupCount + ' group(s) available to map onto.</span>';
+			}else{
+				box.className = 'alert alert-warning';
+				box.innerHTML = '<i class="fa-solid fa-triangle-exclamation"></i> <strong>This directory already has ' +
+					data.otherUsers.length + ' other user account(s).</strong> An import is designed to run into an empty directory. ' +
+					'Any source account whose username, uidNumber or gidNumber already exists here will be blocked and cannot be migrated. ' +
+					'<div class="mt-1 small text-muted">Existing: ' + data.otherUsers.slice(0, 20).map(esc).join(', ') +
+					(data.otherUsers.length > 20 ? ', …' : '') + '</div>';
+			}
+			if(data.groupCount === 0){
+				box.innerHTML += '<hr><div class="small mb-0"><strong>No groups exist yet.</strong> Source groups can only be mapped onto groups that already exist here, ' +
+					'so add your hosts and apps first or every group will have to be dropped.</div>';
+			}
+		}catch(e){ /* readiness is advisory */ }
+	}
+
+	async function uploadFile(){
+		const input = document.getElementById('ldifFile');
+		if(!input.files.length) return note('Choose an LDIF file first.', 'warning');
+
+		const button = document.getElementById('uploadBtn');
+		button.disabled = true;
+		button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Parsing…';
+		clearNote();
+
+		try{
+			const text = await input.files[0].text();
+			const data = await $.ajax({
+				type: 'POST',
+				url: '/api/ldif-import/upload',
+				headers: { 'auth-token': app.auth.getToken() },
+				data: text,
+				contentType: 'text/plain; charset=utf-8',
+				dataType: 'json',
+			});
+			state.importId = data.importId;
+			state.profile = data.profile;
+			state.plan = data.plan;
+			renderMapping();
+			renderUsers();
+			await loadTargets();
+			renderGroups();
+			step(2);
+		}catch(xhr){
+			note('Could not read this file: ' + esc((xhr.responseJSON && xhr.responseJSON.message) || xhr.message || 'unknown error'), 'danger');
+		}finally{
+			button.disabled = false;
+			button.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> Parse file';
+		}
+	}
+
+	// ── Step 2: schema mapping ──────────────────────────────────────────────
+
+	function option(value, label, selected){
+		return '<option value="' + esc(value) + '"' + (selected ? ' selected' : '') + '>' + esc(label) + '</option>';
+	}
+
+	function renderMapping(){
+		const p = state.profile;
+		const s = state.plan.stats;
+
+		document.getElementById('mapUserClass').innerHTML = p.available.objectClasses
+			.map(function(o){ return option(o.name, o.name + ' (' + o.count + ')', o.name === p.userObjectClass); }).join('');
+		document.getElementById('mapUsernameAttr').innerHTML = (p.available.usernameAttrs.length ? p.available.usernameAttrs : [p.usernameAttr])
+			.map(function(a){ return option(a, a, a === p.usernameAttr); }).join('');
+		document.getElementById('mapMemberAttr').innerHTML = (p.available.memberAttrs.length ? p.available.memberAttrs : [p.memberAttr])
+			.map(function(a){ return option(a, a, a === p.memberAttr); }).join('');
+		document.getElementById('mapGroupClasses').innerHTML = p.available.objectClasses
+			.map(function(o){ return option(o.name, o.name + ' (' + o.count + ')', p.groupObjectClasses.indexOf(o.name) !== -1); }).join('');
+
+		document.getElementById('mapStats').innerHTML =
+			'<span class="badge text-bg-primary">' + s.users + ' users</span> ' +
+			'<span class="badge text-bg-success">' + s.importable + ' importable</span> ' +
+			(s.blocked ? '<span class="badge text-bg-danger">' + s.blocked + ' blocked</span> ' : '') +
+			'<span class="badge text-bg-secondary">' + s.groups + ' groups</span> ' +
+			'<span class="badge text-bg-light text-dark">' + s.personalGroups + ' personal groups</span> ' +
+			'<span class="badge text-bg-light text-dark">' + s.skipped + ' other entries ignored</span>';
+	}
+
+	async function applyMapping(){
+		const groupClasses = Array.from(document.getElementById('mapGroupClasses').selectedOptions).map(function(o){ return o.value; });
+		try{
+			const data = await app.api.put('ldif-import/' + state.importId + '/mapping', {
+				userObjectClass: document.getElementById('mapUserClass').value,
+				usernameAttr: document.getElementById('mapUsernameAttr').value,
+				memberAttr: document.getElementById('mapMemberAttr').value,
+				groupObjectClasses: groupClasses,
+			});
+			state.profile = data.profile;
+			state.plan = data.plan;
+			renderMapping();
+			renderUsers();
+			renderGroups();
+			note('Mapping updated — review the users below.', 'info');
+		}catch(e){ note('Could not re-scan: ' + esc(e.message || 'unknown error'), 'danger'); }
+	}
+
+	// ── Step 3: users ───────────────────────────────────────────────────────
+
+	function decisionCell(user){
+		if(user.blocking.length){
+			return '<span class="badge text-bg-danger">blocked</span>';
+		}
+		return '<select class="form-select form-select-sm user-decision" data-username="' + esc(user.username) + '">' +
+			option('import', 'Import', user.decision === 'import') +
+			option('service', 'Service account', user.decision === 'service') +
+			option('reject', 'Reject', user.decision === 'reject') +
+			'</select>';
+	}
+
+	function renderUsers(){
+		const rows = state.plan.users.map(function(u){
+			const flags = [];
+			if(u.locked) flags.push('<span class="badge text-bg-secondary" title="Disabled at the source; imported disabled">disabled</span>');
+			if(u.sshPublicKey.length) flags.push('<span class="badge text-bg-light text-dark">' + u.sshPublicKey.length + ' SSH key(s)</span>');
+			if(!u.hasPassword) flags.push('<span class="badge text-bg-warning">no password</span>');
+
+			const messages = u.blocking.map(function(b){ return '<div class="text-danger small"><i class="fa-solid fa-ban"></i> ' + esc(b) + '</div>'; })
+				.concat(u.warnings.map(function(w){ return '<div class="text-muted small"><i class="fa-solid fa-circle-info"></i> ' + esc(w) + '</div>'; }))
+				.join('');
+
+			return '<tr class="' + (u.blocking.length ? 'table-danger' : '') + '">' +
+				'<td><code>' + esc(u.username) + '</code></td>' +
+				'<td class="text-nowrap"><small>' + esc(u.uidNumber || '—') + ' / ' + esc(u.gidNumber || '—') + '</small></td>' +
+				'<td><small>' + esc([u.givenName, u.sn].filter(Boolean).join(' ') || '—') + '</small></td>' +
+				'<td><small>' + esc(u.mail || '—') + '</small></td>' +
+				'<td><small>' + (u.passwordScheme ? '<code>{' + esc(u.passwordScheme) + '}</code>' : '—') + '</small></td>' +
+				'<td>' + flags.join(' ') + messages + '</td>' +
+				'<td style="min-width:9rem">' + decisionCell(u) + '</td>' +
+				'</tr>';
+		}).join('');
+
+		document.getElementById('userTable').innerHTML = rows ||
+			'<tr><td colspan="7" class="text-center text-muted p-4">No user entries found under the current mapping.</td></tr>';
+		updateUserCounts();
+	}
+
+	function updateUserCounts(){
+		const counts = { import: 0, service: 0, reject: 0 };
+		state.plan.users.forEach(function(u){ counts[u.blocking.length ? 'reject' : u.decision]++; });
+		document.getElementById('userCounts').innerHTML =
+			'<span class="badge text-bg-success">' + counts.import + ' to import</span> ' +
+			'<span class="badge text-bg-info">' + counts.service + ' as service accounts</span> ' +
+			'<span class="badge text-bg-secondary">' + counts.reject + ' rejected</span>';
+	}
+
+	function bulkUsers(decision){
+		state.plan.users.forEach(function(u){ if(!u.blocking.length) u.decision = decision; });
+		renderUsers();
+	}
+
+	document.addEventListener('change', function(e){
+		if(e.target.classList.contains('user-decision')){
+			const user = state.plan.users.find(function(u){ return u.username === e.target.dataset.username; });
+			if(user) user.decision = e.target.value;
+			updateUserCounts();
+		}
+		if(e.target.classList.contains('group-target')){
+			const group = state.plan.groups.find(function(g){ return g.sourceDn === e.target.dataset.dn; });
+			if(group) group.target = e.target.value;
+			updateGroupCounts();
+		}
+	});
+
+	async function saveUsers(){
+		const decisions = {};
+		state.plan.users.forEach(function(u){ decisions[u.username] = u.blocking.length ? 'reject' : u.decision; });
+		try{
+			const data = await app.api.put('ldif-import/' + state.importId + '/users', { decisions: decisions });
+			state.plan = data.plan;
+			renderUsers();
+			renderGroups();
+			step(4);
+		}catch(e){ note('Could not save selections: ' + esc(e.message || 'unknown error'), 'danger'); }
+	}
+
+	// ── Step 4: groups ──────────────────────────────────────────────────────
+
+	async function loadTargets(){
+		try{
+			const data = await app.api.get('ldif-import/targets');
+			state.targets = data.results || [];
+		}catch(e){ state.targets = []; }
+	}
+
+	function renderGroups(){
+		const groups = state.plan.groups;
+		const importedUsernames = new Set(state.plan.users.filter(function(u){
+			return !u.blocking.length && u.decision !== 'reject';
+		}).map(function(u){ return u.username.toLowerCase(); }));
+
+		const rows = groups.map(function(g){
+			// Members whose accounts are not being imported simply do not come
+			// across; showing the number here makes that visible before it happens.
+			const landing = g.memberUsernames.filter(function(m){ return importedUsernames.has(m.toLowerCase()); }).length;
+			const dropped = g.memberUsernames.length - landing;
+
+			const select = '<select class="form-select form-select-sm group-target" data-dn="' + esc(g.sourceDn) + '">' +
+				option('', '— drop this group —', !g.target) +
+				state.targets.map(function(t){ return option(t.cn, t.cn, t.cn === g.target); }).join('') +
+				'</select>';
+
+			const warnings = g.warnings.map(function(w){ return '<div class="text-muted small">' + esc(w) + '</div>'; }).join('');
+
+			return '<tr>' +
+				'<td><code>' + esc(g.cn) + '</code>' + (g.description ? '<div class="text-muted small">' + esc(g.description) + '</div>' : '') + '</td>' +
+				'<td class="text-nowrap"><small>' + landing + ' member(s)' +
+					(dropped ? ' <span class="text-muted">(' + dropped + ' not imported)</span>' : '') + '</small>' + warnings + '</td>' +
+				'<td style="min-width:14rem">' + select + '</td>' +
+				'</tr>';
+		}).join('');
+
+		document.getElementById('groupTable').innerHTML = rows ||
+			'<tr><td colspan="3" class="text-center text-muted p-4">No groups found under the current mapping.</td></tr>';
+		updateGroupCounts();
+	}
+
+	function updateGroupCounts(){
+		const mapped = state.plan.groups.filter(function(g){ return !!g.target; }).length;
+		document.getElementById('groupCounts').innerHTML =
+			'<span class="badge text-bg-success">' + mapped + ' mapped</span> ' +
+			'<span class="badge text-bg-secondary">' + (state.plan.groups.length - mapped) + ' dropped</span>';
+	}
+
+	// Map every source group whose name exactly matches an existing group here.
+	function autoMapGroups(){
+		const byName = new Map(state.targets.map(function(t){ return [t.cn.toLowerCase(), t.cn]; }));
+		let matched = 0;
+		state.plan.groups.forEach(function(g){
+			const hit = byName.get((g.cn || '').toLowerCase());
+			if(hit){ g.target = hit; matched++; }
+		});
+		renderGroups();
+		note(matched ? matched + ' group(s) matched an existing group by name.' : 'No source group name matched an existing group.', matched ? 'success' : 'info');
+	}
+
+	async function saveGroups(){
+		const mapping = {};
+		state.plan.groups.forEach(function(g){ mapping[g.sourceDn] = g.target || ''; });
+		try{
+			const data = await app.api.put('ldif-import/' + state.importId + '/groups', { mapping: mapping });
+			state.plan = data.plan;
+			renderGroups();
+			renderSummary();
+			step(5);
+		}catch(e){ note('Could not save mapping: ' + esc(e.message || 'unknown error'), 'danger'); }
+	}
+
+	// ── Step 5: confirm and apply ───────────────────────────────────────────
+
+	function renderSummary(){
+		const users = state.plan.users.filter(function(u){ return !u.blocking.length && u.decision !== 'reject'; });
+		const md5 = users.filter(function(u){ return u.passwordScheme === 'MD5'; }).length;
+		const locked = users.filter(function(u){ return u.locked; }).length;
+		const mapped = state.plan.groups.filter(function(g){ return !!g.target; }).length;
+
+		document.getElementById('summary').innerHTML =
+			'<li><strong>' + users.length + '</strong> account(s) created, keeping their original uidNumber, gidNumber and password hash</li>' +
+			'<li><strong>' + users.filter(function(u){ return u.decision === 'service'; }).length + '</strong> of them marked as service accounts</li>' +
+			(locked ? '<li><strong>' + locked + '</strong> imported disabled, as they are at the source</li>' : '') +
+			(md5 ? '<li><strong>' + md5 + '</strong> carry legacy MD5 passwords and will be forced to change them at first login</li>' : '') +
+			'<li><strong>' + mapped + '</strong> source group(s) merged into existing groups; the rest dropped</li>';
+	}
+
+	async function runImport(){
+		if(!confirm('Import these accounts now? Accounts are created as the import runs and are not rolled back if it fails partway.')) return;
+
+		const button = document.getElementById('applyBtn');
+		button.disabled = true;
+		button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Importing…';
+		clearNote();
+
+		try{
+			const data = await app.api.post('ldif-import/' + state.importId + '/apply', {
+				verifyEmail: document.getElementById('optVerifyEmail').checked,
+				acceptTos: document.getElementById('optAcceptTos').checked,
+			});
+			renderReport(data.report);
+			step(6);
+		}catch(e){
+			note('Import failed: ' + esc(e.message || 'unknown error'), 'danger');
+			button.disabled = false;
+			button.innerHTML = '<i class="fa-solid fa-file-import"></i> Run import';
+		}
+	}
+
+	function renderReport(report){
+		const badge = { imported: 'success', failed: 'danger', skipped: 'secondary', partial: 'warning' };
+		// A source group you chose to drop is not a result. Listing all of them
+		// buries the handful of rows that actually say something -- a real
+		// directory drops well over a hundred -- so they are counted, not listed.
+		const actedOn = report.groups.filter(function(g){ return g.status !== 'skipped'; });
+		const dropped = report.groups.length - actedOn.length;
+
+		document.getElementById('reportSummary').innerHTML =
+			'<span class="badge text-bg-success">' + report.summary.imported + ' imported</span> ' +
+			(report.summary.failed ? '<span class="badge text-bg-danger">' + report.summary.failed + ' failed</span> ' : '') +
+			'<span class="badge text-bg-secondary">' + report.summary.skipped + ' skipped</span> ' +
+			'<span class="badge text-bg-primary">' + report.summary.groupsMapped + ' groups mapped</span> ' +
+			(dropped ? '<span class="badge text-bg-light text-dark">' + dropped + ' groups dropped</span>' : '');
+
+		document.getElementById('reportTable').innerHTML = report.users.map(function(u){
+			return '<tr><td><code>' + esc(u.username) + '</code></td>' +
+				'<td><span class="badge text-bg-' + (badge[u.status] || 'secondary') + '">' + esc(u.status) + '</span></td>' +
+				'<td><small>' + esc(u.detail || '') + '</small></td></tr>';
+		}).concat(actedOn.map(function(g){
+			return '<tr><td><code>' + esc(g.cn) + '</code> <i class="fa-solid fa-arrow-right text-muted"></i> <code>' + esc(g.target || '—') + '</code></td>' +
+				'<td><span class="badge text-bg-' + (badge[g.status] || 'secondary') + '">' + esc(g.status) + '</span></td>' +
+				'<td><small>' + esc(g.detail || '') + '</small></td></tr>';
+		})).join('');
+	}
+
+	(async function(){
+		await app.auth.forceLogin(['app_sso_admin', 'admin']);
+		$(document).ready(function(){
+			loadReadiness();
+			step(1);
+		});
+	})();
+</script>
+
+<div class="container mt-4">
+	<div class="row">
+		<div class="col-md-12">
+			<div class="card shadow">
+				<div class="card-header d-flex justify-content-between align-items-center">
+					<div>
+						<i class="fa-solid fa-file-import"></i>
+						Import from an existing LDAP directory
+					</div>
+					<div>
+						<a href="/users" class="btn btn-sm btn-outline-secondary me-2"><i class="fa-solid fa-arrow-left"></i> Users</a>
+						<a href="/docs/ldif-import" class="text-reset" title="Help"><i class="fa-solid fa-circle-question"></i></a>
+					</div>
+				</div>
+
+				<div class="px-3 pt-3 border-bottom">
+					<ul class="nav nav-tabs border-bottom-0" role="tablist">
+						<li class="nav-item"><span class="nav-link" data-step-btn="1">1. File</span></li>
+						<li class="nav-item"><span class="nav-link" data-step-btn="2">2. Mapping</span></li>
+						<li class="nav-item"><span class="nav-link" data-step-btn="3">3. Users</span></li>
+						<li class="nav-item"><span class="nav-link" data-step-btn="4">4. Groups</span></li>
+						<li class="nav-item"><span class="nav-link" data-step-btn="5">5. Confirm</span></li>
+					</ul>
+				</div>
+
+				<div class="card-body">
+					<div id="notice" class="alert" style="display:none"></div>
+
+					<!-- Step 1 -->
+					<div data-step="1" class="d-none">
+						<div id="readiness" class="alert alert-secondary">Checking this directory…</div>
+
+						<p class="text-muted">
+							Upload a full export of the directory you are migrating from, produced with
+							<code>slapcat -l full.ldif</code> or <code>ldapsearch -LLL</code>. Nothing is written
+							until you have reviewed every account and group on the next screens.
+						</p>
+
+						<div class="row g-2 align-items-end">
+							<div class="col-md-8">
+								<label class="form-label" for="ldifFile">LDIF file</label>
+								<input type="file" class="form-control" id="ldifFile" accept=".ldif,.txt,text/plain">
+							</div>
+							<div class="col-md-4">
+								<button class="btn btn-primary w-100" id="uploadBtn" onclick="uploadFile()">
+									<i class="fa-solid fa-magnifying-glass"></i> Parse file
+								</button>
+							</div>
+						</div>
+
+						<div class="alert alert-light border mt-3 mb-0 small">
+							<strong>Before you start:</strong> add all of your hosts and apps first, so their groups exist
+							to map onto — source groups can only be merged into groups that already exist here, never created.
+							The file is parsed in memory and held for one hour; it is never written to disk, and the
+							password hashes in it are never sent back to your browser.
+						</div>
+					</div>
+
+					<!-- Step 2 -->
+					<div data-step="2" class="d-none">
+						<p class="text-muted">
+							This is how the file appears to be laid out. Correct anything that looks wrong —
+							a directory exported from FreeIPA, Active Directory or a hand-rolled schema will
+							not use the same attributes as OpenLDAP.
+						</p>
+						<div id="mapStats" class="mb-3"></div>
+
+						<div class="row g-3">
+							<div class="col-md-6">
+								<label class="form-label" for="mapUserClass">An entry is a <strong>user</strong> when it has objectClass</label>
+								<select class="form-select" id="mapUserClass"></select>
+								<div class="form-text">Prefer the class that carries <code>uidNumber</code> — accounts without one cannot be migrated.</div>
+							</div>
+							<div class="col-md-6">
+								<label class="form-label" for="mapUsernameAttr">Its <strong>username</strong> comes from</label>
+								<select class="form-select" id="mapUsernameAttr"></select>
+								<div class="form-text">Must be unique across every account.</div>
+							</div>
+							<div class="col-md-6">
+								<label class="form-label" for="mapGroupClasses">An entry is a <strong>group</strong> when it has any of</label>
+								<select class="form-select" id="mapGroupClasses" multiple size="5"></select>
+							</div>
+							<div class="col-md-6">
+								<label class="form-label" for="mapMemberAttr">Group <strong>membership</strong> is listed in</label>
+								<select class="form-select" id="mapMemberAttr"></select>
+								<div class="form-text"><code>member</code>/<code>uniqueMember</code> hold DNs; <code>memberUid</code> holds bare usernames.</div>
+							</div>
+						</div>
+
+						<div class="mt-4 d-flex justify-content-between">
+							<button class="btn btn-outline-secondary" onclick="step(1)"><i class="fa-solid fa-arrow-left"></i> Back</button>
+							<div>
+								<button class="btn btn-outline-primary me-2" onclick="applyMapping()"><i class="fa-solid fa-rotate"></i> Re-scan with these settings</button>
+								<button class="btn btn-primary" onclick="step(3)">Review users <i class="fa-solid fa-arrow-right"></i></button>
+							</div>
+						</div>
+					</div>
+
+					<!-- Step 3 -->
+					<div data-step="3" class="d-none">
+						<div class="d-flex justify-content-between align-items-center mb-2">
+							<div id="userCounts"></div>
+							<div>
+								<button class="btn btn-sm btn-outline-secondary" onclick="bulkUsers('import')">All to import</button>
+								<button class="btn btn-sm btn-outline-secondary" onclick="bulkUsers('service')">All to service</button>
+								<button class="btn btn-sm btn-outline-secondary" onclick="bulkUsers('reject')">Reject all</button>
+							</div>
+						</div>
+
+						<div class="table-responsive" style="max-height:60vh;overflow-y:auto">
+							<table class="table table-striped table-sm align-middle">
+								<thead class="sticky-top bg-body">
+									<tr>
+										<th>Username</th>
+										<th class="text-nowrap">uid / gid</th>
+										<th>Name</th>
+										<th>Email</th>
+										<th>Password</th>
+										<th>Notes</th>
+										<th>Action</th>
+									</tr>
+								</thead>
+								<tbody id="userTable"></tbody>
+							</table>
+						</div>
+
+						<div class="mt-3 d-flex justify-content-between">
+							<button class="btn btn-outline-secondary" onclick="step(2)"><i class="fa-solid fa-arrow-left"></i> Back</button>
+							<button class="btn btn-primary" onclick="saveUsers()">Map groups <i class="fa-solid fa-arrow-right"></i></button>
+						</div>
+					</div>
+
+					<!-- Step 4 -->
+					<div data-step="4" class="d-none">
+						<div class="alert alert-light border small">
+							Source groups are <strong>never created here</strong>. A group name from another directory carries no meaning
+							in this one, where access is derived from the group model. Each source group can either have its members
+							merged into a group that already exists, or be dropped. Several source groups may point at the same target.
+						</div>
+
+						<div class="d-flex justify-content-between align-items-center mb-2">
+							<div id="groupCounts"></div>
+							<button class="btn btn-sm btn-outline-primary" onclick="autoMapGroups()">
+								<i class="fa-solid fa-wand-magic-sparkles"></i> Match by name
+							</button>
+						</div>
+
+						<div class="table-responsive" style="max-height:60vh;overflow-y:auto">
+							<table class="table table-striped table-sm align-middle">
+								<thead class="sticky-top bg-body">
+									<tr><th>Source group</th><th>Members</th><th>Merge into</th></tr>
+								</thead>
+								<tbody id="groupTable"></tbody>
+							</table>
+						</div>
+
+						<div class="mt-3 d-flex justify-content-between">
+							<button class="btn btn-outline-secondary" onclick="step(3)"><i class="fa-solid fa-arrow-left"></i> Back</button>
+							<button class="btn btn-primary" onclick="saveGroups()">Confirm <i class="fa-solid fa-arrow-right"></i></button>
+						</div>
+					</div>
+
+					<!-- Step 5 -->
+					<div data-step="5" class="d-none">
+						<h5>What will happen</h5>
+						<ul id="summary" class="mb-4"></ul>
+
+						<h6>Onboarding</h6>
+						<p class="text-muted small">
+							Imported accounts have no history in this app, so by default everyone is asked to accept the
+							terms of service and verify their email at first login. If you already collected these in the
+							directory you are migrating from, skip them here.
+						</p>
+						<div class="form-check">
+							<input class="form-check-input" type="checkbox" id="optAcceptTos">
+							<label class="form-check-label" for="optAcceptTos">Treat the terms of service as already accepted</label>
+						</div>
+						<div class="form-check mb-3">
+							<input class="form-check-input" type="checkbox" id="optVerifyEmail">
+							<label class="form-check-label" for="optVerifyEmail">Treat email addresses as already verified</label>
+						</div>
+
+						<div class="alert alert-warning small">
+							Accounts carrying legacy MD5 passwords are always forced to change them at first login,
+							regardless of the settings above. No welcome email is sent to anyone.
+						</div>
+
+						<div class="mt-3 d-flex justify-content-between">
+							<button class="btn btn-outline-secondary" onclick="step(4)"><i class="fa-solid fa-arrow-left"></i> Back</button>
+							<button class="btn btn-danger" id="applyBtn" onclick="runImport()">
+								<i class="fa-solid fa-file-import"></i> Run import
+							</button>
+						</div>
+					</div>
+
+					<!-- Step 6: report -->
+					<div data-step="6" class="d-none">
+						<h5>Import complete</h5>
+						<div id="reportSummary" class="mb-3"></div>
+
+						<div class="table-responsive" style="max-height:60vh;overflow-y:auto">
+							<table class="table table-striped table-sm align-middle">
+								<thead class="sticky-top bg-body"><tr><th>Entry</th><th>Status</th><th>Detail</th></tr></thead>
+								<tbody id="reportTable"></tbody>
+							</table>
+						</div>
+
+						<div class="alert alert-info small mt-3">
+							Group membership beyond what you mapped, and any nesting the old directory had, is not migrated —
+							set it up from the <a href="/directory">directory</a> now that the accounts exist.
+						</div>
+
+						<div class="mt-3">
+							<a href="/users" class="btn btn-primary"><i class="fa-solid fa-users"></i> Back to users</a>
+						</div>
+					</div>
+
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+<%- include('bottom') %>

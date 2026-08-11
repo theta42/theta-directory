@@ -55,7 +55,14 @@ function nextPosixId(entries, key){
 	return String(Math.max(conf.uidGidMin - 1, ...existing) + 1);
 }
 
-async function addPosixGroup(client, data){
+// `preserve` options exist for one caller: the LDIF importer
+// (utils/ldif_import.js). They are a separate argument rather than fields on
+// `data` on purpose -- every route in this app calls User.add(req.body), so a
+// `data.uidNumber` that was honoured whenever present would let anyone who can
+// create a user pick their own uidNumber (0, say), and a `data.userPassword`
+// that skipped hashing whenever it looked hashed would let them plant a known
+// hash. Neither is reachable unless a caller passes the option explicitly.
+async function addPosixGroup(client, data, opts = {}){
 
   try{
 	const groups = (await client.search(conf.groupBase, {
@@ -63,7 +70,27 @@ async function addPosixGroup(client, data){
 	  filter: '(&(objectClass=posixGroup))',
 	})).searchEntries;
 
-	data.gidNumber = nextPosixId(groups, 'gidNumber');
+	if (opts.preserveIds && data.gidNumber) {
+		// Migration preserves the source gid exactly -- it is what every file on
+		// every host is grouped by, and reallocating it would silently change
+		// group ownership everywhere.
+		//
+		// A group already holding this gid is not an error. Every account here
+		// normally gets a personal group of its own, but nothing in POSIX says
+		// two accounts cannot share a primary group, and real directories do:
+		// the source this was written against has two accounts whose primary
+		// gid is a third account's group. In that case the group the account
+		// needs already exists, so referencing it is the faithful migration --
+		// creating a second group with the same gid is what would be wrong.
+		const existing = groups.find(g => String(g.gidNumber) === String(data.gidNumber));
+		if (existing) {
+			data.gidNumber = String(data.gidNumber);
+			return data;
+		}
+		data.gidNumber = String(data.gidNumber);
+	} else {
+		data.gidNumber = nextPosixId(groups, 'gidNumber');
+	}
 
 	const safeCn = escapeLDAPDNValue(data.cn);
 	await client.add(`cn=${safeCn},${conf.groupBase}`, {
@@ -79,14 +106,24 @@ async function addPosixGroup(client, data){
   }
 }
 
-async function addPosixAccount(client, data){
+async function addPosixAccount(client, data, opts = {}){
   try{
 	const people = (await client.search(conf.userBase, {
 		scope: 'sub',
 		filter: conf.userFilter,
 	})).searchEntries;
 
-	data.uidNumber = nextPosixId(people, 'uidNumber');
+	if (opts.preserveIds && data.uidNumber) {
+		const taken = people.some(p => String(p.uidNumber) === String(data.uidNumber));
+		if (taken) {
+			throw Object.assign(new Error(`uidNumber ${data.uidNumber} is already in use`), {
+				status: 409, name: 'UidNumberInUse',
+			});
+		}
+		data.uidNumber = String(data.uidNumber);
+	} else {
+		data.uidNumber = nextPosixId(people, 'uidNumber');
+	}
 
 	const safeCn = escapeLDAPDNValue(data.cn);
 	const entry = {
@@ -99,9 +136,13 @@ async function addPosixAccount(client, data){
 		loginShell: data.loginShell,
 		homeDirectory: data.homeDirectory,
 		description: data.description || ' ',
-		sudoHost: 'ALL',
-		sudoCommand: 'ALL',
-		sudoUser: data.uid,
+		// A migrated account keeps whatever sudo rule it already had; a new one
+		// gets this directory's default. Handing every imported user ALL/ALL
+		// because the source happened to be more restrictive would quietly grant
+		// privileges the old directory withheld.
+		sudoHost: data.sudoHost || 'ALL',
+		sudoCommand: data.sudoCommand || 'ALL',
+		sudoUser: data.sudoUser || data.uid,
 		objectclass: ['inetOrgPerson', 'sudoRole', 'ldapPublicKey', 'posixAccount', 'top', 'theta42Person'],
 	};
 
@@ -152,7 +193,13 @@ async function addPosixAccount(client, data){
 
 }
 
-async function addLdapUser(client, data){
+// An already-hashed userPassword, as stored by any LDAP server: {SSHA512}...,
+// {MD5}..., {CRYPT}..., etc. Migration must write these through untouched --
+// hashing one again produces an account whose password is the literal string
+// "{MD5}Lc..." and which nobody can ever log in as.
+const HASHED_PASSWORD = /^\{[A-Za-z0-9-]+\}/;
+
+async function addLdapUser(client, data, opts = {}){
 
 	var group;
 
@@ -161,17 +208,24 @@ async function addLdapUser(client, data){
 		if (!data.uid) {
 			data.uid = `${data.givenName[0]}${data.sn}`.toLowerCase();
 		}
+		// Normalizes the DN to this directory's convention. Source directories
+		// commonly use a display name here ("cn=Jane Doe"), which would break
+		// the personal-group DN that deleteLdapUser derives from cn.
 		data.cn = data.uid;
 		data.loginShell = data.loginShell || '/bin/bash';
 		data.homeDirectory = data.homeDirectory || `/home/${data.uid}`;
 		if (data.userPassword) {
-			data.userPassword = hashPasswordSSHA512(data.userPassword);
+			if (opts.preserveHash && HASHED_PASSWORD.test(data.userPassword)) {
+				// Left exactly as the source stored it.
+			} else {
+				data.userPassword = hashPasswordSSHA512(data.userPassword);
+			}
 		} else {
 			delete data.userPassword;
 		}
 
-		group = await addPosixGroup(client, data);
-		data = await addPosixAccount(client, group);
+		group = await addPosixGroup(client, data, opts);
+		data = await addPosixAccount(client, group, opts);
 
 		return data;
 
@@ -403,9 +457,14 @@ User.exists = async function(data, key){
 	}
 };
 
-User.add = async function(data) {
+// `options` is deliberately a second argument: no route may forward request
+// data into it. See the note above addPosixGroup.
+//   preserveIds     keep the caller's uidNumber/gidNumber, fail on collision
+//   preserveHash    write an already-hashed userPassword through untouched
+//   suppressWelcome skip the welcome email (a migration should not mail everyone)
+User.add = async function(data, options = {}) {
 	try{
-		if (await this.exists(data.mail, 'mail')) {
+		if (data.mail && await this.exists(data.mail, 'mail')) {
 			throw Object.assign(new Error('Email already in use'), {status: 409, name: 'EmailInUse'});
 		}
 		if (data.mobile && await this.exists(data.mobile, 'mobile')) {
@@ -413,13 +472,15 @@ User.add = async function(data) {
 		}
 
 		await withClient(async (client) => {
-			await addLdapUser(client, data);
+			await addLdapUser(client, data, options);
 		});
 		cache.clear();
 
 		let user = await this.get(data.uid);
 
 		await UserVerification.getOrCreate(user.uid);
+
+		if (options.suppressWelcome) return user;
 
 		try {
 			await Mail.sendTemplate(
