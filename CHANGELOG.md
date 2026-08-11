@@ -1,3 +1,10 @@
+# v2.5.0 - 2026-08-10
+
+### Added
+- **No-inbound relay automation.** A spoke with no public IP of its own can now register as such (`noInbound`/`meshIp`/`publicHost` on `POST /api/site/spokes`, forwarded through `POST /api/site/join` for the real operator join flow), and the master auto-creates/updates the relay route on its own `theta-proxy` via `utils/proxy_client.js` — a new self-service `prx_...` API token client, reusing `theta-proxy`'s existing token system rather than inventing a new credential type. Verified against a real running `theta-proxy` container (`GET /api/host/:item`'s actual `{item, results: {...}}` response shape, not the flat shape first assumed).
+- **Replication traffic prefers the mesh.** `utils/site_replicate.js`'s fire-and-forget resync push now tries a registered spoke's `meshIp` first (falling back to its public `endpoint` on failure) — cross-component routing over the gateway-to-gateway WireGuard mesh instead of the open internet, for any spoke that's registered one.
+- `POST /api/site/join` surfaces the resulting relay status in its response (`relay.note`), and `theta-suite`'s bootstrap flow (`CFG_SPOKE_NO_INBOUND`/`CFG_SPOKE_PUBLIC_HOST`, `bootstrap/site-relay-register.js`) drives all of this from the real operator-facing setup script, not just the API.
+
 # v2.4.0 - 2026-08-10
 
 ### Added
