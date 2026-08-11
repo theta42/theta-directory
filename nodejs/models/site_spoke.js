@@ -29,7 +29,17 @@ class SiteSpoke extends Model {
 		siteSlug: { type: 'string' },
 		pushToken: { type: 'string', isRequired: true },
 		created_on: { type: 'integer' },
-		last_seen_on: { type: 'integer' }
+		last_seen_on: { type: 'integer' },
+		// No-inbound relay (MULTI_SITE_SPEC.md): a spoke with no public IP of
+		// its own reports its WG mesh IP + the public hostname it wants
+		// reached at; the master then best-effort creates a matching relay
+		// route on its own theta-proxy (utils/proxy_client.js). relayNote
+		// records what happened for visibility in the UI -- this automation
+		// is optional/best-effort, never a join requirement.
+		noInbound: { type: 'boolean', default: false },
+		meshIp: { type: 'string' },
+		publicHost: { type: 'string' },
+		relayNote: { type: 'string' }
 	};
 
 	toPublic() {
