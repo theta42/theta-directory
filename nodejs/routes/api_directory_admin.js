@@ -11,6 +11,7 @@ const { projectResources } = require('@simpleworkjs/directory-schema');
 const SUPER_ADMIN_GROUP = permission.SUPER_ADMIN_GROUP;
 const groups = require('../utils/groups');
 const meshReplicate = require('../utils/site_replicate');
+const jumpClient = require('../utils/jump_client');
 
 // Make `childCn` a member of `parentCn`, i.e. everyone in the child is
 // transitively in the parent. Idempotent and non-fatal: "already a member" is
@@ -987,8 +988,6 @@ async function probeMasterHealth(cfg) {
 router.get('/site-status', async (req, res, next) => {
   try {
     const sites = await Resource.list({ where: { kind: 'site' } });
-    const allResources = await Resource.list();
-    const gateResources = allResources.filter(r => r.metadata && r.metadata.subType === 'wireguard');
 
     const cfg = siteConfig.get();
     const wanConnected = await probeMasterHealth(cfg);
@@ -1003,6 +1002,12 @@ router.get('/site-status', async (req, res, next) => {
     // fully joined but silently stuck on the one-time snapshot, which was
     // otherwise invisible anywhere in the UI.
     const registeredSpokesCount = cfg.isMaster ? await SiteSpoke.list().then(l => l.length).catch(() => 0) : 0;
+    // Real gateway-to-gateway mesh peer count from jump-host's own registry
+    // (utils/jump_client.js), not this app's unrelated WireGuard
+    // roaming-client Resources. count is null (not 0) when the query
+    // couldn't run at all -- the UI distinguishes "0 gateways" from "can't
+    // tell" instead of showing a misleading zero.
+    const gateways = await jumpClient.getGatewayCount();
     res.json({
       status: 'ok',
       config: {
@@ -1017,7 +1022,8 @@ router.get('/site-status', async (req, res, next) => {
       },
       sitesCount: sites.length,
       sites: sites.map(s => ({ id: s.id, name: s.name, slug: s.slug })),
-      gatewaysCount: gateResources.length
+      gatewaysCount: gateways.count,
+      gatewaysNote: gateways.note
     });
   } catch (err) { next(err); }
 });
