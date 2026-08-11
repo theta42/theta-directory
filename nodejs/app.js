@@ -96,6 +96,8 @@ app.use('/api/group', middleware.auth, require('./routes/group'));
 app.use('/api/notification', middleware.auth, require('./routes/notification'));
 app.use('/api/discovery', middleware.auth, require('./routes/discovery'));
 app.use('/api/directory-admin', middleware.auth, require('./routes/api_directory_admin'));
+// Directory migration (docs/ldif-import.md). Admin-gated inside the router.
+app.use('/api/ldif-import', middleware.auth, require('./routes/api_ldif_import'));
 // Multi-site join (site join keys, master export, spoke join) — mounted before
 // the 404 catch-all; /api/site/export is reachable by other hosts with a
 // Bearer site-join-key (no admin session).
