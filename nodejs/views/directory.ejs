@@ -3319,6 +3319,55 @@
     } catch (e) { console.error('Failed to fetch site status:', e); }
   }
 
+  // ldap: { configuredServerId, advertisedServerId, stale, peersCount } from
+  // GET /directory-admin/site-status (routes/api_directory_admin.js).
+  // configuredServerId is read from THIS node's live slapd.conf;
+  // advertisedServerId (master only) is what the API currently hands spokes.
+  // They can genuinely disagree right after a promotion or a new spoke
+  // joining -- OpenLDAP's static config only reloads at process start.
+  function renderLdapStatus(ldap) {
+    if (!ldap) return '<span class="text-muted">unknown</span>';
+    if (ldap.configuredServerId == null) {
+      return '<span class="badge bg-secondary"><i class="fa-solid fa-circle-minus me-1"></i> Not configured (standalone)</span>';
+    }
+    let html = '<span class="badge bg-dark">ServerID ' + esc(ldap.configuredServerId) + '</span>';
+    if (ldap.peersCount != null) {
+      html += ' <span class="badge bg-primary">' + ldap.peersCount + ' peer' + (ldap.peersCount === 1 ? '' : 's') + '</span>';
+    }
+    if (ldap.stale) {
+      html += ' <span class="badge bg-warning text-dark" title="This node now advertises ServerID ' + esc(ldap.advertisedServerId) +
+        ' (e.g. after a promotion), but slapd is still running with ' + esc(ldap.configuredServerId) +
+        ' -- re-run setup.sh here to apply it."><i class="fa-solid fa-triangle-exclamation me-1"></i> Needs setup.sh re-run</span>';
+    }
+    return html;
+  }
+
+  // spokes: [{siteSlug, endpoint, noInbound, relayNote, ldapServerId, lastSeenOn}]
+  // Per-spoke detail (master only) so an operator can see what's actually
+  // registered instead of only an aggregate count.
+  function renderSpokesTable(spokes) {
+    if (!spokes || !spokes.length) return '';
+    const rows = spokes.map(function(s) {
+      return '<tr>' +
+        '<td><code>' + esc(s.siteSlug || '?') + '</code></td>' +
+        '<td class="small">' + esc(s.endpoint) + '</td>' +
+        '<td>' + (s.ldapServerId != null ? '<span class="badge bg-dark">' + esc(s.ldapServerId) + '</span>' : '<span class="text-muted small">unassigned</span>') + '</td>' +
+        '<td>' + (s.noInbound
+          ? '<span class="badge bg-info text-dark" title="' + esc(s.relayNote || '') + '"><i class="fa-solid fa-diagram-project me-1"></i> Relayed</span>'
+          : '<span class="text-muted small">direct</span>') + '</td>' +
+      '</tr>';
+    }).join('');
+    return '<div class="card mt-3">' +
+      '<div class="card-header py-2 fw-bold small"><i class="fa-solid fa-diagram-project me-1"></i> Registered Spokes</div>' +
+      '<div class="card-body p-0">' +
+        '<table class="table table-sm table-hover mb-0">' +
+          '<thead><tr><th>Site</th><th>Endpoint</th><th>LDAP ServerID</th><th>Path</th></tr></thead>' +
+          '<tbody>' + rows + '</tbody>' +
+        '</table>' +
+      '</div>' +
+    '</div>';
+  }
+
   async function openSiteStatusModal() {
     try {
       const res = await app.api.get('directory-admin/site-status');
@@ -3351,12 +3400,14 @@
               '<tr><th>Theta Gateways:</th><td>' + (res.gatewaysCount == null
                 ? '<span class="badge bg-secondary" title="' + esc(res.gatewaysNote || 'not configured') + '"><i class="fa-solid fa-question me-1"></i> Unknown (jump-host integration not configured)</span>'
                 : '<span class="badge bg-dark">' + res.gatewaysCount + ' active gateway' + (res.gatewaysCount === 1 ? '' : 's') + '</span>') + '</td></tr>' +
+              '<tr><th>LDAP Replication (MMR):</th><td>' + renderLdapStatus(res.ldap) + '</td></tr>' +
             '</table>' +
           '</div>' +
         '</div>' +
         '<div class="alert alert-secondary small mb-3">' +
           '<i class="fa-solid fa-network-wired me-1"></i> <strong>WireGuard Gateway Mesh & NETMAP</strong>: Inter-site routing operates via <code>theta-gateway</code> subnets (<code>10.x.0.0/16</code>) with default NETMAP shadow translations (<code>10.x.168.0/24 &rarr; 192.168.1.0/24</code>).' +
-        '</div>';
+        '</div>' +
+        (isMaster ? renderSpokesTable(res.spokes) : '');
 
       // Fresh install (no users/resources yet): offer to JOIN an existing
       // master site instead of seeding a new directory.
