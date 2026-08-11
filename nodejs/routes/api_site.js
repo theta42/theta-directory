@@ -120,27 +120,43 @@ router.post('/spokes', async (req, res, next) => {
     const key = await SiteJoinKey.authenticate(rawKey);
     if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
 
-    const { endpoint, siteSlug } = req.body || {};
+    const { endpoint, siteSlug, noInbound, meshIp, publicHost } = req.body || {};
     if (!endpoint || !/^https?:\/\//.test(endpoint)) {
       return res.status(400).json({ status: 'error', message: 'a valid http(s) endpoint is required' });
     }
 
     const now = Math.floor(Date.now() / 1000);
     let spoke = (await SiteSpoke.list({ where: { endpoint } }))[0];
+    const patch = { siteSlug: siteSlug || (spoke && spoke.siteSlug) || null, last_seen_on: now, noInbound: !!noInbound, meshIp: meshIp || '', publicHost: publicHost || '' };
     if (spoke) {
-      await spoke.update({ siteSlug: siteSlug || spoke.siteSlug, last_seen_on: now });
+      await spoke.update(patch);
     } else {
       spoke = await SiteSpoke.create({
         id: crypto.randomUUID(),
         endpoint,
-        siteSlug: siteSlug || null,
         pushToken: SiteSpoke.generatePushToken(),
         created_on: now,
-        last_seen_on: now
+        ...patch
       });
     }
-    logAudit('spoke_registered', { endpoint, siteSlug: spoke.siteSlug });
-    res.json({ status: 'ok', pushToken: spoke.pushToken });
+
+    // No-inbound relay automation: best-effort, never blocks registration.
+    // See utils/proxy_client.js for why this reuses theta-proxy's existing
+    // API token system rather than a new credential type.
+    let relayNote = 'not applicable (spoke has inbound access)';
+    if (noInbound) {
+      if (meshIp && publicHost) {
+        const proxyClient = require('../utils/proxy_client');
+        const result = await proxyClient.ensureRelayRoute({ host: publicHost, ip: meshIp, targetPort: 3001 });
+        relayNote = result.note;
+      } else {
+        relayNote = 'skipped: noInbound set but meshIp/publicHost missing';
+      }
+      await spoke.update({ relayNote });
+    }
+
+    logAudit('spoke_registered', { endpoint, siteSlug: spoke.siteSlug, noInbound: !!noInbound, relayNote });
+    res.json({ status: 'ok', pushToken: spoke.pushToken, relay: { note: relayNote } });
   } catch (e) { next(e); }
 });
 
