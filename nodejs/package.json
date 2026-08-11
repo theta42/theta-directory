@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node ./bin/www",
     "dev": "npx nodemon --ignore public/ ./bin/www",
-    "test": "NODE_ENV=test jest tests/groups.test.js tests/subtypes.test.js tests/site_join.test.js tests/site_config.test.js tests/site_replicate.test.js tests/proxy_client.test.js --forceExit"
+    "test": "NODE_ENV=test jest tests/groups.test.js tests/subtypes.test.js tests/site_join.test.js tests/site_config.test.js tests/site_replicate.test.js tests/proxy_client.test.js tests/nmap_plugin.test.js --forceExit"
   },
   "jest": {
     "testEnvironment": "node",

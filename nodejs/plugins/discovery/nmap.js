@@ -88,9 +88,28 @@ module.exports = {
         var msg = (error && error.message) || String(error);
         if (/nmap.*not found|command location/i.test(msg)) {
           reject(new Error('nmap binary not installed in the container image (rebuild with Dockerfile.openldap, which apk-adds nmap)'));
-        } else {
-          reject(error);
+          return;
         }
+        // node-nmap (node_modules/node-nmap/index.js) treats ANY stderr
+        // output from the nmap binary as a fatal scan error -- including
+        // nmap's own benign RTT timing-calibration warnings ("RTTVAR has
+        // grown to over N seconds, decreasing to M"), which it prints
+        // *during* a scan that goes on to complete normally. That means a
+        // scan that actually succeeded (valid XML already sitting in
+        // scan.rawData) got thrown away and reported as a failed run with
+        // zero hosts discovered -- not just a noisy log line. Recover by
+        // manually re-running node-nmap's own XML-parse-then-complete path
+        // (rawDataHandler -> scanComplete -> the 'complete' listener above)
+        // when the "error" is this specific known-benign nmap message and
+        // there's actually output to parse. A genuine XML parse failure
+        // re-emits 'error' with a different message, which falls through to
+        // reject() below same as before -- this only widens the recovery
+        // path, it doesn't swallow real failures.
+        if (/RTTVAR has grown/i.test(msg) && scan.rawData) {
+          scan.rawDataHandler(scan.rawData);
+          return;
+        }
+        reject(error);
       });
 
       scan.startScan();
