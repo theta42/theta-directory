@@ -39,7 +39,15 @@ class SiteSpoke extends Model {
 		noInbound: { type: 'boolean', default: false },
 		meshIp: { type: 'string' },
 		publicHost: { type: 'string' },
-		relayNote: { type: 'string' }
+		relayNote: { type: 'string' },
+		// OpenLDAP multi-master replication (docs/replication.md): a unique
+		// small integer this spoke's slapd.conf ServerID must use. Assigned
+		// once at registration (see api_site.js's nextFreeLdapServerId),
+		// reused on re-registration -- a spoke that re-registers after a
+		// restart must not get bumped to a new ID, same reasoning as
+		// jump-host's meshIndex. The master reserves 1 for itself, never
+		// assigned here.
+		ldapServerId: { type: 'integer' }
 	};
 
 	toPublic() {
