@@ -370,7 +370,7 @@ async function adoptFromMaster({ masterUrl, joinKey }) {
 
 router.post('/join', async (req, res, next) => {
   try {
-    const { masterUrl, joinKey, selfUrl } = req.body || {};
+    const { masterUrl, joinKey, selfUrl, noInbound, meshIp, publicHost } = req.body || {};
     if (!masterUrl || !joinKey) {
       return res.status(400).json({ status: 'error', message: 'masterUrl and joinKey are required' });
     }
@@ -404,17 +404,29 @@ router.post('/join', async (req, res, next) => {
     //    snapshot for that spoke, not a hard failure).
     let replicationPushToken = null;
     let replicationNote = 'not registered (no selfUrl given)';
+    let relayNote = noInbound ? 'not attempted (registration did not run)' : 'not applicable (this spoke has inbound access)';
     if (selfUrl) {
       try {
         const regResp = await fetch(base + '/api/site/spokes', {
           method: 'POST',
           headers: { Authorization: 'Bearer ' + joinKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ endpoint: selfUrl, siteSlug: exportData.siteSlug || cfg.siteSlug })
+          // noInbound/meshIp/publicHost: this spoke has no public IP of its
+          // own; forwarded so the master can best-effort auto-create a relay
+          // route on its own theta-proxy (utils/proxy_client.js). Previously
+          // accepted by /spokes but never actually reachable from here --
+          // nothing forwarded them, so the automation existed but no real
+          // join flow could ever trigger it.
+          body: JSON.stringify({
+            endpoint: selfUrl,
+            siteSlug: exportData.siteSlug || cfg.siteSlug,
+            ...(noInbound ? { noInbound: true, meshIp, publicHost } : {})
+          })
         });
         if (regResp.ok) {
           const regBody = await regResp.json();
           replicationPushToken = regBody.pushToken;
           replicationNote = 'registered for live replication';
+          if (regBody.relay) relayNote = regBody.relay.note;
         } else {
           replicationNote = 'registration failed: HTTP ' + regResp.status;
         }
@@ -454,7 +466,8 @@ router.post('/join', async (req, res, next) => {
       resources: { created: imp.created, updated: imp.updated, edges: imp.edgeCount },
       ldap: { note: ldapNote },
       signingKey: { note: signingKeyNote },
-      replication: { note: replicationNote, live: !!replicationPushToken }
+      replication: { note: replicationNote, live: !!replicationPushToken },
+      relay: { note: relayNote }
     });
   } catch (e) { next(e); }
 });

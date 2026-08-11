@@ -55,6 +55,45 @@ describe('site_replicate', () => {
     expect(JSON.parse(optsA.body).reason).toBe('catalog-changed');
   });
 
+  test('prefers the mesh IP over the public endpoint when the spoke reported one', async () => {
+    SiteSpoke._seed([
+      { endpoint: 'https://spoke-a.example.com:8443', pushToken: 'token-a', meshIp: '172.24.5.1' }
+    ]);
+
+    await siteReplicate.replicateToSpokes('catalog-changed');
+    await new Promise((r) => setImmediate(r));
+
+    expect(mockFetchCalls.length).toBe(1);
+    expect(mockFetchCalls[0][0]).toBe('http://172.24.5.1:8443/api/site/resync');
+  });
+
+  test('falls back to the public endpoint if the mesh attempt fails', async () => {
+    SiteSpoke._seed([
+      { endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', meshIp: '172.24.5.1' }
+    ]);
+    mockFetchImpl = async (url) => {
+      if (url.startsWith('http://172.24.5.1')) throw new Error('mesh unreachable');
+      return { ok: true, status: 200 };
+    };
+
+    await siteReplicate.replicateToSpokes('catalog-changed');
+    await new Promise((r) => setImmediate(r));
+
+    expect(mockFetchCalls.length).toBe(2);
+    expect(mockFetchCalls[0][0]).toMatch(/^http:\/\/172\.24\.5\.1/);
+    expect(mockFetchCalls[1][0]).toBe('https://spoke-a.example.com/api/site/resync');
+  });
+
+  test('a spoke with no meshIp only ever tries the public endpoint', async () => {
+    SiteSpoke._seed([{ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a' }]);
+
+    await siteReplicate.replicateToSpokes('catalog-changed');
+    await new Promise((r) => setImmediate(r));
+
+    expect(mockFetchCalls.length).toBe(1);
+    expect(mockFetchCalls[0][0]).toBe('https://spoke-a.example.com/api/site/resync');
+  });
+
   test('no known spokes: resolves cleanly, no fetch calls', async () => {
     await siteReplicate.replicateToSpokes('catalog-changed');
     await new Promise((r) => setImmediate(r));
