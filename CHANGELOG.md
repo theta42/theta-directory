@@ -1,3 +1,24 @@
+# v2.11.0 - 2026-08-11
+
+### Added
+- **Import users and groups from an existing LDAP directory.** New wizard at **Users → Import LDIF** (`/users/import`, admin-only) takes a `slapcat`/`ldapsearch` export and migrates accounts through the app's own model layer -- so every imported account arrives with a `UserVerification` row, a personal group, cache invalidation and service-account membership, exactly as if it had been created here. Two guarantees drive the design: `uidNumber`/`gidNumber` are preserved verbatim (they are what every file on every host is owned by -- reallocating them turns a migration into a filesystem-wide chown), and `userPassword` is carried across as the stored hash, never re-hashed, so people keep the password they already have. See [docs/ldif-import.md](docs/ldif-import.md).
+  - `utils/ldif.js` -- a standalone RFC 2849 parser: line folding, base64, attribute options, CRLF. It refuses `attr:< url` values (a file-disclosure primitive handed to whoever uploads the dump) and rejects change records rather than misreading them as content.
+  - `utils/ldif_import.js` -- schema-agnostic profiling, planning and applying. The layout of the source directory is *detected and then editable*, so a FreeIPA or AD export is a mapping change rather than a code change. Membership is resolved per entry, because real directories mix `groupOfNames`/`member` with `posixGroup`/`memberUid` and a single file-wide choice silently drops whichever kind loses.
+  - Review happens before anything is written: every account shows what it will bring across, what it will not, and why it cannot be imported. Blocked rows (no `uidNumber`, a duplicate inside the file, a collision with an account already here) are skipped no matter what the client sends.
+  - **Groups are never created by an import.** A group name from another directory carries no meaning in this one, where access is a projection of the resource graph (docs/groups.md). Each source group either has its members merged into a group that already exists, or is dropped; many-to-one is supported for collapsing a sprawling old directory.
+  - Carried across where present: password hash, uid/gid numbers, name, email, phone, shell, home directory, description, location, date of birth, every SSH key, sudo rules, and the account's disabled state. Anything else is listed on the row as *not migrated* rather than dropped quietly.
+  - Onboarding is a per-run choice (treat ToS as accepted / email as verified) so a cutover need not re-ask 30 people. Legacy MD5 passwords still always force a change at first login, and no welcome email is sent to anyone.
+  - Staging lives in Redis under a one-hour expiry and is destroyed on apply or abandon; the parsed dump is never written to disk and password hashes are never included in an API response.
+
+### Changed
+- **`User.add(data, options)` takes an options argument** for `preserveIds`, `preserveHash` and `suppressWelcome`. These are a second argument rather than fields on `data` deliberately: every route calls `User.add(req.body)`, so a `uidNumber` honoured whenever present would let anyone who can create a user claim uid 0, and a `userPassword` that skipped hashing whenever it looked hashed would let them plant a known hash. Normal user creation is unchanged.
+- **An account may share its primary group with another account.** Each account normally gets a personal group of its own, but nothing in POSIX requires that, and real directories do share -- the dump this was built against has two accounts whose primary gid is a third account's group. Under `preserveIds`, a group already holding the gid is referenced rather than duplicated.
+- **`sudoHost`/`sudoCommand`/`sudoUser` are honoured when supplied.** New accounts still get this directory's `ALL`/`ALL` default; a migrated account keeps the rule it already had, rather than being silently granted more than the old directory gave it.
+- `User.add` no longer runs its "email already in use" lookup when the account has no email address.
+
+### Fixed
+- **The docs allowlist gained `ldif-import`**, so the wizard's help link resolves in-app.
+
 # v2.10.0 - 2026-08-11
 
 ### Added
