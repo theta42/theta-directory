@@ -67,6 +67,14 @@ models.initORM().then(() => {
   if (process.env.VAULT_TOKEN) {
     require('../utils/vault_broker').startAppTokenRenewal();
   }
+
+  // Converge this node's live OpenLDAP replication config on whatever the
+  // cluster currently looks like, then keep it converged. The cluster can
+  // change while a node is down (a site joins, a master is promoted), and
+  // the slapd.conf the entrypoint seeded only carries whatever
+  // LDAP_SERVER_ID/LDAP_REPLICATION_HOSTS happened to be in the environment.
+  // Applied at runtime against cn=config -- no restart, no setup.sh re-run.
+  require('../utils/ldap_reconcile').startReplicationReconciler();
 }).catch(err => {
   console.error('Failed to initialize ORM:', err);
   process.exit(1);
