@@ -135,11 +135,33 @@ already joined reports "already a spoke" and setup continues (idempotent).
 
 ## Not yet built
 
-- Traffic between sites (join/export/resync) still goes over the open
-  network path that already reaches the target — it does not route over the
-  WireGuard mesh `theta-gateway` can now establish (see `MULTI_SITE_SPEC.md`).
-- A no-inbound spoke (no public IP at all) still can't join — the mechanism
-  for a master to relay through the mesh to such a spoke is verified as
-  working, but nothing automates creating that route yet.
 - OpenBao secret replication covers only the agent-signing key; LDAP admin
   creds, JWT secret, and other per-deployment secrets aren't synced.
+- A promoted spoke's own OpenLDAP `ServerID` doesn't apply live -- `POST
+  /site-promote` starts advertising `1` for it immediately
+  (`GET /directory-admin/ldap-replication-config`), but nothing restarts
+  `slapd` with that value automatically (its static `slapd.conf` is only
+  read at process start). Re-run `setup.sh` on the newly-promoted node
+  promptly after promotion to actually apply it.
+- The master's own `LDAP_REPLICATION_HOSTS` peer list only recomputes on
+  its next `setup.sh` run, not live the instant a new spoke joins -- same
+  re-run-`setup.sh` caveat as above, just triggered by a join instead of a
+  promotion.
+
+## Shipped since the above was last stale
+
+- Traffic between sites (`utils/site_replicate.js`'s resync push) prefers a
+  registered spoke's WireGuard mesh IP over the open internet when one's on
+  file, falling back to the public endpoint on failure.
+- A no-inbound spoke (no public IP at all) CAN join: `noInbound`/`meshIp`/
+  `publicHost` on `POST /api/site/join` drive `utils/proxy_client.js`, which
+  auto-creates/updates the relay route on the master's own `theta-proxy`.
+  Mesh peering between the two jump-hosts is still a manual, one-time step
+  (see `theta-suite`'s `spoke.env.example` for the operator-facing side).
+  A spoke with zero inbound *and* zero outbound path still can't join --
+  the join itself needs to reach the master's API directly.
+- OpenLDAP N-way multi-master replication now auto-configures on join --
+  the master assigns each spoke a unique `LDAP_SERVER_ID` and derives every
+  site's `ldaps://` URL automatically (`GET /api/site/ldap-peers`,
+  `GET /directory-admin/ldap-replication-config`). See
+  `docs/replication.md`.
