@@ -25,6 +25,11 @@ services:
       - LDAP_ADMIN_PASS=secret
       - ORG_NAME=E2E Master
       - app_oauth__jwtSecret=e2e-multisite-master-jwt-secret
+      # POST /demote's self-registration (routes/api_site.js) needs a real
+      # reachable endpoint for this container; stack.selfUrl overrides the
+      # normal https://<stack.ssoHost> derivation, which isn't reachable
+      # here (plain HTTP, no TLS/proxy in front, non-443 port).
+      - app_stack__selfUrl=http://master:3001
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health >/dev/null 2>&1"]
       interval: 2s
@@ -42,6 +47,7 @@ services:
       - LDAP_ADMIN_PASS=secret
       - ORG_NAME=E2E Spoke
       - app_oauth__jwtSecret=e2e-multisite-spoke-jwt-secret
+      - app_stack__selfUrl=http://spoke:3001
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health >/dev/null 2>&1"]
       interval: 2s
