@@ -169,20 +169,14 @@ router.post('/promote/:slug', async (req, res, next) => {
 			else throw e;
 		}
 		
-		// Link them
-		const crypto = require('crypto');
-		await ResourceGroup.create({
-			id: crypto.randomUUID(),
-			resourceId: resource.id,
-			groupCn: accessGroup,
-			accessLevel: 'user'
-		});
-		await ResourceGroup.create({
-			id: crypto.randomUUID(),
-			resourceId: resource.id,
-			groupCn: adminGroup,
-			accessLevel: 'admin'
-		});
+		// Link them. ensure(), not create(): a re-submitted/retried Promote
+		// click (or the modal being saved twice) had no existence check here,
+		// so repeated promotion attempts on the same resource accumulated
+		// duplicate access/admin group rows -- see ResourceGroup.ensure()'s
+		// comment on models/resource.js for why this can't rely on a DB
+		// constraint instead.
+		await ResourceGroup.ensure(resource.id, accessGroup, 'user');
+		await ResourceGroup.ensure(resource.id, adminGroup, 'admin');
 		
 		const meta = resource.metadata || {};
 		meta.managed = true;

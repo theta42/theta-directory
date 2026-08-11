@@ -320,8 +320,14 @@ class DiscoveryReconciler {
           await Group.get(adminGroup).catch(async (e) => {
             if (e.status === 404) await Group.add({ name: adminGroup, description: `Admin access to ${res.name}`, owner: 'cn=admin' });
           });
-          await ResourceGroup.create({ id: crypto.randomUUID(), resourceId: res._actualId, groupCn: accessGroup, accessLevel: 'user' }).catch(() => {});
-          await ResourceGroup.create({ id: crypto.randomUUID(), resourceId: res._actualId, groupCn: adminGroup, accessLevel: 'admin' }).catch(() => {});
+          // ensure(), not create(): reconcile() runs on every discovery pass
+          // (e.g. once per Proxmox cluster node reporting the same LXC), and
+          // a raw create() here had no existence check, so a resource ended
+          // up with the same access/admin group rows duplicated once per
+          // pass -- see ResourceGroup.ensure()'s comment for why this can't
+          // rely on a DB constraint instead.
+          await ResourceGroup.ensure(res._actualId, accessGroup, 'user').catch(() => {});
+          await ResourceGroup.ensure(res._actualId, adminGroup, 'admin').catch(() => {});
         } catch (err) {
           console.error(`[DiscoveryReconciler] autoPromote failed for ${res.slug}:`, err.message);
         }
