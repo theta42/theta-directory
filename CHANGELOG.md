@@ -1,3 +1,12 @@
+# v2.8.0 - 2026-08-11
+
+### Fixed
+- **Promotion no longer orphans the demoted old master's LDAP replication.** Neither `/site-promote` nor `/demote` touched `SiteSpoke` -- the demoted old master got a fresh join key but no `SiteSpoke` entry on the new master (no `ldapServerId`, invisible to the peer list), and structurally could never self-heal via `/join` (refuses re-join for a node that's already a spoke). `/demote` now registers itself with the new master immediately, deriving its own endpoint from `stack.selfUrl`/`stack.ssoHost`. `/site-promote`'s response also now surfaces that the promoted node's own OpenLDAP ServerID needs a `setup.sh` re-run to actually apply.
+- **The Directory's site slug and the multi-site replication identity are unified.** These were two unrelated values that happened to share a name -- a deployment could show a real site name in the Directory catalog and the literal `site-default` fallback on the Multi-Site modal for the same node. `POST /resources` now syncs `site_config`'s `siteSlug` to match the moment this node's own site Resource is first created, for a still-default master only.
+
+### Added
+- **LDAP replication status + per-spoke detail on the Multi-Site modal.** New `utils/ldap_replication.js`'s `currentSlapdServerId()` reads the actual running ServerID from this node's own `slapd.conf` -- distinct from what the API currently advertises, which can genuinely disagree right after a promotion or a new spoke joining. `GET /directory-admin/site-status` now surfaces both plus a `stale` flag and a full spokes list (endpoint, assigned `ldapServerId`, relay path), not just an aggregate count.
+
 # v2.7.0 - 2026-08-11
 
 ### Added
