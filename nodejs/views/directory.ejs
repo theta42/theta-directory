@@ -2349,16 +2349,16 @@
     }
     $('#agent-join-command').text(joinCmd);
 
-    // Windows: the installer is a GitHub release artifact (built by the
-    // theta-agent release workflow — nothing binary lives in this repo). It
-    // takes the same values as /SERVER_URL /JOIN_KEY command-line params.
-    const WIN_SETUP = 'theta-agent-2.1.0-windows-amd64-setup.exe';
-    const WIN_SETUP_URL = `https://github.com/theta42/theta-agent/releases/latest/download/${WIN_SETUP}`;
+    // Windows: the installer is served by THIS Directory (staged by setup.sh
+    // into /resources/theta-agent/, which pulls the release artifact matching
+    // the suite's pinned theta-agent version). It takes the same values as
+    // /SERVER_URL /JOIN_KEY command-line params.
+    const WIN_SETUP = 'theta-agent-windows-amd64-setup.exe';
     function winInstallCmd(url, args) {
       return [
         `$url = '${url}'`,
         `$setup = "$env:TEMP\\ta-setup.exe"`,
-        `Invoke-WebRequest "${WIN_SETUP_URL}" -OutFile $setup`,
+        `Invoke-WebRequest "${url}/resources/theta-agent/${WIN_SETUP}" -OutFile $setup`,
         `Start-Process -Wait $setup -ArgumentList ${args}`
       ].join('\n');
     }
