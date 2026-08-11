@@ -205,6 +205,30 @@ async function main() {
   if (spokeCfg.config.isMaster !== false) fail(`spoke should be isMaster:false after join, got ${JSON.stringify(spokeCfg.config)}`);
   if (!spokeCfg.config.masterUrl) fail('spoke should have masterUrl set after join');
 
+  step('Verifying the master computed its own LDAP replication config (ServerID 1 + the new spoke as a peer)');
+  const { body: masterLdapCfg } = await api(MASTER_URL, '/api/directory-admin/ldap-replication-config', { token: masterToken });
+  if (masterLdapCfg.ldapServerId !== 1) fail(`master's own ldapServerId should be 1, got ${JSON.stringify(masterLdapCfg)}`);
+  const spokePeer = (masterLdapCfg.peers || []).find(p => p.ldapHost === 'ldaps://spoke:636');
+  if (!spokePeer || typeof spokePeer.ldapServerId !== 'number') {
+    fail(`master's peer list should include the spoke at ldaps://spoke:636 with an assigned ldapServerId, got ${JSON.stringify(masterLdapCfg.peers)}`);
+  }
+
+  step('Verifying the spoke can fetch its own assigned LDAP ServerID + peer list from the master');
+  const spokeLdapPeersResp = await fetch(`${MASTER_URL}/api/site/ldap-peers?endpoint=${encodeURIComponent('http://spoke:3001')}`, {
+    headers: { Authorization: 'Bearer ' + joinKey }
+  });
+  const spokeLdapCfg = await spokeLdapPeersResp.json();
+  if (spokeLdapPeersResp.status !== 200) fail(`GET /api/site/ldap-peers failed: ${spokeLdapPeersResp.status} ${JSON.stringify(spokeLdapCfg)}`);
+  if (spokeLdapCfg.ldapServerId !== spokePeer.ldapServerId) {
+    fail(`spoke's own reported ldapServerId (${spokeLdapCfg.ldapServerId}) should match what the master's peer list assigned it (${spokePeer.ldapServerId})`);
+  }
+  const masterAsPeer = (spokeLdapCfg.peers || []).find(p => p.ldapServerId === 1);
+  if (!masterAsPeer || masterAsPeer.ldapHost !== 'ldaps://master:636') {
+    fail(`spoke's peer list should include the master (ServerID 1, ldaps://master:636), got ${JSON.stringify(spokeLdapCfg.peers)}`);
+  }
+  const selfInOwnPeerList = (spokeLdapCfg.peers || []).some(p => p.ldapServerId === spokeLdapCfg.ldapServerId);
+  if (selfInOwnPeerList) fail(`spoke's own peer list should not include itself, got ${JSON.stringify(spokeLdapCfg.peers)}`);
+
   step('Verifying the spoke adopted the master\'s pre-join catalog');
   const spokeResources = await api(SPOKE_URL, '/api/directory-admin/resources', { token: spokeToken });
   const adopted = (spokeResources.body.results || spokeResources.body.resources || spokeResources.body || []);

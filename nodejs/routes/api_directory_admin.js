@@ -962,6 +962,7 @@ const siteConfig = require('../utils/site_config');
 const { siteIsFresh } = require('../utils/site_join');
 const { Agent } = require('../models/agent');
 const { SiteSpoke } = require('../models/site_spoke');
+const { ldapHostFor } = require('../utils/ldap_replication');
 
 // probeMasterHealth checks whether this (spoke) node can reach its master over
 // the site join key. The master's /api/site/ping is deliberately lightweight.
@@ -1025,6 +1026,30 @@ router.get('/site-status', async (req, res, next) => {
       gatewaysCount: gateways.count,
       gatewaysNote: gateways.note
     });
+  } catch (err) { next(err); }
+});
+
+// OpenLDAP multi-master replication config for THIS node (docs/replication.md).
+// Master-only: the master already has every registered spoke's info locally
+// (SiteSpoke), so it can compute its own ServerID (always 1) + full peer
+// list without an HTTP round-trip. A spoke gets its config from the master
+// directly instead (GET /api/site/ldap-peers -- see bootstrap/
+// site-ldap-register.js in theta-suite, which calls whichever of the two
+// applies to this node's role).
+router.get('/ldap-replication-config', async (req, res, next) => {
+  try {
+    const cfg = siteConfig.get();
+    if (!cfg.isMaster) {
+      return res.status(400).json({ status: 'error', message: 'this node is a spoke -- fetch replication config from the master via GET /api/site/ldap-peers instead' });
+    }
+    const spokes = await SiteSpoke.list();
+    const peers = [];
+    for (const s of spokes) {
+      if (!s.ldapServerId) continue;
+      const host = ldapHostFor(s.endpoint);
+      if (host) peers.push({ ldapServerId: s.ldapServerId, ldapHost: host });
+    }
+    res.json({ status: 'ok', ldapServerId: 1, peers });
   } catch (err) { next(err); }
 });
 
