@@ -281,6 +281,16 @@ async function main() {
   if (promoteRes.body.handoff !== 'previous master demoted') {
     fail(`expected the old master to be demoted as part of promotion, got handoff=${JSON.stringify(promoteRes.body.handoff)}`);
   }
+  if (!promoteRes.body.ldapReplicationNote) {
+    fail('expected /site-promote to surface a note that this node\'s LDAP ServerID needs a setup.sh re-run to apply');
+  }
+
+  step('Verifying the demoted old master auto-registered itself as a real spoke of the new master (not orphaned)');
+  const { body: newMasterLdapCfg } = await api(SPOKE_URL, '/api/directory-admin/ldap-replication-config', { token: spokeToken });
+  const oldMasterAsPeer = (newMasterLdapCfg.peers || []).find(p => p.ldapHost === 'ldaps://master:636');
+  if (!oldMasterAsPeer || typeof oldMasterAsPeer.ldapServerId !== 'number') {
+    fail(`the demoted old master should appear as a registered peer with an assigned ldapServerId, got ${JSON.stringify(newMasterLdapCfg.peers)}`);
+  }
 
   step('Verifying the newly-promoted node is master');
   const { body: newMasterCfg } = await api(SPOKE_URL, '/api/site/config', { token: spokeToken });
