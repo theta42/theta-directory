@@ -37,21 +37,48 @@ function replicateToSpokes(reason) {
 	})();
 }
 
-async function pingOne(spoke, reason) {
-	const url = String(spoke.endpoint).replace(/\/+$/, '') + '/api/site/resync';
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), RESYNC_TIMEOUT_MS);
-	try {
-		const resp = await fetch(url, {
-			method: 'POST',
-			headers: { Authorization: 'Bearer ' + spoke.pushToken, 'Content-Type': 'application/json' },
-			body: JSON.stringify({ reason: reason || 'catalog-changed' }),
-			signal: controller.signal
-		});
-		if (!resp.ok) throw new Error('status ' + resp.status);
-	} finally {
-		clearTimeout(timer);
+// Cross-component routing (MULTI_SITE_SPEC.md): if this spoke reported a WG
+// mesh IP when it registered (utils/proxy_client.js's no-inbound relay path
+// populates the same field), prefer sending the resync push over the mesh
+// tunnel instead of the open internet -- plain HTTP is fine here since the
+// WG tunnel itself is already encrypted, same reasoning as the no-inbound
+// relay terminating at the master. Falls back to the spoke's public endpoint
+// if the mesh attempt fails (mesh IP set but that particular tunnel isn't
+// actually up yet, or unreachable for any other reason) -- never let a
+// mesh-routing preference turn into "spoke never gets updates."
+function resyncUrls(spoke) {
+	const urls = [];
+	if (spoke.meshIp) {
+		let port = '3001';
+		try { port = new URL(spoke.endpoint).port || port; } catch (_) { /* keep default */ }
+		urls.push(`http://${spoke.meshIp}:${port}/api/site/resync`);
 	}
+	urls.push(String(spoke.endpoint).replace(/\/+$/, '') + '/api/site/resync');
+	return urls;
 }
 
-module.exports = { replicateToSpokes };
+async function pingOne(spoke, reason) {
+	const urls = resyncUrls(spoke);
+	let lastErr;
+	for (const url of urls) {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), RESYNC_TIMEOUT_MS);
+		try {
+			const resp = await fetch(url, {
+				method: 'POST',
+				headers: { Authorization: 'Bearer ' + spoke.pushToken, 'Content-Type': 'application/json' },
+				body: JSON.stringify({ reason: reason || 'catalog-changed' }),
+				signal: controller.signal
+			});
+			if (!resp.ok) throw new Error('status ' + resp.status);
+			return; // success -- don't try the next (fallback) URL
+		} catch (err) {
+			lastErr = err;
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+	throw lastErr;
+}
+
+module.exports = { replicateToSpokes, resyncUrls };
