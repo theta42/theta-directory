@@ -1,5 +1,7 @@
 'use strict';
 
+const fs = require('fs');
+
 // OpenLDAP multi-master replication (docs/replication.md) config derivation,
 // shared between routes/api_site.js (the spoke-facing side: assigns a
 // ServerID at registration, serves GET /api/site/ldap-peers) and
@@ -41,4 +43,26 @@ function ldapHostFor(endpoint) {
 	}
 }
 
-module.exports = { MAX_LDAP_SERVER_ID, nextFreeLdapServerId, ldapHostFor };
+const SLAPD_CONF_PATH = process.env.SLAPD_CONF_PATH || '/etc/openldap/slapd.conf';
+
+// The ServerID this node's OpenLDAP is ACTUALLY running with right now, read
+// straight from slapd.conf (the same file docker-entrypoint.sh writes
+// `ServerID <n>` into). This can genuinely differ from what
+// GET /ldap-peers / /ldap-replication-config currently ADVERTISE for this
+// node -- OpenLDAP's static slapd.conf is only read at process start, so a
+// promotion or a new spoke joining doesn't retroactively change what's
+// already running until `setup.sh` restarts the container. Surfaced on the
+// Multi-Site modal so an operator can see "configured X, but slapd is still
+// running Y" instead of assuming replication is live because the API says so.
+function currentSlapdServerId() {
+	let contents;
+	try {
+		contents = fs.readFileSync(SLAPD_CONF_PATH, 'utf8');
+	} catch (e) {
+		return null;
+	}
+	const m = contents.match(/^ServerID\s+(\d+)/m);
+	return m ? Number(m[1]) : null;
+}
+
+module.exports = { MAX_LDAP_SERVER_ID, nextFreeLdapServerId, ldapHostFor, currentSlapdServerId };
