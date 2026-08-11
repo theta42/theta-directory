@@ -12,6 +12,9 @@ function makeSpokeMock() {
 
 let mockFetchCalls = [];
 let mockFetchImpl = async () => ({ ok: true, status: 200 });
+// Shared so a test that re-requires the module (to pick up a different
+// JUMP_INTERNAL_URL) can reinstall the same recorder.
+const trackedFetch = (...args) => { mockFetchCalls.push(args); return mockFetchImpl(...args); };
 
 describe('site_replicate', () => {
   let siteReplicate;
@@ -30,11 +33,12 @@ describe('site_replicate', () => {
     // site_replicate.js uses the global fetch (Node 18+ built-in), not
     // node-fetch -- stub that directly.
     originalFetch = global.fetch;
-    global.fetch = (...args) => { mockFetchCalls.push(args); return mockFetchImpl(...args); };
+    global.fetch = trackedFetch;
   });
 
   afterEach(() => {
     global.fetch = originalFetch;
+    delete process.env.JUMP_INTERNAL_URL;
   });
 
   test('pushes to every known spoke concurrently with its own pushToken', async () => {
@@ -55,7 +59,17 @@ describe('site_replicate', () => {
     expect(JSON.parse(optsA.body).reason).toBe('catalog-changed');
   });
 
-  test('prefers the mesh IP over the public endpoint when the spoke reported one', async () => {
+  // The mesh path goes through THIS site's gateway, on a port derived from
+  // the peer's mesh index -- never at the peer's mesh IP directly, which no
+  // container here can route to (utils/mesh_route.js).
+  test('prefers the local gateway forwarding port when the spoke reported a mesh IP', async () => {
+    process.env.JUMP_INTERNAL_URL = 'http://jump-host:3002';
+    jest.resetModules();
+    jest.doMock('../models/site_spoke', () => ({ SiteSpoke: makeSpokeMock() }));
+    siteReplicate = require('../utils/site_replicate');
+    SiteSpoke = require('../models/site_spoke').SiteSpoke;
+    global.fetch = trackedFetch;
+
     SiteSpoke._seed([
       { endpoint: 'https://spoke-a.example.com:8443', pushToken: 'token-a', meshIp: '172.24.5.1' }
     ]);
@@ -64,15 +78,24 @@ describe('site_replicate', () => {
     await new Promise((r) => setImmediate(r));
 
     expect(mockFetchCalls.length).toBe(1);
-    expect(mockFetchCalls[0][0]).toBe('http://172.24.5.1:8443/api/site/resync');
+    expect(mockFetchCalls[0][0]).toBe('http://jump-host:30005/api/site/resync');
+    // The old, unroutable target must never be attempted again.
+    expect(mockFetchCalls[0][0]).not.toContain('172.24.5.1');
   });
 
   test('falls back to the public endpoint if the mesh attempt fails', async () => {
+    process.env.JUMP_INTERNAL_URL = 'http://jump-host:3002';
+    jest.resetModules();
+    jest.doMock('../models/site_spoke', () => ({ SiteSpoke: makeSpokeMock() }));
+    siteReplicate = require('../utils/site_replicate');
+    SiteSpoke = require('../models/site_spoke').SiteSpoke;
+    global.fetch = trackedFetch;
+
     SiteSpoke._seed([
       { endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', meshIp: '172.24.5.1' }
     ]);
     mockFetchImpl = async (url) => {
-      if (url.startsWith('http://172.24.5.1')) throw new Error('mesh unreachable');
+      if (url.startsWith('http://jump-host:')) throw new Error('mesh unreachable');
       return { ok: true, status: 200 };
     };
 
@@ -80,8 +103,27 @@ describe('site_replicate', () => {
     await new Promise((r) => setImmediate(r));
 
     expect(mockFetchCalls.length).toBe(2);
-    expect(mockFetchCalls[0][0]).toMatch(/^http:\/\/172\.24\.5\.1/);
+    expect(mockFetchCalls[0][0]).toBe('http://jump-host:30005/api/site/resync');
     expect(mockFetchCalls[1][0]).toBe('https://spoke-a.example.com/api/site/resync');
+  });
+
+  // No gateway configured: there is no mesh path to take, so the public
+  // endpoint is the only option -- never a guessed mesh dial.
+  test('a mesh IP with no gateway configured falls straight through to the endpoint', async () => {
+    delete process.env.JUMP_INTERNAL_URL;
+    jest.resetModules();
+    jest.doMock('../models/site_spoke', () => ({ SiteSpoke: makeSpokeMock() }));
+    siteReplicate = require('../utils/site_replicate');
+    SiteSpoke = require('../models/site_spoke').SiteSpoke;
+    global.fetch = trackedFetch;
+
+    SiteSpoke._seed([{ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', meshIp: '172.24.5.1' }]);
+
+    await siteReplicate.replicateToSpokes('catalog-changed');
+    await new Promise((r) => setImmediate(r));
+
+    expect(mockFetchCalls.length).toBe(1);
+    expect(mockFetchCalls[0][0]).toBe('https://spoke-a.example.com/api/site/resync');
   });
 
   test('a spoke with no meshIp only ever tries the public endpoint', async () => {

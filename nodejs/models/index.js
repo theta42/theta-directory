@@ -44,6 +44,7 @@ async function initORM() {
     console.log('[initORM] ORM initialized successfully');
     console.log('[initORM] Resource.orm =', !!Resource.orm, 'Token.orm =', !!Token.orm);
     await healSchema();
+    await ensureUniqueIndexes();
   } catch (err) {
     console.error('[initORM] ORM initialization failed:', err.message);
     throw err;
@@ -81,4 +82,106 @@ async function healSchema() {
   }
 }
 
+// Unique indexes the model layer cannot give us.
+//
+// Two independent gaps make `unique: true` in a model's `fields` a no-op here:
+//
+//   1. @simpleworkjs/orm only forwards `unique` for string fields —
+//      IntegerField.toSequelize() drops it (lib/fields.js). So it can never
+//      reach the database for an integer column like SiteSpoke.ldapServerId.
+//   2. The ORM calls sequelize.sync() with no options (lib/orm.js), which
+//      creates missing TABLES but never alters existing ones — the same reason
+//      healSchema() above exists. Every already-deployed site therefore lacks
+//      even SiteSpoke.endpoint's declared unique constraint.
+//
+// So the indexes are added here explicitly, on the same add-only, fail-soft
+// terms as healSchema: never drop, never retype, never take the boot down.
+//
+// ldapServerId is the one that matters. It is allocated read-then-write
+// (routes/api_site.js), serialized by an in-process mutex — which protects
+// nothing if the app is ever run as more than one process against one
+// database. Duplicate ServerIDs do not error; they quietly break OpenLDAP
+// multi-master replication, because ServerID is how syncrepl tells originators
+// apart. The index is what makes that a hard failure instead of a silent one.
+async function ensureUniqueIndexes() {
+  const adapter = Resource.orm && Resource.orm.adapters && Resource.orm.adapters.sequelize;
+  if (!adapter || !adapter.sequelize) return;
+  const qi = adapter.sequelize.getQueryInterface();
+
+  await repairDuplicateServerIds();
+
+  const wanted = [
+    { model: 'SiteSpoke', field: 'ldapServerId', name: 'site_spoke_ldap_server_id_unique' },
+    { model: 'SiteSpoke', field: 'endpoint', name: 'site_spoke_endpoint_unique' }
+  ];
+
+  for (const { model, field, name } of wanted) {
+    const SM = adapter.sequelize.models[model];
+    if (!SM) continue;
+    // The table name comes from the model, not a literal: the adapter sets
+    // tableName from the class name (lib/adapters/sequelize.js), which is not
+    // the pluralized name Sequelize would pick on its own.
+    const table = SM.getTableName();
+    const attr = SM.getAttributes()[field];
+    const column = (attr && attr.field) || field;
+    try {
+      const existing = await qi.showIndex(table);
+      if (existing.some((i) => i.name === name)) continue;
+      await qi.addIndex(table, { fields: [column], unique: true, name });
+      console.log(`[initORM] added unique index ${name}`);
+    } catch (e) {
+      // Almost always "this database already contains duplicates" — which is
+      // the corruption the index exists to prevent, and which an operator has
+      // to resolve. Say so loudly rather than booting as if it were enforced.
+      console.error(`[initORM] could not add unique index ${name}: ${e.message}`);
+    }
+  }
+}
+
+// A database written before the index existed may already hold the bug. NULL
+// ids are left alone (a spoke that has not been assigned one yet); among real
+// duplicates the oldest registration keeps the id and the rest are moved to
+// free ones. Reassignment is safe to do unattended because a spoke does not
+// store its own ServerID authoritatively — it re-reads it from the master via
+// GET /api/site/ldap-peers on every reconcile (utils/ldap_reconcile.js) — and
+// the duplicate state is already broken, so leaving it is not the safer option.
+async function repairDuplicateServerIds() {
+  let rows;
+  try { rows = await SiteSpoke.list(); }
+  catch (e) { return; } // table not present yet
+
+  const byId = new Map();
+  for (const row of rows || []) {
+    if (!row.ldapServerId) continue;
+    if (!byId.has(row.ldapServerId)) byId.set(row.ldapServerId, []);
+    byId.get(row.ldapServerId).push(row);
+  }
+
+  const used = new Set(byId.keys());
+  used.add(1); // reserved for the master, never handed to a spoke
+
+  for (const [id, group] of byId) {
+    if (group.length < 2) continue;
+    // Oldest keeps it; created_on can be unset on hand-me-down rows, so fall
+    // back to a stable order rather than an arbitrary one.
+    group.sort((a, b) => (a.created_on || 0) - (b.created_on || 0) || String(a.id).localeCompare(String(b.id)));
+    for (const row of group.slice(1)) {
+      let next = 2;
+      while (used.has(next)) next += 1;
+      used.add(next);
+      try {
+        await row.update({ ldapServerId: next });
+        console.error(
+          `[initORM] duplicate LDAP ServerID ${id} on ${row.endpoint} — reassigned to ${next}. ` +
+          'Replication for this site was broken until now; it re-reads its ID on the next reconcile.'
+        );
+      } catch (e) {
+        console.error(`[initORM] could not reassign duplicate ServerID ${id} on ${row.endpoint}: ${e.message}`);
+      }
+    }
+  }
+}
+
 module.exports.initORM = initORM;
+module.exports.ensureUniqueIndexes = ensureUniqueIndexes;
+module.exports.repairDuplicateServerIds = repairDuplicateServerIds;

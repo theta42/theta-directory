@@ -31,6 +31,9 @@ const MASTER_LDAP_HOST = process.env.MASTER_LDAP_HOST || 'master';
 const MASTER_BASE_DN = process.env.MASTER_BASE_DN || 'dc=master,dc=test';
 const SPOKE_LDAP_HOST = process.env.SPOKE_LDAP_HOST || 'spoke';
 const SPOKE_BASE_DN = process.env.SPOKE_BASE_DN || 'dc=spoke,dc=test';
+const SPOKE2_URL = process.env.SPOKE2_URL || 'http://spoke2:3001';
+const SPOKE2_LDAP_HOST = process.env.SPOKE2_LDAP_HOST || 'spoke2';
+const SPOKE2_BASE_DN = process.env.SPOKE2_BASE_DN || 'dc=spoke2,dc=test';
 const LDAP_ADMIN_PASS = process.env.LDAP_ADMIN_PASS || 'secret';
 const ADMIN_UID = 'e2eadmin';
 const ADMIN_PASSWORD = 'MultiSiteE2E!2';
@@ -139,13 +142,15 @@ async function api(url, path, { method = 'GET', token, body } = {}) {
 }
 
 async function main() {
-  step('Waiting for master + spoke to be healthy');
+  step('Waiting for master + both spokes to be healthy');
   await waitForHealthy(MASTER_URL, 'master');
   await waitForHealthy(SPOKE_URL, 'spoke');
+  await waitForHealthy(SPOKE2_URL, 'spoke2');
 
-  step('Seeding admin users in both sites\' LDAP');
+  step('Seeding admin users in all three sites\' LDAP');
   await seedAdmin(MASTER_LDAP_HOST, MASTER_BASE_DN);
   await seedAdmin(SPOKE_LDAP_HOST, SPOKE_BASE_DN);
+  await seedAdmin(SPOKE2_LDAP_HOST, SPOKE2_BASE_DN);
 
   step('Logging in as admin on master and spoke');
   const masterToken = await login(MASTER_URL);
@@ -204,6 +209,58 @@ async function main() {
   if (joinRes.status !== 200) fail(`join failed: ${joinRes.status} ${JSON.stringify(joinRes.body)}`);
   if (!joinRes.body.replication || joinRes.body.replication.live !== true) {
     fail(`expected join to register for live replication, got ${JSON.stringify(joinRes.body.replication)}`);
+  }
+
+  // The join reported "skipped/failed" for the LDAP tree on EVERY join and
+  // resync -- a callback-style fs.unlink() throwing into the catch that sets
+  // this note, after ldapadd had already succeeded. Nothing asserted the note,
+  // so it went unnoticed; assert it now.
+  step('Verifying the join reports the LDAP tree as actually imported');
+  if (!joinRes.body.ldap || !/^imported/.test(joinRes.body.ldap.note || '')) {
+    fail(`expected join to report an "imported..." ldap.note, got ${JSON.stringify(joinRes.body.ldap)}`);
+  }
+
+  // Assert on the LDAP tree itself, not just the note: the note is what hid
+  // "spawn -c ENOENT" (argv[0] was missing, so ldapadd never ran) for as long
+  // as it did. Seed a user on the master, resync, and look for it in the
+  // spoke's own slapd.
+  step('Verifying a master-only LDAP user actually lands in the spoke\'s directory');
+  const replicatedUid = 'e2erepl';
+  await execFileAsync('ldapadd', ['-x', '-H', `ldap://${MASTER_LDAP_HOST}:389`, '-D', `cn=admin,${MASTER_BASE_DN}`, '-w', LDAP_ADMIN_PASS], {
+    input: `dn: uid=${replicatedUid},ou=people,${MASTER_BASE_DN}
+objectClass: inetOrgPerson
+objectClass: posixAccount
+uid: ${replicatedUid}
+cn: E2E Replicated User
+sn: User
+uidNumber: 21001
+gidNumber: 21001
+homeDirectory: /home/${replicatedUid}
+`
+  }).catch((e) => {
+    if (!/Already exists/i.test(e.stderr || '')) fail(`seeding a master-only LDAP user failed: ${e.stderr || e.message}`);
+  });
+
+  // A resync (which re-pulls the export, LDIF included) fires on any master
+  // catalog write, so make one rather than reaching for the push token.
+  const nudge = await api(MASTER_URL, '/api/directory-admin/resources', {
+    method: 'POST',
+    token: masterToken,
+    body: { name: 'E2E LDAP Nudge', slug: 'host_e2e_ldap_nudge', kind: 'host', parentSlug: 'site_e2e' }
+  });
+  if (nudge.status !== 200) fail(`could not trigger a resync via a master write: ${nudge.status} ${JSON.stringify(nudge.body)}`);
+
+  let ldapReplicated = false;
+  for (let i = 0; i < 20; i++) {
+    const out = await execFileAsync('ldapsearch', [
+      '-x', '-H', `ldap://${SPOKE_LDAP_HOST}:389`, '-D', `cn=admin,${SPOKE_BASE_DN}`, '-w', LDAP_ADMIN_PASS,
+      '-b', `ou=people,${SPOKE_BASE_DN}`, `(uid=${replicatedUid})`, 'uid'
+    ]).catch(() => ({ stdout: '' }));
+    if ((out.stdout || '').includes(`uid: ${replicatedUid}`)) { ldapReplicated = true; break; }
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+  if (!ldapReplicated) {
+    fail('a user that exists only on the master never appeared in the spoke\'s LDAP -- the join\'s LDIF import is not working');
   }
 
   step('Verifying spoke persisted isMaster:false + masterUrl after join');
@@ -280,6 +337,66 @@ async function main() {
   }
   if (!liveReplicated) fail('post-join resource never appeared on the spoke -- live replication did not fire (or resync did not apply it)');
 
+  // Resource UPDATES (as opposed to creations) went nowhere: importDirectory
+  // called Resource.update(id, data), a static @simpleworkjs/orm has never
+  // had, and the TypeError landed in a swallowing catch. A rename on the
+  // master therefore never reached any spoke.
+  step('Renaming a resource on master to verify UPDATES replicate, not just creations');
+  const renameRes = await api(MASTER_URL, '/api/directory-admin/resources', { token: masterToken });
+  const allMasterResources = (renameRes.body.results || renameRes.body.resources || renameRes.body || []);
+  const toRename = allMasterResources.find((r) => r.slug === 'host_e2e_prejoin');
+  const parentSite = allMasterResources.find((r) => r.slug === 'site_e2e');
+  if (!toRename || !parentSite) {
+    fail('could not find host_e2e_prejoin (or its parent site) on master to rename');
+  } else {
+    // PUT /resources/:id re-validates the whole body, so kind + hostId have to
+    // ride along -- a name-only body is rejected as a top-level non-site.
+    const updateRes = await api(MASTER_URL, `/api/directory-admin/resources/${toRename.id}`, {
+      method: 'PUT',
+      token: masterToken,
+      body: { name: 'E2E Renamed Host', kind: 'host', hostId: parentSite.id }
+    });
+    if (updateRes.status !== 200) fail(`renaming resource on master failed: ${updateRes.status} ${JSON.stringify(updateRes.body)}`);
+
+    let renameReplicated = false;
+    for (let i = 0; i < 20; i++) {
+      const r = await api(SPOKE_URL, '/api/directory-admin/resources', { token: spokeToken });
+      const row = (r.body.results || r.body.resources || r.body || []).find((x) => x.slug === 'host_e2e_prejoin');
+      if (row && row.name === 'E2E Renamed Host') { renameReplicated = true; break; }
+      await new Promise((res) => setTimeout(res, 500));
+    }
+    if (!renameReplicated) {
+      fail('a rename on the master never reached the spoke -- resource UPDATES are not replicating');
+    }
+  }
+
+  // The mirror-image half: edge REMOVALS never propagated either, because the
+  // edge-clearing loop threw on ResourceEdge.delete(id) and aborted.
+  step('Deleting a resource on master to verify removals/edges converge on the spoke');
+  const delTarget = (await api(MASTER_URL, '/api/directory-admin/resources', { token: masterToken }))
+    .body;
+  const postJoinRow = (delTarget.results || delTarget.resources || delTarget || [])
+    .find((r) => r.slug === 'host_e2e_postjoin');
+  if (postJoinRow) {
+    const delRes = await api(MASTER_URL, `/api/directory-admin/resources/${postJoinRow.id}`, {
+      method: 'DELETE', token: masterToken
+    });
+    if (delRes.status !== 200) {
+      fail(`deleting resource on master failed: ${delRes.status} ${JSON.stringify(delRes.body)}`);
+    } else {
+      let deletionConverged = false;
+      for (let i = 0; i < 20; i++) {
+        const r = await api(SPOKE_URL, '/api/directory-admin/resources', { token: spokeToken });
+        const slugs = (r.body.results || r.body.resources || r.body || []).map((x) => x.slug);
+        if (!slugs.includes('host_e2e_postjoin')) { deletionConverged = true; break; }
+        await new Promise((res) => setTimeout(res, 500));
+      }
+      if (!deletionConverged) {
+        fail('a resource deleted on the master is still present on the spoke -- deletions are not converging');
+      }
+    }
+  }
+
   step('Verifying WAN health ping from spoke to master succeeds');
   const statusRes = await api(SPOKE_URL, '/api/directory-admin/site-status', { token: spokeToken });
   if (statusRes.body.config && statusRes.body.config.wanConnected !== true) {
@@ -289,6 +406,120 @@ async function main() {
   step('Verifying master itself is unaffected (still isMaster:true, no writes blocked)');
   const { body: masterCfg } = await api(MASTER_URL, '/api/site/config', { token: masterToken });
   if (masterCfg.config.isMaster !== true) fail('master flipped away from isMaster:true unexpectedly');
+
+  // ── Third site ────────────────────────────────────────────────────────────
+  // Everything above works in a two-site cluster. The promotion handoff does
+  // not: the promoted node was a spoke, so its own registry is empty, and
+  // nothing told the OTHER spokes that the master had changed.
+  step('Joining a SECOND spoke to the master (three-site cluster)');
+  const spoke2Token = await login(SPOKE2_URL);
+  if (!spoke2Token) fail('no token from spoke2 login');
+
+  const key2Res = await api(MASTER_URL, '/api/site/join-keys', {
+    method: 'POST', token: masterToken, body: { label: 'e2e-test-spoke2' }
+  });
+  if (key2Res.status !== 200 || !key2Res.body.key) fail(`second join-key mint failed: ${key2Res.status} ${JSON.stringify(key2Res.body)}`);
+
+  const join2Res = await api(SPOKE2_URL, '/api/site/join', {
+    method: 'POST',
+    token: spoke2Token,
+    body: { masterUrl: 'http://master:3001', joinKey: key2Res.body.key, selfUrl: 'http://spoke2:3001' }
+  });
+  if (join2Res.status !== 200) fail(`spoke2 join failed: ${join2Res.status} ${JSON.stringify(join2Res.body)}`);
+  if (!join2Res.body.replication || join2Res.body.replication.live !== true) {
+    fail(`expected spoke2 to register for live replication, got ${JSON.stringify(join2Res.body.replication)}`);
+  }
+
+  // The point of moving slapd onto cn=config: a site joining has to change
+  // every other site's LIVE replication config, with no setup.sh re-run and
+  // no restart. Read it straight out of the running slapd, not out of an API
+  // that could just be echoing intent back.
+  step('Verifying the master\'s RUNNING slapd picked up both spokes automatically');
+  let liveSyncrepl = '';
+  for (let i = 0; i < 30; i++) {
+    const out = await execFileAsync('ldapsearch', [
+      '-x', '-H', `ldap://${MASTER_LDAP_HOST}:389`, '-D', 'cn=admin,cn=config', '-w', LDAP_ADMIN_PASS,
+      '-LLL', '-b', 'cn=config', '(olcSyncrepl=*)', 'olcSyncrepl'
+    ]).catch((e) => ({ stdout: '', err: e.stderr || e.message }));
+    // Unfold LDIF continuation lines before matching.
+    liveSyncrepl = (out.stdout || '').replace(/\n /g, '');
+    if (liveSyncrepl.includes('spoke:636') && liveSyncrepl.includes('spoke2:636')) break;
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+  if (!liveSyncrepl.includes('ldaps://spoke:636')) {
+    fail(`the master's live slapd has no syncrepl entry for the first spoke -- replication config is not being applied automatically. Got: ${liveSyncrepl.slice(0, 500)}`);
+  }
+  if (!liveSyncrepl.includes('ldaps://spoke2:636')) {
+    fail(`the master's live slapd never picked up the SECOND spoke -- this is the case that used to need a setup.sh re-run. Got: ${liveSyncrepl.slice(0, 500)}`);
+  }
+
+  step('Verifying the master reports no replication drift (the automatic path worked)');
+  const { body: driftStatus } = await api(MASTER_URL, '/api/directory-admin/site-status', { token: masterToken });
+  if (driftStatus.ldap && driftStatus.ldap.source !== 'cn=config') {
+    fail(`site-status should read the live cn=config, got source=${JSON.stringify(driftStatus.ldap && driftStatus.ldap.source)}`);
+  }
+  if (driftStatus.ldap && driftStatus.ldap.stale === true) {
+    fail(`master reports replication drift after automatic reconciliation: ${JSON.stringify(driftStatus.ldap)}`);
+  }
+
+  step('Verifying the spoke applied ITS assigned ServerID live, without a restart');
+  let spokeServerId = '';
+  for (let i = 0; i < 20; i++) {
+    const out = await execFileAsync('ldapsearch', [
+      '-x', '-H', `ldap://${SPOKE_LDAP_HOST}:389`, '-D', 'cn=admin,cn=config', '-w', LDAP_ADMIN_PASS,
+      '-LLL', '-b', 'cn=config', '-s', 'base', 'olcServerID'
+    ]).catch(() => ({ stdout: '' }));
+    spokeServerId = (out.stdout || '').replace(/\n /g, '');
+    if (/olcServerID:\s*\d+/.test(spokeServerId)) break;
+    await new Promise((res) => setTimeout(res, 1000));
+  }
+  if (!/olcServerID:\s*[2-9]\d*/.test(spokeServerId)) {
+    fail(`the spoke's live slapd should carry the ServerID the master assigned it (>= 2), got: ${JSON.stringify(spokeServerId.trim())}`);
+  }
+
+  step('Verifying the master now reports two registered spokes');
+  const { body: twoSpokeStatus } = await api(MASTER_URL, '/api/directory-admin/site-status', { token: masterToken });
+  if (twoSpokeStatus.config.registeredSpokesCount !== 2) {
+    fail(`expected master to report 2 registered spokes, got ${JSON.stringify(twoSpokeStatus.config.registeredSpokesCount)}`);
+  }
+
+  // Operator actions on the Registered Spokes table (it used to be read-only,
+  // so a dead site's row sat there forever holding an LDAP ServerID).
+  step('Forcing a manual resync push at every registered spoke');
+  const manualResync = await api(MASTER_URL, '/api/site/spokes/resync', { method: 'POST', token: masterToken, body: {} });
+  if (manualResync.status !== 200) fail(`manual resync failed: ${manualResync.status} ${JSON.stringify(manualResync.body)}`);
+  if (manualResync.body.ok !== 2 || manualResync.body.failed !== 0) {
+    fail(`expected a manual resync to reach both spokes, got ${JSON.stringify(manualResync.body)}`);
+  }
+
+  step('Removing a spoke from the registry, then re-registering it');
+  const { body: beforeRemoval } = await api(MASTER_URL, '/api/directory-admin/site-status', { token: masterToken });
+  const spoke2Row = (beforeRemoval.spokes || []).find((s) => s.endpoint === 'http://spoke2:3001');
+  if (!spoke2Row || !spoke2Row.id) {
+    fail(`site-status must expose a spoke id for the table's actions, got ${JSON.stringify(beforeRemoval.spokes)}`);
+  } else {
+    const removeRes = await api(MASTER_URL, `/api/site/spokes/${spoke2Row.id}`, { method: 'DELETE', token: masterToken });
+    if (removeRes.status !== 200) fail(`removing a spoke failed: ${removeRes.status} ${JSON.stringify(removeRes.body)}`);
+
+    const { body: afterRemoval } = await api(MASTER_URL, '/api/directory-admin/site-status', { token: masterToken });
+    if (afterRemoval.config.registeredSpokesCount !== 1) {
+      fail(`expected 1 registered spoke after removal, got ${afterRemoval.config.registeredSpokesCount}`);
+    }
+
+    // Put it back, the way an operator actually recovers from this: the SPOKE
+    // re-registers itself with the master credentials it already holds. A
+    // removal recreates the row with a fresh pushToken, so anything driving
+    // this from the master's side would leave the two ends disagreeing about
+    // the token with no way back (POST /join refuses once a node is a spoke).
+    const reReg = await api(SPOKE2_URL, '/api/site/reregister', { method: 'POST', token: spoke2Token });
+    if (reReg.status !== 200) fail(`spoke re-registration failed: ${reReg.status} ${JSON.stringify(reReg.body)}`);
+    if (reReg.body.live !== true) fail(`re-registration should restore live replication, got ${JSON.stringify(reReg.body)}`);
+
+    const { body: afterRejoin } = await api(MASTER_URL, '/api/directory-admin/site-status', { token: masterToken });
+    if (afterRejoin.config.registeredSpokesCount !== 2) {
+      fail(`expected 2 registered spokes after re-registration, got ${afterRejoin.config.registeredSpokesCount}`);
+    }
+  }
 
   step('Promoting the spoke to master (coordinated handoff -- must demote the old master too)');
   const promoteRes = await api(SPOKE_URL, '/api/directory-admin/site-promote', {
@@ -302,6 +533,46 @@ async function main() {
   }
   if (!promoteRes.body.ldapReplicationNote) {
     fail('expected /site-promote to surface a note that this node\'s LDAP ServerID needs a setup.sh re-run to apply');
+  }
+
+  // The core of the 3+-site fix: the promoted node must inherit the old
+  // master's registry and re-point the sibling spoke at itself. Before the
+  // fix, spoke2 kept following the demoted master forever and the new master
+  // did not know spoke2 existed.
+  step('Verifying the promotion inherited the old master\'s registry and re-pointed the sibling');
+  if (!promoteRes.body.siblings) {
+    fail('expected /site-promote to report what happened to the other spokes (siblings)');
+  } else {
+    const sib = promoteRes.body.siblings;
+    if (sib.adopted < 1) fail(`expected the promotion to adopt the sibling spoke, got ${JSON.stringify(sib)}`);
+    if (sib.repointed < 1) fail(`expected the promotion to re-point the sibling spoke, got ${JSON.stringify(sib)}`);
+    if (sib.orphaned !== 0) fail(`expected no orphaned siblings after promotion, got ${JSON.stringify(sib)}`);
+  }
+
+  step('Verifying spoke2 now follows the NEW master, not the demoted one');
+  let repointed = false;
+  for (let i = 0; i < 20; i++) {
+    const { body } = await api(SPOKE2_URL, '/api/site/config', { token: spoke2Token });
+    if (body.config && body.config.masterUrl === 'http://spoke:3001') { repointed = true; break; }
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  if (!repointed) {
+    const { body } = await api(SPOKE2_URL, '/api/site/config', { token: spoke2Token });
+    fail(`spoke2 should follow the newly-promoted master after the handoff, got masterUrl=${JSON.stringify(body.config && body.config.masterUrl)}`);
+  }
+
+  step('Verifying the new master knows about BOTH the demoted master and spoke2');
+  const { body: newMasterStatus } = await api(SPOKE_URL, '/api/directory-admin/site-status', { token: spokeToken });
+  const endpoints = (newMasterStatus.spokes || []).map((s) => s.endpoint).sort();
+  if (!endpoints.includes('http://master:3001') || !endpoints.includes('http://spoke2:3001')) {
+    fail(`new master should have both siblings registered, got ${JSON.stringify(endpoints)}`);
+  }
+  const serverIds = (newMasterStatus.spokes || []).map((s) => s.ldapServerId).filter(Boolean);
+  if (new Set(serverIds).size !== serverIds.length) {
+    fail(`inherited spokes must not share an LDAP ServerID, got ${JSON.stringify(serverIds)}`);
+  }
+  if (serverIds.includes(1)) {
+    fail(`no spoke may hold ServerID 1 -- that is the new master's, got ${JSON.stringify(serverIds)}`);
   }
 
   step('Verifying the demoted old master auto-registered itself as a real spoke of the new master (not orphaned)');
@@ -336,6 +607,20 @@ async function main() {
     body: { name: 'E2E Post-Promotion Host', slug: 'host_e2e_postpromotion', kind: 'host', parentSlug: 'site_e2e' }
   });
   if (newMasterWrite.status !== 200) fail(`expected the newly-promoted master to accept writes, got ${newMasterWrite.status} ${JSON.stringify(newMasterWrite.body)}`);
+
+  // The real proof the handoff worked: a write on the NEW master has to reach
+  // the sibling that was never told about the promotion by hand.
+  step('Verifying a post-promotion write on the new master replicates to spoke2');
+  let siblingReplicated = false;
+  for (let i = 0; i < 30; i++) {
+    const r = await api(SPOKE2_URL, '/api/directory-admin/resources', { token: spoke2Token });
+    const slugs = (r.body.results || r.body.resources || r.body || []).map((x) => x.slug);
+    if (slugs.includes('host_e2e_postpromotion')) { siblingReplicated = true; break; }
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  if (!siblingReplicated) {
+    fail('a write on the newly-promoted master never reached spoke2 -- the sibling is still orphaned');
+  }
 
   if (failed) {
     console.error('MULTISITE E2E: one or more checks failed (see above)');

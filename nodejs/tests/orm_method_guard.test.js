@@ -15,9 +15,16 @@ const path = require('path');
 const ORM_MODELS = [
 	'Resource', 'ResourceEdge', 'ResourceGroup', 'AccessRequest', 'Webhook',
 	'PluginInstance', 'SharedSecret', 'SharedSecretGrant', 'VaultAppToken',
-	'Agent', 'AgentJoinKey',
+	'Agent', 'AgentJoinKey', 'SiteSpoke', 'SiteJoinKey',
 ];
-const MISSING_STATICS = ['find', 'findOne', 'findAll', 'findAndCountAll', 'where'];
+// `update` and `delete` are the same trap one level subtler: they DO exist,
+// but only as instance methods (`row.update(patch)`), never as statics. It
+// happened twice in utils/site_join.js -- `Resource.update(id, data)` and
+// `ResourceEdge.delete(id)` -- where both threw into a swallowing catch, so a
+// spoke silently never applied resource updates or edge deletions from its
+// master. Model class names are capitalized here and instances aren't, so
+// matching on the class name only flags the static (mis)use.
+const MISSING_STATICS = ['find', 'findOne', 'findAll', 'findAndCountAll', 'where', 'update', 'delete'];
 
 const ROOT = path.join(__dirname, '..');
 const SCAN_DIRS = ['models', 'routes', 'services', 'utils', 'plugins', 'controller', 'middleware'];

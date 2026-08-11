@@ -13,6 +13,14 @@
 # container it runs in, so this MUST use the all-in-one image (master and
 # spoke each carry their own slapd) — the split ldap+redis+app harness used
 # by docker-compose.test.yml/e2e.yml won't exercise export/join at all.
+#
+# Every site shares ONE base DN (dc=e2e,dc=test). That is not a harness
+# convenience, it is the actual product constraint: CFG_DOMAIN is the identity
+# namespace and MMR replicas cannot diverge on it (MULTI_SITE_SPEC.md §4).
+# This harness used to give each site its own (dc=master / dc=spoke), which
+# made the join's LDIF import fail on every entry with "no global superior
+# knowledge" — invisibly, since nothing asserted on the note that carried it.
+# A real mismatch is now refused up front by POST /api/site/join.
 
 services:
   master:
@@ -21,7 +29,7 @@ services:
       dockerfile: Dockerfile.openldap
     container_name: multisite_e2e_master
     environment:
-      - LDAP_BASE_DN=dc=master,dc=test
+      - LDAP_BASE_DN=dc=e2e,dc=test
       - LDAP_ADMIN_PASS=secret
       - ORG_NAME=E2E Master
       - app_oauth__jwtSecret=e2e-multisite-master-jwt-secret
@@ -43,11 +51,33 @@ services:
       dockerfile: Dockerfile.openldap
     container_name: multisite_e2e_spoke
     environment:
-      - LDAP_BASE_DN=dc=spoke,dc=test
+      - LDAP_BASE_DN=dc=e2e,dc=test
       - LDAP_ADMIN_PASS=secret
       - ORG_NAME=E2E Spoke
       - app_oauth__jwtSecret=e2e-multisite-spoke-jwt-secret
       - app_stack__selfUrl=http://spoke:3001
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health >/dev/null 2>&1"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+      start_period: 5s
+
+  # A THIRD site. Promotion in a two-site cluster is a special case that hides
+  # a real bug: the promoted node inherits nothing, and any sibling spoke keeps
+  # following the node that was just demoted. Two sites can never catch that —
+  # there is no sibling. This one exists so the handoff is exercised for real.
+  spoke2:
+    build:
+      context: .
+      dockerfile: Dockerfile.openldap
+    container_name: multisite_e2e_spoke2
+    environment:
+      - LDAP_BASE_DN=dc=e2e,dc=test
+      - LDAP_ADMIN_PASS=secret
+      - ORG_NAME=E2E Spoke Two
+      - app_oauth__jwtSecret=e2e-multisite-spoke2-jwt-secret
+      - app_stack__selfUrl=http://spoke2:3001
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health >/dev/null 2>&1"]
       interval: 2s
@@ -63,13 +93,18 @@ services:
     environment:
       - MASTER_URL=http://master:3001
       - SPOKE_URL=http://spoke:3001
+      - SPOKE2_URL=http://spoke2:3001
       - MASTER_LDAP_HOST=master
-      - MASTER_BASE_DN=dc=master,dc=test
+      - MASTER_BASE_DN=dc=e2e,dc=test
       - SPOKE_LDAP_HOST=spoke
-      - SPOKE_BASE_DN=dc=spoke,dc=test
+      - SPOKE_BASE_DN=dc=e2e,dc=test
+      - SPOKE2_LDAP_HOST=spoke2
+      - SPOKE2_BASE_DN=dc=e2e,dc=test
       - LDAP_ADMIN_PASS=secret
     depends_on:
       master:
         condition: service_healthy
       spoke:
+        condition: service_healthy
+      spoke2:
         condition: service_healthy
