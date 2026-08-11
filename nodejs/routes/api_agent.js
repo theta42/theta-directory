@@ -479,7 +479,9 @@ refresh_expired_interval = 300
     ws.on('close', () => {
       console.log(`[Theta Agent] "${agent.name}" (${agent.id}) disconnected`);
       agentManager.unregisterAgent(agent.id, ws);
-      ldapTunnel.cleanup(agent.id);
+      // Scoped to THIS ws: an agent that reconnected already has relay
+      // sockets on its new connection, and those must survive this close.
+      ldapTunnel.cleanup(agent.id, ws);
     });
 
     // Send initial welcome/config payload. When this connection enrolled via a

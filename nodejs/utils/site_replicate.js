@@ -16,6 +16,7 @@
 // no risk of a diff payload and a full export ever disagreeing.
 
 const { SiteSpoke } = require('../models/site_spoke');
+const { meshServiceTarget } = require('./mesh_route');
 
 const RESYNC_TIMEOUT_MS = 8000;
 
@@ -49,9 +50,13 @@ function replicateToSpokes(reason) {
 function resyncUrls(spoke) {
 	const urls = [];
 	if (spoke.meshIp) {
-		let port = '3001';
-		try { port = new URL(spoke.endpoint).port || port; } catch (_) { /* keep default */ }
-		urls.push(`http://${spoke.meshIp}:${port}/api/site/resync`);
+		// NOT `http://<meshIp>:3001` -- that was the bug. The mesh subnet
+		// lives inside the peer gateway's namespace; this container cannot
+		// route to it, and nothing answered on :3001 there in any case. The
+		// reachable address is the LOCAL gateway's per-peer forwarding port,
+		// derived from the mesh index (utils/mesh_route.js).
+		const target = meshServiceTarget(spoke.meshIp);
+		if (target) urls.push(`http://${target.host}:${target.port}/api/site/resync`);
 	}
 	urls.push(String(spoke.endpoint).replace(/\/+$/, '') + '/api/site/resync');
 	return urls;
@@ -81,4 +86,7 @@ async function pingOne(spoke, reason) {
 	throw lastErr;
 }
 
-module.exports = { replicateToSpokes, resyncUrls };
+// pingOne is exported as pushResync for the operator-driven "Sync now" action
+// (routes/api_site.js), which unlike the write-triggered fan-out AWAITS the
+// result so the UI can report whether the spoke was actually reachable.
+module.exports = { replicateToSpokes, resyncUrls, pushResync: pingOne };

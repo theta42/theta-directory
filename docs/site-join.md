@@ -62,8 +62,35 @@ demote-then-promote:
    The response's `handoff` field reports what happened
    (`"previous master demoted"`, an HTTP failure, or "unreachable, promoted
    locally anyway") so the operator can reconcile it manually if needed.
-3. Every known spoke gets a fire-and-forget `master-promoted` resync ping so
+3. The demote response hands over the outgoing master's **spoke registry** —
+   every other site's endpoint, siteSlug, assigned `ldapServerId`, relay
+   details, and `pushToken`. The promoting node writes those into its own
+   registry (preserving each `ldapServerId` where it doesn't collide with one
+   it already uses, and never keeping `1`, which is now its own) and then
+   calls `POST /api/site/master-changed` on each of them to re-point it.
+4. Every known spoke gets a fire-and-forget `master-promoted` resync ping so
    they pick up the new master on their next sync.
+
+Step 3 is what makes promotion work in a cluster with more than two sites.
+Without it the promoted node — which was a spoke, so its own registry is
+empty — came up as a master believing it had no spokes, while every sibling
+kept replicating from the node that had just been demoted. Two-site clusters
+happened to work regardless (the demoted master re-registers itself), which
+is why this went unnoticed.
+
+The `pushToken`s travel with the registry deliberately. They are the
+master→spoke credential, and the demote call is already authenticated with a
+site join key — the credential that authorizes "stop being master at all" and
+can already pull a full directory export. Withholding them would buy nothing
+and would instead force every spoke to accept a re-point from a node it has
+no established relationship with.
+
+The response's `siblings` field reports `{inherited, adopted, repointed,
+orphaned, detail}`. **`orphaned > 0` needs operator action**: those sites are
+still pointed at the demoted master. The usual cause is a promotion done
+while the old master was unreachable, so there was no registry to inherit —
+recover by re-registering each remaining spoke against the new master
+(`POST /api/site/reregister` on that spoke, or the modal's **Re-register**).
 
 The Master Site modal's **Promote to Master** button surfaces the `handoff`
 result in a toast so the operator sees immediately whether the old master was
@@ -83,8 +110,91 @@ actually reached.
 | `POST` | `/api/site/join` | Adopt a master directory + register for live replication (admin session) |
 | `POST` | `/api/site/spokes` | Register a spoke's endpoint for live replication (Bearer `stj_` key, called by the spoke right after join) |
 | `POST` | `/api/site/resync` | Re-pull the master's export (Bearer the spoke's own `pushToken`, called by the master's fire-and-forget push) |
-| `POST` | `/api/site/demote` | Step down to spoke of a new master (Bearer `stj_` key, called by the newly-promoted node) |
-| `POST` | `/api/directory-admin/site-promote` | Promote this node to master, coordinating demotion of the old one (`god_admin` session) |
+| `POST` | `/api/site/demote` | Step down to spoke of a new master, returning this node's spoke registry for the new master to inherit (Bearer `stj_` key, called by the newly-promoted node) |
+| `POST` | `/api/site/master-changed` | Follow a newly-promoted master: re-point, re-register, resync (Bearer this spoke's own `pushToken`, called by the new master during promotion) |
+| `POST` | `/api/site/reregister` | Re-run only the registration half of a join, using stored master credentials (admin session, spoke only) |
+| `GET` | `/api/site/spokes` | List registered spokes (admin session; never includes `pushToken`) |
+| `DELETE` | `/api/site/spokes/:id` | Remove a spoke from the registry, freeing its `ldapServerId` (admin session, master only) |
+| `POST` | `/api/site/spokes/resync` | Push a resync now, to one spoke (`{id}`) or all; **awaits** each result so reachability is reported honestly (admin session, master only) |
+| `POST` | `/api/directory-admin/site-promote` | Promote this node to master, coordinating demotion of the old one and inheriting its spoke registry (`god_admin` session) |
+
+### ServerID allocation
+
+Each spoke is assigned the lowest free `ldapServerId` at registration (1 is
+the master's). That is a read-then-write, so it is serialized by
+`utils/mutex.js` — but the lock is process-local and would protect nothing if
+this app were run as two processes against one database, so the actual
+guarantee is a unique index on `SiteSpoke.ldapServerId`, added at boot by
+`models/index.js`'s `ensureUniqueIndexes()`.
+
+The index has to be added explicitly: `@simpleworkjs/orm` only forwards a
+field's `unique: true` for string fields, and it calls `sequelize.sync()` with
+no options, which never alters an existing table. (The same reason
+`healSchema()` exists — and the reason `SiteSpoke.endpoint`'s declared
+constraint does not exist on any site deployed before this.)
+
+A master upgrading from a build that predates the index may already hold
+duplicates, which would make `addIndex` fail. `repairDuplicateServerIds()`
+runs first: the oldest registration keeps the ID, the rest are moved to free
+ones and log a line each. That is safe unattended because a spoke does not
+store its ServerID authoritatively — it re-reads it from
+`GET /api/site/ldap-peers` on every reconcile — and a duplicate is already a
+broken replica, so leaving it alone is not the more conservative option.
+
+`utils/mutex.js` refuses re-entry rather than deadlocking: taking the same
+lock from inside a critical section throws, and a lock held across an
+outbound call that comes back into the same route fails with an acquisition
+timeout naming the holder. Both used to be an unanswered request, and the
+error surfaced on the *other* node as an unrelated-looking fetch abort.
+
+### LDAP replication config is applied live
+
+`slapd` runs from the **`cn=config` dynamic backend** — `docker-entrypoint.sh`
+still generates the same `slapd.conf` as the seed (schema, overlays, ACLs,
+TLS), then converts it with `slaptest -f … -F /etc/openldap/slapd.d` and runs
+`slapd -F` against the result. That is what makes `olcServerID` and
+`olcSyncrepl` modifiable while the server is running.
+
+`utils/ldap_runtime_config.js` converges the running config on a desired
+`{serverId, peers}`: it reads what is configured, computes the delta, and
+issues only the modifications needed, so re-applying the same state is a
+no-op. `utils/ldap_reconcile.js` decides what that desired state is (a master
+computes it from its own registry; a spoke asks the master via
+`GET /api/site/ldap-peers`) and triggers it on every event that can change it
+— spoke registered/removed, join, resync, master-changed, promotion, boot —
+plus a periodic sweep for anything no event covers.
+
+**No `setup.sh` re-run, no restart, on any node.** A site that was offline
+while the cluster changed converges when it comes back. Three details worth
+knowing, each learned the hard way against a real server:
+
+- `olcSyncrepl` is X-ORDERED: the `{n}` prefix slapd stores is the ordering
+  position, *not* the rid. Values are written without a prefix, and the whole
+  attribute is replaced when the peer set changes — deleting an individual
+  peer by `{rid}` fails with "No such attribute", and deleting by position is
+  a moving target.
+- OpenLDAP 2.6 renamed `olcMirrorMode` to `olcMultiProvider`. It still accepts
+  the old name on write but stores and returns the new one, so both are read.
+- The mdb database entry is found by `(objectClass=olcMdbConfig)`, not by
+  `(olcDatabase=*mdb)` — slapd does not substring-match that attribute, so the
+  obvious filter silently returns nothing.
+
+`GET /directory-admin/site-status` reports the live config (`ldap.source` is
+`cn=config`) plus a drift comparison against what the cluster advertises. That
+comparison is a **fault indicator**, not an operator instruction: under normal
+operation it never fires, and when it does, the `[ldap-reconcile]` log lines
+say what failed.
+
+### Why `reregister` exists
+
+Registration only ever happened during a join, so any state where the master's
+`SiteSpoke` row and the spoke's stored `pushToken` disagree was unrecoverable:
+`POST /api/site/join` refuses once a node is a spoke, and requires a fresh
+install besides. That state is reachable in ordinary operation — an operator
+removes a spoke and wants it back, a row gets recreated with a new token, or
+the original join ran without `selfUrl` and left the spoke on a one-time
+snapshot. `reregister` re-runs just that step with the credentials the spoke
+already holds; it never adopts a directory.
 
 ## Behavior after joining (spoke)
 
@@ -137,22 +247,26 @@ already joined reports "already a spoke" and setup continues (idempotent).
 
 - OpenBao secret replication covers only the agent-signing key; LDAP admin
   creds, JWT secret, and other per-deployment secrets aren't synced.
-- A promoted spoke's own OpenLDAP `ServerID` doesn't apply live -- `POST
-  /site-promote` starts advertising `1` for it immediately
-  (`GET /directory-admin/ldap-replication-config`), but nothing restarts
-  `slapd` with that value automatically (its static `slapd.conf` is only
-  read at process start). Re-run `setup.sh` on the newly-promoted node
-  promptly after promotion to actually apply it.
-- The master's own `LDAP_REPLICATION_HOSTS` peer list only recomputes on
-  its next `setup.sh` run, not live the instant a new spoke joins -- same
-  re-run-`setup.sh` caveat as above, just triggered by a join instead of a
-  promotion.
+- Promotion when the old master is **unreachable** inherits no spoke registry,
+  so the remaining spokes stay pointed at the node that is gone. The response
+  reports them as `siblings.orphaned`; recovery is per-spoke
+  (`POST /api/site/reregister` on each, or the modal's **Re-register**).
+- A spoke with **zero inbound and zero outbound** path still cannot join: the
+  join itself has to reach the master's API directly.
+
+*(The two `setup.sh` re-run caveats that used to live here — a promoted node's
+own ServerID, and every other site's peer list after a join — are gone.
+Replication config is applied live against `cn=config` now; see "LDAP
+replication config is applied live" above.)*
 
 ## Shipped since the above was last stale
 
-- Traffic between sites (`utils/site_replicate.js`'s resync push) prefers a
-  registered spoke's WireGuard mesh IP over the open internet when one's on
-  file, falling back to the public endpoint on failure.
+- Traffic between sites (`utils/site_replicate.js`'s resync push) prefers the
+  WireGuard mesh over the open internet when a spoke has a mesh IP on file,
+  falling back to the public endpoint on failure. It dials the LOCAL gateway's
+  per-peer forwarding port (`utils/mesh_route.js`), **not** the peer's mesh IP
+  — that address lives inside the peer gateway's network namespace and is not
+  routable from here.
 - A no-inbound spoke (no public IP at all) CAN join: `noInbound`/`meshIp`/
   `publicHost` on `POST /api/site/join` drive `utils/proxy_client.js`, which
   auto-creates/updates the relay route on the master's own `theta-proxy`.

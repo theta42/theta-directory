@@ -3334,10 +3334,35 @@
     if (ldap.peersCount != null) {
       html += ' <span class="badge bg-primary">' + ldap.peersCount + ' peer' + (ldap.peersCount === 1 ? '' : 's') + '</span>';
     }
+    if (ldap.stale === null) {
+      html += ' <span class="badge bg-secondary" title="' + esc(ldap.note || 'slapd.conf could not be read, so drift cannot be determined') +
+        '"><i class="fa-solid fa-circle-question me-1"></i> Drift unknown</span>';
+      return html;
+    }
     if (ldap.stale) {
-      html += ' <span class="badge bg-warning text-dark" title="This node now advertises ServerID ' + esc(ldap.advertisedServerId) +
-        ' (e.g. after a promotion), but slapd is still running with ' + esc(ldap.configuredServerId) +
-        ' -- re-run setup.sh here to apply it."><i class="fa-solid fa-triangle-exclamation me-1"></i> Needs setup.sh re-run</span>';
+      // Two independent kinds of drift. The ServerID one only happens after a
+      // promotion; the peer-list one happens to EVERY site each time any new
+      // site joins, and nothing re-runs setup.sh on the sites already up.
+      var why = [];
+      if (ldap.serverIdStale) {
+        why.push('This node now advertises ServerID ' + ldap.advertisedServerId +
+          ' but slapd is still running with ' + ldap.configuredServerId + '.');
+      }
+      if (ldap.peersStale) {
+        if (ldap.missingPeers && ldap.missingPeers.length) {
+          why.push('Not replicating with: ' + ldap.missingPeers.join(', ') + '.');
+        }
+        if (ldap.extraPeers && ldap.extraPeers.length) {
+          why.push('Still configured for sites no longer in the cluster: ' + ldap.extraPeers.join(', ') + '.');
+        }
+      }
+      // Replication config is normally applied live (utils/ldap_reconcile.js),
+      // so this badge means the automatic path failed rather than that the
+      // operator forgot a step.
+      why.push('Replication config is normally applied automatically and live; seeing this means that failed -- check the container log for [ldap-reconcile] errors.');
+      html += ' <span class="badge bg-warning text-dark" title="' + esc(why.join(' ')) +
+        '"><i class="fa-solid fa-triangle-exclamation me-1"></i> ' +
+        (ldap.peersStale ? 'Peer list out of sync' : 'ServerID out of sync') + '</span>';
     }
     return html;
   }
@@ -3355,17 +3380,85 @@
         '<td>' + (s.noInbound
           ? '<span class="badge bg-info text-dark" title="' + esc(s.relayNote || '') + '"><i class="fa-solid fa-diagram-project me-1"></i> Relayed</span>'
           : '<span class="text-muted small">direct</span>') + '</td>' +
+        // Actions: this table used to be purely informational, so a
+        // decommissioned site's row sat here forever holding an LDAP ServerID
+        // and collecting replication pushes, and the only way to force a sync
+        // was to make an unrelated catalog write.
+        '<td class="text-end text-nowrap">' +
+          '<button class="btn btn-sm btn-outline-primary py-0 px-1 me-1" data-spoke-resync="' + esc(s.id) + '" title="Push a resync to this spoke now">' +
+            '<i class="fa-solid fa-rotate"></i></button>' +
+          '<button class="btn btn-sm btn-outline-danger py-0 px-1" data-spoke-remove="' + esc(s.id) + '" data-spoke-label="' + esc(s.siteSlug || s.endpoint) + '" title="Remove this spoke from the registry">' +
+            '<i class="fa-solid fa-trash"></i></button>' +
+        '</td>' +
       '</tr>';
     }).join('');
     return '<div class="card mt-3">' +
-      '<div class="card-header py-2 fw-bold small"><i class="fa-solid fa-diagram-project me-1"></i> Registered Spokes</div>' +
+      '<div class="card-header py-2 fw-bold small d-flex justify-content-between align-items-center">' +
+        '<span><i class="fa-solid fa-diagram-project me-1"></i> Registered Spokes</span>' +
+        '<button class="btn btn-sm btn-outline-primary py-0 px-2" data-spoke-resync-all="1">' +
+          '<i class="fa-solid fa-rotate me-1"></i> Sync all now</button>' +
+      '</div>' +
       '<div class="card-body p-0">' +
         '<table class="table table-sm table-hover mb-0">' +
-          '<thead><tr><th>Site</th><th>Endpoint</th><th>LDAP ServerID</th><th>Path</th></tr></thead>' +
+          '<thead><tr><th>Site</th><th>Endpoint</th><th>LDAP ServerID</th><th>Path</th><th></th></tr></thead>' +
           '<tbody>' + rows + '</tbody>' +
         '</table>' +
       '</div>' +
     '</div>';
+  }
+
+  // Wires the spoke-row actions. Called after the modal body is rendered.
+  function bindSpokeActions(container, reopen) {
+    if (!container) return;
+
+    container.querySelectorAll('[data-spoke-resync], [data-spoke-resync-all]').forEach(function(btn) {
+      btn.addEventListener('click', async function() {
+        const id = btn.getAttribute('data-spoke-resync');
+        btn.disabled = true;
+        try {
+          const res = await app.api.post('site/spokes/resync', id ? { id: id } : {});
+          const failed = (res.results || []).filter(function(r) { return !r.ok; });
+          if (failed.length) {
+            app.messages.toast('Resync reached ' + res.ok + ' spoke(s); failed for: ' +
+              failed.map(function(f) { return f.endpoint + ' (' + f.error + ')'; }).join(', '), 'warning');
+          } else {
+            app.messages.toast('Resync pushed to ' + res.ok + ' spoke(s).', 'success');
+          }
+        } catch (e) {
+          app.messages.toast('Resync failed: ' + (e.message || e), 'danger');
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+
+    // Row-scoped confirm rather than app.messages.confirm(): that renders into
+    // a single shared banner, so with one button PER ROW a second click before
+    // the first resolves leaves a dangling body-level handler and the banner
+    // can end up confirming for the wrong row. Same reasoning (and the same
+    // shape) as confirmAgentJoinKeyAction above.
+    container.querySelectorAll('[data-spoke-remove]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        const id = btn.getAttribute('data-spoke-remove');
+        const label = btn.getAttribute('data-spoke-label');
+        const $cell = $(btn).closest('td');
+        $cell.html('<span class="small me-1">Remove ' + esc(label) + '?</span>');
+        $('<button class="btn btn-danger btn-sm me-1">Yes</button>')
+          .appendTo($cell)
+          .on('click', async function() {
+            try {
+              const res = await app.api.delete('site/spokes/' + encodeURIComponent(id));
+              app.messages.toast(res.message + (res.note ? ' ' + res.note : ''), 'success');
+            } catch (e) {
+              app.messages.toast('Could not remove spoke: ' + (e.message || e), 'danger');
+            }
+            if (reopen) reopen();
+          });
+        $('<button class="btn btn-outline-secondary btn-sm">No</button>')
+          .appendTo($cell)
+          .on('click', function() { if (reopen) reopen(); });
+      });
+    });
   }
 
   async function openSiteStatusModal() {
@@ -3375,6 +3468,13 @@
       const isMaster = cfg.isMaster;
       
       let html = '<div class="p-2">' +
+        // Where app.messages.action()/confirm() render. Without a
+        // `.actionMessage` in the target, action() silently degrades to a
+        // toast and confirm() renders NOTHING AND NEVER RESOLVES -- so the
+        // spoke-remove and promote confirmations just did nothing when
+        // clicked. (Verified in a browser: the click registered, the row
+        // stayed, no dialog appeared.)
+        '<div class="actionMessage rounded p-2 mb-2" style="display:none"></div>' +
         '<div class="card mb-3 shadow-sm border-' + (isMaster ? 'warning' : 'info') + '">' +
           '<div class="card-body">' +
             '<h5 class="card-title d-flex align-items-center justify-content-between">' +
@@ -3394,7 +3494,15 @@
                 : '<span class="badge bg-success"><i class="fa-solid fa-check me-1"></i> Online / Operational</span>') + '</td></tr>' +
               (!isMaster ? '<tr><th>Live Replication:</th><td>' + (cfg.liveReplication
                 ? '<span class="badge bg-success"><i class="fa-solid fa-bolt me-1"></i> Live (catalog updates push automatically)</span>'
-                : '<span class="badge bg-warning text-dark"><i class="fa-solid fa-triangle-exclamation me-1"></i> Snapshot only (re-join to register for live updates)</span>') + '</td></tr>' : '') +
+                : '<span class="badge bg-warning text-dark"><i class="fa-solid fa-triangle-exclamation me-1"></i> Snapshot only</span>') +
+                // Re-registering is the recovery path for every state where
+                // this node and its master disagree about live replication:
+                // a join made without selfUrl, or a registry row the master
+                // removed/recreated. POST /join cannot do it (it refuses once
+                // this node is a spoke).
+                ' <button class="btn btn-sm btn-outline-primary py-0 px-2 ms-2" onclick="reregisterWithMaster()">' +
+                '<i class="fa-solid fa-rotate me-1"></i> Re-register</button>' +
+                '</td></tr>' : '') +
               (isMaster ? '<tr><th>Registered Spokes:</th><td><span class="badge bg-success">' + (cfg.registeredSpokesCount || 0) + ' receiving live updates</span></td></tr>' : '') +
               '<tr><th>Registered Sites:</th><td><span class="badge bg-primary">' + (res.sitesCount || 0) + ' sites</span></td></tr>' +
               '<tr><th>Theta Gateways:</th><td>' + (res.gatewaysCount == null
@@ -3460,10 +3568,27 @@
       html += '</div>';
 
       app.modal.open({ title: 'Multi-Site & Network Gateway Status', bodyHtml: html, size: 'lg' });
+      // Bound after open(), which rebuilds the modal body -- handlers attached
+      // to the pre-render markup would be thrown away.
+      if (isMaster) bindSpokeActions(app.modal.body()[0] || document, openSiteStatusModal);
     } catch (e) {
       app.messages.toast('Error fetching site status: ' + e.message, 'danger');
     }
   }
+
+  async function reregisterWithMaster() {
+    try {
+      const res = await app.api.post('site/reregister', { selfUrl: window.location.origin });
+      app.messages.toast(
+        res.message + (res.live ? ' — live replication is active.' : ' — the master did not issue a push token.'),
+        res.live ? 'success' : 'warning'
+      );
+      openSiteStatusModal();
+    } catch (e) {
+      app.messages.toast('Re-registration failed: ' + (e.message || e), 'danger');
+    }
+  }
+  window.reregisterWithMaster = reregisterWithMaster;
 
   async function promoteCurrentSiteToMaster() {
     const confirmed = await app.messages.confirm(
