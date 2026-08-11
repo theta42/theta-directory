@@ -1,3 +1,4 @@
+const crypto = require('crypto');
 const { Model } = require('@simpleworkjs/orm');
 
 const { Group } = require('./group_ldap');
@@ -228,6 +229,18 @@ class ResourceGroup extends Model {
     groupCn: { type: 'string', isRequired: true },
     accessLevel: { type: 'string', isRequired: true }
   };
+
+  // No DB-level unique constraint on (resourceId, groupCn) exists, so callers
+  // MUST check-then-create rather than relying on a constraint violation to
+  // catch a dupe. A caller that skips this (raw ResourceGroup.create()) and
+  // runs more than once for the same resource -- e.g. discovery reconciling
+  // the same LXC from multiple Proxmox cluster nodes -- silently accumulates
+  // duplicate access/admin rows every pass, with no error to notice it by.
+  static async ensure(resourceId, groupCn, accessLevel) {
+    const existing = await this.list({ where: { resourceId, groupCn } });
+    if (existing.length) return existing[0];
+    return this.create({ id: crypto.randomUUID(), resourceId, groupCn, accessLevel });
+  }
 }
 
 module.exports = {
