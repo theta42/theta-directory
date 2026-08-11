@@ -1116,6 +1116,16 @@ router.post('/site-promote', async (req, res, next) => {
       status: 'ok',
       message: 'Node successfully promoted to Master Site',
       handoff: handoffNote,
+      // This node's own OpenLDAP ServerID stays whatever it was as a spoke
+      // (e.g. 2) until `setup.sh` is re-run here -- GET
+      // /ldap-replication-config will immediately start advertising 1 for
+      // this node (the master's reserved ID) since that's derived purely
+      // from cfg.isMaster, but nothing restarts slapd with the new value
+      // automatically (OpenLDAP's static slapd.conf is only read at process
+      // start, and this app has no safe way to restart its own container).
+      // Surfaced here + on the Multi-Site modal so an operator promoting a
+      // site knows to re-run setup.sh promptly, not just assume it's done.
+      ldapReplicationNote: 'Re-run setup.sh on this node to apply its new LDAP ServerID (1) and pick up the current spoke peer list -- OpenLDAP config only reloads at process start.',
       config: {
         isMaster: true,
         masterUrl: '',

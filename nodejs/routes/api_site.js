@@ -260,7 +260,44 @@ router.post('/demote', async (req, res, next) => {
     const base = String(newMasterUrl).replace(/\/+$/, '');
     siteConfig.save({ isMaster: false, masterUrl: base, masterJoinKey: newJoinKey });
     logAudit('demoted', { demotedBy: key.keyPrefix, newMasterUrl: base });
-    res.json({ status: 'ok', message: 'Demoted to spoke of ' + base });
+
+    // Register with the new master immediately, the same way a real /join
+    // does (POST /spokes) -- without this, a demoted former master was
+    // orphaned: it had a masterJoinKey but no SiteSpoke entry on the new
+    // master (so no ldapServerId, no live replication push target), and
+    // structurally could never self-heal via /join (which refuses re-join
+    // for a node that's already a spoke, and requires a fresh install --
+    // neither true for a former master with real users/agents). Best-effort:
+    // failing to register here must not fail the demotion itself, same
+    // reasoning as a normal join's optional live-replication registration.
+    let registrationNote = 'not attempted (no stack.ssoHost/stack.selfUrl configured to register with)';
+    // stack.selfUrl is a full-URL override (scheme + port) for environments
+    // where "https://<ssoHost>" isn't the real reachable address -- the
+    // multisite e2e test harness (plain HTTP, docker-network hostnames,
+    // no TLS/proxy in front) is exactly that case; every real deployment
+    // just relies on the ssoHost derivation.
+    const selfUrl = (conf.stack && conf.stack.selfUrl) || (conf.stack && conf.stack.ssoHost && `https://${conf.stack.ssoHost}`);
+    if (selfUrl) {
+      try {
+        const regResp = await fetch(base + '/api/site/spokes', {
+          method: 'POST',
+          headers: { Authorization: 'Bearer ' + newJoinKey, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ endpoint: selfUrl, siteSlug: cfg.siteSlug })
+        });
+        if (regResp.ok) {
+          const regBody = await regResp.json();
+          if (regBody.pushToken) siteConfig.save({ replicationPushToken: regBody.pushToken });
+          registrationNote = 'registered as a spoke of the new master';
+        } else {
+          registrationNote = 'registration failed: HTTP ' + regResp.status;
+        }
+      } catch (e) {
+        registrationNote = 'registration failed: ' + e.message;
+      }
+    }
+    logAudit('demoted_self_registered', { newMasterUrl: base, registrationNote });
+
+    res.json({ status: 'ok', message: 'Demoted to spoke of ' + base, registration: { note: registrationNote } });
   } catch (e) { next(e); }
 });
 
