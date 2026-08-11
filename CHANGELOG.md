@@ -1,3 +1,8 @@
+# v2.7.0 - 2026-08-11
+
+### Added
+- **OpenLDAP N-way multi-master replication auto-config.** `SiteSpoke.ldapServerId` is now auto-assigned at registration (next free from 2 upward, 1 reserved for the master -- same pattern as jump-host's mesh index), and each site's LDAP URL is derived from its already-known HTTP(S) endpoint rather than a separately-configured field. New `utils/ldap_replication.js`, `GET /api/site/ldap-peers` (spoke-facing, Bearer site join key) and `GET /directory-admin/ldap-replication-config` (master-local). Operators no longer hand-maintain `LDAP_SERVER_ID`/`LDAP_REPLICATION_HOSTS` for a `theta-suite`-joined cluster (see `theta-suite`'s `bootstrap/site-ldap-register.js`). Verified against real running containers (`docker-compose.multisite-e2e.yml`).
+
 # v2.6.0 - 2026-08-11
 
 ### Fixed
