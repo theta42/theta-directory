@@ -126,6 +126,15 @@ router.get('/login', async function(req, res, next) {
   res.render('login', {...values, redirect: req.query.redirect});
 });
 
+// The theta-agent installer opens this page from its "Open Theta Directory..."
+// button (with ?callback=<loopback URL>). If the logged-in user is a site
+// admin, the page mints a join key and redirects to the callback so the
+// installer can pre-fill the join-key field. The callback is validated to be
+// loopback-only by the page itself.
+router.get('/install-agent/authorize', function(req, res, next) {
+  res.render('install-agent', {...values, callback: String(req.query.callback || '')});
+});
+
 // OAuth client management and LDAP connection info, merged into one page
 // (tabs) -- both are "how do other apps/hosts plug into this SSO" concerns.
 // LDAP values are derived from the running config + request host rather than

@@ -1,0 +1,66 @@
+<%- include('top') %>
+<script type="text/javascript">
+	// "Connect this computer" authorize flow (opened by the theta-agent
+	// installer's "Open Theta Directory..." button). If the logged-in user is a
+	// site admin we mint a join key and hand it to the installer's localhost
+	// callback, which pre-fills the join-key field.
+
+	var callback = <%- JSON.stringify(callback || '') %>;
+
+	function isLoopback(u) {
+		try {
+			var p = new URL(u);
+			return p.protocol === 'http:'
+				&& (p.hostname === '127.0.0.1' || p.hostname === 'localhost' || p.hostname === '::1');
+		} catch (e) { return false; }
+	}
+
+	function showError(msg) {
+		$('#ia-status').removeClass('alert-info').addClass('alert-danger').text(msg);
+	}
+
+	$(document).ready(function () {
+		if (!isLoopback(callback)) {
+			showError('Invalid callback URL; the installer must be on this computer.');
+			return;
+		}
+		app.auth.isLoggedIn(function (err, isLoggedIn) {
+			if (!isLoggedIn) {
+				var here = '/install-agent/authorize?callback=' + encodeURIComponent(callback);
+				window.location.href = '/login?redirect=' + encodeURIComponent(here);
+				return;
+			}
+			fetch('/api/agent/join-keys', {
+				method: 'POST',
+				headers: {
+					'auth-token': app.auth.getToken(),
+					'Content-Type': 'application/json'
+				},
+				body: JSON.stringify({ label: 'installer' })
+			}).then(function (resp) {
+				if (!resp.ok) {
+					if (resp.status === 403) showError('You need site-admin privileges to mint a join key.');
+					else showError('Could not mint a join key (HTTP ' + resp.status + ').');
+					return;
+				}
+				return resp.json();
+			}).then(function (data) {
+				if (!data || !data.key) return;
+				var sep = callback.indexOf('?') >= 0 ? '&' : '?';
+				window.location.href = callback + sep
+					+ 'join_key=' + encodeURIComponent(data.key)
+					+ '&server_url=' + encodeURIComponent(window.location.origin);
+			}).catch(function () { showError('Request failed. Try again.'); });
+		});
+	});
+</script>
+<div class="container mt-5" style="max-width: 560px;">
+	<div class="shadow-lg card">
+		<div class="card-header shadow">
+			Connect this computer
+		</div>
+		<div class="card-body">
+			<div id="ia-status" class="alert alert-info mb-0">Minting a join key and returning the installer...</div>
+		</div>
+	</div>
+</div>
