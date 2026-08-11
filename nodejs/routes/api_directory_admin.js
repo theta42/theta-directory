@@ -962,7 +962,7 @@ const siteConfig = require('../utils/site_config');
 const { siteIsFresh } = require('../utils/site_join');
 const { Agent } = require('../models/agent');
 const { SiteSpoke } = require('../models/site_spoke');
-const { ldapHostFor } = require('../utils/ldap_replication');
+const { ldapHostFor, currentSlapdServerId } = require('../utils/ldap_replication');
 
 // probeMasterHealth checks whether this (spoke) node can reach its master over
 // the site join key. The master's /api/site/ping is deliberately lightweight.
@@ -1002,13 +1002,29 @@ router.get('/site-status', async (req, res, next) => {
     // via an older bootstrap, or the UI form before it grew the field) is
     // fully joined but silently stuck on the one-time snapshot, which was
     // otherwise invisible anywhere in the UI.
-    const registeredSpokesCount = cfg.isMaster ? await SiteSpoke.list().then(l => l.length).catch(() => 0) : 0;
+    const allSpokes = cfg.isMaster ? await SiteSpoke.list().catch(() => []) : [];
+    const registeredSpokesCount = allSpokes.length;
     // Real gateway-to-gateway mesh peer count from jump-host's own registry
     // (utils/jump_client.js), not this app's unrelated WireGuard
     // roaming-client Resources. count is null (not 0) when the query
     // couldn't run at all -- the UI distinguishes "0 gateways" from "can't
     // tell" instead of showing a misleading zero.
     const gateways = await jumpClient.getGatewayCount();
+
+    // LDAP MMR status (docs/replication.md): configuredServerId is read
+    // straight from THIS node's own live slapd.conf; advertisedServerId is
+    // what GET /ldap-peers / /ldap-replication-config currently hand out for
+    // it. These can genuinely disagree -- a promotion or a newly-joined
+    // spoke changes the advertised value immediately, but OpenLDAP's static
+    // config only reloads at process start, so a mismatch means "re-run
+    // setup.sh here" rather than "something's broken". Only computed for the
+    // master (a spoke's advertised ID lives on the master, not locally, and
+    // querying it here would mean another WAN round-trip on every page load).
+    const configuredServerId = currentSlapdServerId();
+    const ldap = cfg.isMaster
+      ? { configuredServerId, advertisedServerId: 1, stale: configuredServerId !== null && configuredServerId !== 1, peersCount: allSpokes.filter(s => s.ldapServerId).length }
+      : { configuredServerId, advertisedServerId: null, stale: null, peersCount: null };
+
     res.json({
       status: 'ok',
       config: {
@@ -1024,7 +1040,16 @@ router.get('/site-status', async (req, res, next) => {
       sitesCount: sites.length,
       sites: sites.map(s => ({ id: s.id, name: s.name, slug: s.slug })),
       gatewaysCount: gateways.count,
-      gatewaysNote: gateways.note
+      gatewaysNote: gateways.note,
+      ldap,
+      // Per-spoke detail (master only) -- endpoint/siteSlug/noInbound/
+      // relayNote/ldapServerId, not just an aggregate count, so an operator
+      // can actually see what's registered instead of only "N spokes".
+      spokes: allSpokes.map(s => ({
+        siteSlug: s.siteSlug, endpoint: s.endpoint, noInbound: !!s.noInbound,
+        relayNote: s.relayNote || null, ldapServerId: s.ldapServerId || null,
+        lastSeenOn: s.last_seen_on || null
+      }))
     });
   } catch (err) { next(err); }
 });
