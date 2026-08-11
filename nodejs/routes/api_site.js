@@ -42,6 +42,8 @@ function logAudit(action, details) {
   console.log(JSON.stringify({ timestamp: new Date().toISOString(), component: 'site', action, ...details }));
 }
 
+const { nextFreeLdapServerId, ldapHostFor } = require('../utils/ldap_replication');
+
 // slurpLdif dumps the local LDAP tree with slapcat (the sso-manager container
 // carries an OpenLDAP build with slapcat on PATH).
 async function slurpLdif() {
@@ -136,6 +138,7 @@ router.post('/spokes', async (req, res, next) => {
         endpoint,
         pushToken: SiteSpoke.generatePushToken(),
         created_on: now,
+        ldapServerId: await nextFreeLdapServerId(),
         ...patch
       });
     }
@@ -157,6 +160,47 @@ router.post('/spokes', async (req, res, next) => {
 
     logAudit('spoke_registered', { endpoint, siteSlug: spoke.siteSlug, noInbound: !!noInbound, relayNote });
     res.json({ status: 'ok', pushToken: spoke.pushToken, relay: { note: relayNote } });
+  } catch (e) { next(e); }
+});
+
+// ── LDAP replication peer list (SPOKE-callable, Bearer site join key) ───────
+// OpenLDAP multi-master replication (docs/replication.md) needs each site to
+// know its own ServerID plus every OTHER site's LDAPS URL. The master
+// coordinates ID assignment (nextFreeLdapServerId, above); this is how a
+// spoke asks "what's my ID, and who are my peers" -- called by
+// theta-suite's bootstrap/site-ldap-register.js on every setup.sh run, not
+// just once at join time, since the peer list changes as other spokes join.
+// Same join-key auth as /spokes (a spoke already has this stored from its
+// own join). `endpoint` identifies the CALLER so it can be excluded from its
+// own peer list -- same identity SiteSpoke.list() keys registration on.
+router.get('/ldap-peers', async (req, res, next) => {
+  try {
+    const auth = req.headers.authorization || '';
+    const rawKey = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+    const key = await SiteJoinKey.authenticate(rawKey);
+    if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
+
+    const callerEndpoint = req.query.endpoint;
+    if (!callerEndpoint) {
+      return res.status(400).json({ status: 'error', message: 'endpoint query param is required' });
+    }
+
+    const cfg = siteConfig.get();
+    const masterHost = ldapHostFor(cfg.masterUrl || req.protocol + '://' + req.get('host'));
+    const spokes = await SiteSpoke.list();
+    const caller = spokes.find((s) => s.endpoint === callerEndpoint);
+    if (!caller || !caller.ldapServerId) {
+      return res.status(404).json({ status: 'error', message: 'this endpoint is not a registered spoke -- register via POST /api/site/spokes first' });
+    }
+
+    const peers = [{ ldapServerId: 1, ldapHost: masterHost }];
+    for (const s of spokes) {
+      if (s.endpoint === callerEndpoint || !s.ldapServerId) continue;
+      const host = ldapHostFor(s.endpoint);
+      if (host) peers.push({ ldapServerId: s.ldapServerId, ldapHost: host });
+    }
+
+    res.json({ status: 'ok', ldapServerId: caller.ldapServerId, peers });
   } catch (e) { next(e); }
 });
 
