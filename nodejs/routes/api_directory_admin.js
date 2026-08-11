@@ -981,7 +981,9 @@ const siteConfig = require('../utils/site_config');
 const { siteIsFresh } = require('../utils/site_join');
 const { Agent } = require('../models/agent');
 const { SiteSpoke } = require('../models/site_spoke');
-const { ldapHostFor, currentSlapdServerId } = require('../utils/ldap_replication');
+const { ldapHostFor, currentSlapdServerId, currentReplicationState, replicationDrift } = require('../utils/ldap_replication');
+const { adoptInheritedSpokes } = require('../utils/site_promote');
+const { reconcileSoon } = require('../utils/ldap_reconcile');
 
 // probeMasterHealth checks whether this (spoke) node can reach its master over
 // the site join key. The master's /api/site/ping is deliberately lightweight.
@@ -1039,10 +1041,61 @@ router.get('/site-status', async (req, res, next) => {
     // setup.sh here" rather than "something's broken". Only computed for the
     // master (a spoke's advertised ID lives on the master, not locally, and
     // querying it here would mean another WAN round-trip on every page load).
-    const configuredServerId = currentSlapdServerId();
-    const ldap = cfg.isMaster
-      ? { configuredServerId, advertisedServerId: 1, stale: configuredServerId !== null && configuredServerId !== 1, peersCount: allSpokes.filter(s => s.ldapServerId).length }
-      : { configuredServerId, advertisedServerId: null, stale: null, peersCount: null };
+    //
+    // Both halves are checked, on both roles. The ServerID only moves on a
+    // promotion; the PEER LIST moves every time any site joins, and nothing
+    // re-runs setup.sh on the sites that were already up -- /resync has never
+    // touched replication config. So an established cluster silently drifts
+    // toward every node replicating against a different partial view until an
+    // operator happens to re-run setup.sh. A spoke asks the master what it
+    // should have (the master holds the registry); a master computes it
+    // locally.
+    let ldap;
+    if (cfg.isMaster) {
+      const advertisedPeers = allSpokes
+        .filter(s => s.ldapServerId)
+        .map(s => ({ ldapServerId: s.ldapServerId, ldapHost: ldapHostFor(s.endpoint) }))
+        .filter(p => p.ldapHost);
+      const liveState = await currentReplicationState();
+      ldap = {
+        advertisedServerId: 1,
+        peersCount: advertisedPeers.length,
+        source: liveState.source,
+        ...replicationDrift({ advertisedServerId: 1, advertisedPeers, state: liveState })
+      };
+    } else {
+      // Spoke: the authoritative answer lives on the master. Unreachable
+      // master => nulls ("can't tell"), never a misleading "in sync".
+      let advertised = null;
+      if (cfg.masterUrl && cfg.masterJoinKey && cfg.selfUrl) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 8000);
+          try {
+            const r = await fetch(
+              `${String(cfg.masterUrl).replace(/\/+$/, '')}/api/site/ldap-peers?endpoint=${encodeURIComponent(cfg.selfUrl)}`,
+              { headers: { Authorization: 'Bearer ' + cfg.masterJoinKey }, signal: controller.signal }
+            );
+            if (r.ok) advertised = await r.json();
+          } finally { clearTimeout(timer); }
+        } catch (e) { /* leave advertised null -- reported as unknown */ }
+      }
+      const liveState = await currentReplicationState();
+      ldap = advertised
+        ? {
+            advertisedServerId: advertised.ldapServerId || null,
+            peersCount: (advertised.peers || []).length,
+            source: liveState.source,
+            ...replicationDrift({ advertisedServerId: advertised.ldapServerId, advertisedPeers: advertised.peers, state: liveState })
+          }
+        : {
+            configuredServerId: liveState.serverId,
+            advertisedServerId: null, peersCount: null, stale: null,
+            serverIdStale: null, peersStale: null,
+            missingPeers: [], extraPeers: [],
+            note: 'could not reach the master to learn this site\'s expected replication config'
+          };
+    }
 
     res.json({
       status: 'ok',
@@ -1065,6 +1118,8 @@ router.get('/site-status', async (req, res, next) => {
       // relayNote/ldapServerId, not just an aggregate count, so an operator
       // can actually see what's registered instead of only "N spokes".
       spokes: allSpokes.map(s => ({
+        // id is what the table's remove/resync actions address.
+        id: s.id,
         siteSlug: s.siteSlug, endpoint: s.endpoint, noInbound: !!s.noInbound,
         relayNote: s.relayNote || null, ldapServerId: s.ldapServerId || null,
         lastSeenOn: s.last_seen_on || null
@@ -1122,13 +1177,17 @@ router.post('/site-promote', async (req, res, next) => {
     // god_admin's local promotion, it's just reported so the operator can
     // reconcile it manually.
     const beforeCfg = siteConfig.get();
+    const selfUrl = String((req.body && req.body.selfUrl) || '').replace(/\/+$/, '');
     let handoffNote = 'no previous master on file (already master, or fresh install)';
+    let inheritedSpokes = [];
+    let promotionKey = null;
     if (!beforeCfg.isMaster && beforeCfg.masterUrl && beforeCfg.masterJoinKey) {
       try {
         const { raw: freshKey } = await SiteJoinKey.issue({
           label: 'promotion-handoff-' + new Date().toISOString().slice(0, 10),
           createdBy: req.user ? req.user.uid : 'admin'
         });
+        promotionKey = freshKey;
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 15000);
         let resp;
@@ -1136,17 +1195,38 @@ router.post('/site-promote', async (req, res, next) => {
           resp = await fetch(beforeCfg.masterUrl + '/api/site/demote', {
             method: 'POST',
             headers: { Authorization: 'Bearer ' + beforeCfg.masterJoinKey, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ newMasterUrl: (req.body && req.body.selfUrl) || '', newJoinKey: freshKey }),
+            body: JSON.stringify({ newMasterUrl: selfUrl, newJoinKey: freshKey }),
             signal: controller.signal
           });
         } finally { clearTimeout(timer); }
-        handoffNote = resp.ok ? 'previous master demoted' : ('previous master demote failed: HTTP ' + resp.status);
+        if (resp.ok) {
+          handoffNote = 'previous master demoted';
+          // The old master hands over its spoke registry (api_site.js's
+          // /demote). Without it this node -- which was a spoke, so its own
+          // SiteSpoke table is empty -- would come up as a master that
+          // believes it has zero spokes, and every sibling spoke would keep
+          // replicating from the node we just demoted.
+          const body = await resp.json().catch(() => ({}));
+          inheritedSpokes = Array.isArray(body.spokes) ? body.spokes : [];
+        } else {
+          handoffNote = 'previous master demote failed: HTTP ' + resp.status;
+        }
       } catch (e) {
         handoffNote = 'previous master unreachable (' + e.message + ') — promoted locally anyway; reconcile it manually once it\'s back';
       }
     }
 
     siteConfig.save({ isMaster: true, masterUrl: '', masterJoinKey: undefined });
+
+    // Adopt the inherited registry, then tell each of those spokes to follow
+    // this node instead. Both halves are best-effort per spoke: one
+    // unreachable sibling must not abort the promotion or block the others,
+    // it just shows up in the report for the operator to reconcile.
+    const adoption = await adoptInheritedSpokes({ inheritedSpokes, selfUrl, promotionKey });
+
+    // Promotion changes this node's own ServerID (to 1) AND gives it a whole
+    // inherited peer list. Applied live -- no setup.sh re-run.
+    reconcileSoon('promoted');
 
     console.log(`[MULTI-SITE] Node promoted to MASTER by user ${req.user ? req.user.uid : 'admin'} (handoff: ${handoffNote})`);
 
@@ -1160,6 +1240,16 @@ router.post('/site-promote', async (req, res, next) => {
       status: 'ok',
       message: 'Node successfully promoted to Master Site',
       handoff: handoffNote,
+      // What happened to the rest of the cluster. `orphaned` is the number
+      // this node knows it inherited but could not re-point -- those sites
+      // are still pointed at the demoted master and need an operator.
+      siblings: {
+        inherited: inheritedSpokes.length,
+        adopted: adoption.adopted,
+        repointed: adoption.repointed,
+        orphaned: adoption.adopted - adoption.repointed,
+        detail: adoption.results
+      },
       // This node's own OpenLDAP ServerID stays whatever it was as a spoke
       // (e.g. 2) until `setup.sh` is re-run here -- GET
       // /ldap-replication-config will immediately start advertising 1 for

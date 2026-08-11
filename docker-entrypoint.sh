@@ -290,16 +290,75 @@ else
     sed -i "/^REPLICATION_BLOCK_PLACEHOLDER/d" /etc/openldap/slapd.conf
 fi
 
+# ── cn=config (dynamic configuration backend) ───────────────────────────────
+# slapd.conf above stays the seed for everything static (schema, overlays,
+# ACLs, TLS) -- it is generated the same way it always was. But slapd reads a
+# static file exactly once, at process start, and REPLICATION config is not
+# static: every time a site joins or leaves the cluster, every other site's
+# syncrepl peer list changes. With slapd.conf that meant "re-run setup.sh on
+# every site", i.e. an operator ritual nobody performs reliably, and silently
+# divergent replication until they do.
+#
+# So the seed file is converted to the cn=config backend and slapd runs from
+# that, which makes olcServerID/olcSyncrepl modifiable at RUNTIME over
+# ldapmodify -- no restart, no downtime, no operator. utils/ldap_runtime_config.js
+# in the app does exactly that whenever the cluster changes.
+#
+# The conversion is redone from slapd.conf on every boot, deliberately: it
+# keeps upgrades working (a new release's schema/overlay changes land the
+# normal way) and it means runtime state is never something you have to
+# migrate. Replication config is re-applied by the app right after boot from
+# the cluster's current view, which is the authoritative source anyway.
+CONFIG_DIR=/etc/openldap/slapd.d
+CONFIG_ADMIN_DN="cn=admin,cn=config"
+# Reuses the LDAP admin credential rather than inventing a second one: both
+# already grant total control of this slapd, so a separate secret would add a
+# thing to manage without adding a boundary.
+CONFIG_ADMIN_PASS="${LDAP_ADMIN_PASS}"
+
+if ! grep -q '^database[[:space:]]\+config' /etc/openldap/slapd.conf; then
+    CONFIG_ADMIN_HASH="$(slappasswd -s "$CONFIG_ADMIN_PASS")"
+    cat >> /etc/openldap/slapd.conf <<EOF
+
+# The cn=config database itself, so replication config can be changed at
+# runtime instead of requiring a restart (see the note in docker-entrypoint.sh).
+database config
+rootdn "${CONFIG_ADMIN_DN}"
+rootpw ${CONFIG_ADMIN_HASH}
+EOF
+fi
+
+info "Converting slapd.conf to the cn=config backend..."
+rm -rf "$CONFIG_DIR"
+mkdir -p "$CONFIG_DIR"
+# Success is judged by the artifact, not the exit status, and -u is NOT used:
+#
+#   * `-u` is dry-run. It validates and writes nothing, which looks like a
+#     clean success and leaves an empty slapd.d behind.
+#   * Without it, slaptest ALSO tries to open the mdb backend, which fails on
+#     a first boot ("cannot be opened: No such file or directory") because
+#     slapd itself hasn't created the database yet. That failure is about the
+#     data, not the config: the conversion has already been written by then.
+#
+# So run the real conversion and check that cn=config.ldif actually landed.
+slaptest -f /etc/openldap/slapd.conf -F "$CONFIG_DIR" >> /var/lib/ldap/slapd.log 2>&1 || true
+if [[ ! -f "$CONFIG_DIR/cn=config.ldif" ]]; then
+    error "slaptest could not convert slapd.conf to $CONFIG_DIR — see /var/lib/ldap/slapd.log"
+    exit 1
+fi
+
 chown ldap:ldap /etc/openldap/slapd.conf 2>/dev/null || true
+chown -R ldap:ldap "$CONFIG_DIR" 2>/dev/null || true
 chown -R ldap:ldap /var/lib/ldap 2>/dev/null || true
 
 # ── Start slapd ─────────────────────────────────────────────────────────────
 info "Starting OpenLDAP (base DN: ${LDAP_BASE_DN})..."
-# -f forces slapd to use our generated slapd.conf (not cn=config).
+# -F runs from the cn=config backend converted above (not -f slapd.conf), which
+# is what makes runtime replication changes possible.
 # -h listens on ldap:///  (389: plain + StartTLS) and ldaps:/// (636: LDAPS).
 # ldapi:/// is intentionally omitted: its default socket dir doesn't exist on
 # Alpine and the container only uses simple bind over ldap://localhost:389.
-slapd -d 256 -u ldap -g ldap -f /etc/openldap/slapd.conf -h "ldap:/// ldaps:///" >> /var/lib/ldap/slapd.log 2>&1 &
+slapd -d 256 -u ldap -g ldap -F "$CONFIG_DIR" -h "ldap:/// ldaps:///" >> /var/lib/ldap/slapd.log 2>&1 &
 SLAPD_PID=$!
 
 # Wait for slapd to answer the root DSE (means it's up, regardless of DB state).
