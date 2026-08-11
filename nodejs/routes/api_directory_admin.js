@@ -69,10 +69,10 @@ async function ensureGroup(name, ownerDn, description) {
 // naive create on every Directory self-heal (which runs ensureSiteGroups /
 // provisionResourceGroups on each load) was accumulating duplicate links -- the
 // "groups appear 3x under a resource" bug. Always check first.
+// (services/discovery_reconciler.js's autoPromote path had the same bug via
+// its own raw ResourceGroup.create() -- both now share ResourceGroup.ensure().)
 async function ensureResourceGroup(resourceId, groupCn, accessLevel) {
-  const existing = await ResourceGroup.list({ where: { resourceId, groupCn } });
-  if (existing.length) return existing[0];
-  return ResourceGroup.create({ resourceId, groupCn, accessLevel });
+  return ResourceGroup.ensure(resourceId, groupCn, accessLevel);
 }
 
 // Provision the site-level groups + the aggregates the per-resource groups nest
@@ -216,35 +216,17 @@ router.get('/resources', async (req, res, next) => {
     });
     // Even admins never receive secret metadata (e.g. client_secret_hash) over
     // the wire; projectResources strips it unconditionally.
-
-    // Self-heal the group model (docs/GROUPS.md): ensure every site has its
-    // site-level groups (S_super_admin, S_hosts_*, S_apps_*, S_everyone) + the
-    // aggregates, and every host/app resource has its per-resource groups nested
-    // into them. Idempotent, so this is a cheap no-op once present -- it's what
-    // backfills a directory seeded by an older release without a rebuild.
-    // Never fails the list.
-    const sites = resources.filter(r => r.kind === 'site');
-    await Promise.all(sites.map(site =>
-      ensureSiteGroups(site.slug, req.user.dn, site.name, site.id)
-        .catch(err => console.error(`ensureSiteGroups(${site.slug}) failed:`, err.message))
-    ));
-    const siteByResource = new Map();
-    for (const site of sites) siteByResource.set(site.id, site.slug);
-    const siteOf = async (r) => {
-      const direct = siteByResource.get(r.id);
-      if (direct) return direct;
-      // findAncestorSiteSlug returns the site's full slug (`site_local`) -- the
-      // group-model builders take it verbatim, so do NOT strip the `site_` prefix.
-      return await Resource.findAncestorSiteSlug(r.id).catch(() => null);
-    };
-    await Promise.all(resources.map(async (r) => {
-      const gKind = groupKind(r);
-      if (!gKind) return;
-      const siteSlug = await siteOf(r);
-      if (!siteSlug) return;
-      await provisionResourceGroups(r, gKind, siteSlug, req.user.dn)
-        .catch(err => console.error(`provisionResourceGroups(${r.slug}) failed:`, err.message));
-    }));
+    //
+    // Group-model self-heal (docs/GROUPS.md) used to run here, on every GET --
+    // idempotent per-call, but the fan-out (ensureSiteGroups per site +
+    // provisionResourceGroups per resource, each several sequential LDAP
+    // round-trips) ran unconditionally on every single list, which is what
+    // made this route slow/unresponsive once a directory had more than a
+    // handful of resources. Healing now happens where resources actually
+    // change instead: POST /resources, PUT /resources/:id (see below), and
+    // POST /discovery/promote/:slug. See POST /resources/heal-groups for an
+    // on-demand equivalent of what this GET used to do implicitly, for
+    // backfilling a directory seeded before this change.
 
     const projected = projectResources(resources, { fullMetadata: true }).map(r => {
       r.hasSecret = !!(r.metadata?.hasSecret || (r.metadata?.secretKeys && r.metadata.secretKeys.length > 0));
@@ -289,6 +271,40 @@ router.use((req, res, next) => {
     });
   }
   next();
+});
+
+// On-demand equivalent of the group-model self-heal that GET /resources used
+// to run implicitly on every list (see the comment there). Same fan-out,
+// same idempotent ensure()-based helpers -- just explicit and admin-
+// triggered instead of hidden in every page load, for backfilling a
+// directory whose resources predate write-time healing.
+router.post('/resources/heal-groups', async (req, res, next) => {
+  try {
+    const resources = await Resource.list();
+    const sites = resources.filter(r => r.kind === 'site');
+    await Promise.all(sites.map(site =>
+      ensureSiteGroups(site.slug, req.user.dn, site.name, site.id)
+        .catch(err => console.error(`ensureSiteGroups(${site.slug}) failed:`, err.message))
+    ));
+    const siteByResource = new Map();
+    for (const site of sites) siteByResource.set(site.id, site.slug);
+    const siteOf = async (r) => {
+      const direct = siteByResource.get(r.id);
+      if (direct) return direct;
+      return await Resource.findAncestorSiteSlug(r.id).catch(() => null);
+    };
+    let healed = 0;
+    await Promise.all(resources.map(async (r) => {
+      const gKind = groupKind(r);
+      if (!gKind) return;
+      const siteSlug = await siteOf(r);
+      if (!siteSlug) return;
+      await provisionResourceGroups(r, gKind, siteSlug, req.user.dn)
+        .then(() => { healed += 1; })
+        .catch(err => console.error(`provisionResourceGroups(${r.slug}) failed:`, err.message));
+    }));
+    res.json({ status: 'ok', sitesHealed: sites.length, resourcesHealed: healed });
+  } catch (err) { next(err); }
 });
 
 router.post('/resources', async (req, res, next) => {
@@ -408,7 +424,24 @@ router.put('/resources/:id', async (req, res, next) => {
         await ResourceEdge.create({ parentId: req.body.hostId, childId: r.id, relation: updated.kind === 'oauth' ? 'oauth' : 'hosts' });
       }
     }
-    
+
+    // Group provisioning (docs/GROUPS.md), same as POST /resources -- an
+    // update can be what first makes a resource group-eligible (e.g. a
+    // manual `metadata.managed` edit, or a reparent moving it under a
+    // different site), and this route never provisioned groups at all
+    // before. Never fails the update: groups are repairable via
+    // POST /resources/heal-groups if this best-effort attempt fails.
+    const gKind = groupKind(updated);
+    if (gKind) {
+      const ancestorSite = await Resource.findAncestorSiteSlug(updated.id).catch(() => null);
+      if (ancestorSite) {
+        await ensureSiteGroups(ancestorSite, req.user.dn, updated.name)
+          .catch(err => console.error(`ensureSiteGroups(${ancestorSite}) failed:`, err.message));
+        await provisionResourceGroups(updated, gKind, ancestorSite, req.user.dn)
+          .catch(err => console.error(`provisionResourceGroups(${updated.slug}) failed:`, err.message));
+      }
+    }
+
     res.json({ results: updated });
   } catch (err) {
     next(err);
