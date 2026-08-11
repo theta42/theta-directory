@@ -1,3 +1,11 @@
+# v2.10.0 - 2026-08-11
+
+### Added
+- **`GET /install-agent/authorize`** — the theta-agent installer's "Log in to the Directory and get a join key..." button opens this page. A logged-in site admin gets a join key minted via `POST /api/agent/join-keys` and is redirected to the installer's loopback callback with `join_key` + `server_url`; unauthenticated users are sent through `/login?redirect=…` and return after logging in. The callback is validated to be loopback-only so a join key can't be steered to an attacker.
+
+### Changed
+- **Windows Install Agent command** on the Directory page now downloads the installer from this Directory (`/resources/theta-agent/theta-agent-windows-amd64-setup.exe`, staged by `setup.sh` at the matching suite version) instead of GitHub.
+
 # v2.9.0 - 2026-08-11
 
 ### Fixed
