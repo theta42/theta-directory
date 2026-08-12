@@ -683,7 +683,43 @@
       const match = Object.values(resourcesById).find(r => r.slug === slug);
       if (match) openEditModal(match.id);
     }
+    startLiveUpdates();
   });
+
+  // Live updates.
+  //
+  // This table is DERIVED: hierarchy comes from the edge list, hostName from the
+  // parent resource, agent status from a separate service, and renderTable()
+  // recomputes indentation and carets from the resulting tree. Patching a single
+  // row in place (what app.sync.bind does, and the right choice for a flat list)
+  // would leave all of that stale -- a new child would render at the wrong depth
+  // with no caret on its parent. So a change re-derives the whole view instead.
+  //
+  // loadResources() -> renderTable() re-reads the search, sort and secrets-only
+  // controls, so the operator's current filter survives a reload untouched.
+  //
+  // Debounced because one edit commonly emits several events (the resource, its
+  // group, an edge), and because a bulk import emits a burst.
+  function startLiveUpdates(){
+    let timer = null;
+    const reload = function(){
+      clearTimeout(timer);
+      timer = setTimeout(function(){ loadResources(); }, 400);
+    };
+    // Only these carry a socket read gate server-side
+    // (utils/socket_pubsub.js); anything else never arrives.
+    app.subscribe(/^model:Resource:/, reload);
+    app.subscribe(/^model:ResourceGroup:/, reload);
+
+    // The Discovery Plugins tab renders from its own fetch, so it reloads
+    // separately. (views/plugins.ejs is dead — /plugins redirects here and the
+    // UI was ported into this file.)
+    let pluginTimer = null;
+    app.subscribe(/^model:PluginInstance:/, function(){
+      clearTimeout(pluginTimer);
+      pluginTimer = setTimeout(function(){ loadDiscoveryPlugins(); }, 400);
+    });
+  }
   
   var agentsByHost = {};
   var agentsByResource = {};
