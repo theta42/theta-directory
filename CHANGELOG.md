@@ -1,3 +1,10 @@
+## v2.14.0
+- security: **the socket bridge rebroadcast whatever a client published.** `socket.on('P2PSub')` took any topic and payload an authenticated client emitted and fanned it out to every other connected client. No app code has ever called `app.publish()`, so nothing legitimate used it. Events now flow server → client only.
+- security: the outbound side was an unconditional `app.io.emit` of every event on the bus, with its full record, to every authenticated socket. Nothing here publishes model events yet, so it carried no traffic — but it would have started leaking the moment anything did. It is replaced by `utils/socket_pubsub.js`, a per-socket read gate whose `READERS` table is **empty by design**: nothing is broadcast until a model opts in together with the check that decides who may see its events.
+- fix: a delete event carries a `null` body, and the client tagged it unconditionally — throwing and killing the socket handler.
+- feat: the shared UI shell loads `app.sync.js` and `app.filter.js` from `@simpleworkjs/frontend`, so views here can adopt live updates and filtering.
+- chore: `authIO` records the session's groups on the socket, which is what a read gate resolves rights from.
+
 ## v2.13.0
 
 ### Security
