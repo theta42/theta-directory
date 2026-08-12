@@ -167,6 +167,29 @@
 		loadHistory();
 		toggleFilterInputs();
 		loadMetrics();
+
+		// Live updates, panel by panel — each reloads only its own fetch.
+		//
+		// The notification history is a straight model list, so it follows
+		// Notification directly. The stats card counts users and resources, so
+		// it follows those models rather than inventing a "Stats" record to
+		// publish: the aggregate is derived, and the things it is derived from
+		// already announce themselves.
+		//
+		// loadMetrics() is deliberately NOT wired to a model. It reads
+		// failed-login and service-usage counters that are incremented outside
+		// any model write (utils/metrics, on auth attempts), so no model event
+		// corresponds to them; that panel still needs its own emit at the point
+		// the counters change.
+		let historyTimer = null, statsTimer = null;
+		app.subscribe(/^model:Notification:/, function(){
+			clearTimeout(historyTimer);
+			historyTimer = setTimeout(loadHistory, 400);
+		});
+		app.subscribe(/^model:(User|Resource):/, function(){
+			clearTimeout(statsTimer);
+			statsTimer = setTimeout(loadDashboard, 500);
+		});
 	});
 </script>
 
