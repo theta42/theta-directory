@@ -50,11 +50,10 @@ function replicateToSpokes(reason) {
 function resyncUrls(spoke) {
 	const urls = [];
 	if (spoke.meshIp) {
-		// NOT `http://<meshIp>:3001` -- that was the bug. The mesh subnet
-		// lives inside the peer gateway's namespace; this container cannot
-		// route to it, and nothing answered on :3001 there in any case. The
-		// reachable address is the LOCAL gateway's per-peer forwarding port,
-		// derived from the mesh index (utils/mesh_route.js).
+		// The peer site's directory, addressed directly over the routed mesh
+		// (utils/mesh_route.js). This needs a route for 10.0.0.0/8 via the
+		// local gateway; where that route is absent the public-endpoint
+		// fallback below still carries the push, just over the internet.
 		const target = meshServiceTarget(spoke.meshIp);
 		if (target) urls.push(`http://${target.host}:${target.port}/api/site/resync`);
 	}

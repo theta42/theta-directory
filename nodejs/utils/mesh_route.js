@@ -1,67 +1,65 @@
 'use strict';
 
-// How to actually REACH a peer site over the gateway mesh.
+// How to reach a peer site's directory over the mesh.
 //
-// A spoke registers the mesh IP its gateway reports (172.24.<idx>.1). That
-// address is real, but it exists only inside the peer GATEWAY's network
-// namespace -- WireGuard runs in the jump-host container. Nothing else at
-// either site can route to it: this app and theta-proxy sit on the docker
-// bridge, which has no path into the mesh subnet, and nothing at the far end
-// was listening on :3001 anyway (the gateway serves :3002; the directory is a
-// different container).
+// This used to be a workaround. WireGuard lived inside the jump-host
+// CONTAINER's network namespace, so a peer's mesh address was unreachable from
+// here and from theta-proxy, and the only way through was a userspace relay on
+// the local gateway listening on a port derived from the site index. That
+// whole mechanism (jump-host's services/mesh_forwarder.js) is gone: the
+// gateway is a router now, the mesh is really routed, and a peer site's
+// directory is simply an address.
 //
-// So a mesh IP is not a dial-able address from here. It is an IDENTIFIER --
-// the octet in it is the peer's mesh index -- and the dial-able address is the
-// LOCAL gateway's per-peer forwarding port (jump-host's
-// services/mesh_forwarder.js), which bridges into the tunnel and out to that
-// site's directory on the other side:
+// Addressing (must match utils/mesh_addressing.js and jump-host's copy):
 //
-//   this app -> jump-host:<30000+peerIdx> ==wg tunnel==> 172.24.<peerIdx>.1:3001 -> that site's directory
+//   172.24.0.<siteId>   the peer GATEWAY -- an identifier, not a service
+//   10.<siteId>.0.2     that site's directory
 //
-// The port is derived from the index rather than stored, so there is no new
-// field to keep in sync between the two components and no discovery step: a
-// caller that has the mesh IP already has everything it needs. Both ends must
-// agree on the base -- keep this constant and jump-host's
-// MESH_SERVICE_PORT_BASE together.
+// A caller that knows either form knows the site id, and the site id is all
+// that is needed. Nothing is stored and nothing is derived from a port scheme
+// the two components have to agree on separately.
 
-const MESH_SERVICE_PORT_BASE = 30000;
-const MESH_SUBNET_PREFIX = '172.24';
+const { MAX_SITE_ID, MIN_SITE_ID, siteServiceIp } = require('./mesh_addressing');
 
-// 172.24.<idx>.1 -> idx. Returns null for anything that isn't a mesh address,
-// so a caller can fall back rather than dial a guess.
-function meshIndexFrom(meshIp) {
-	const m = new RegExp(`^${MESH_SUBNET_PREFIX.replace('.', '\\.')}\\.(\\d{1,3})\\.\\d{1,3}$`).exec(String(meshIp || '').trim());
-	if (!m) return null;
-	const idx = Number(m[1]);
-	if (!Number.isInteger(idx) || idx < 1 || idx > 254) return null;
-	return idx;
+// The directory's port, the same at every site.
+const DIRECTORY_PORT = 3001;
+
+/**
+ * Pull the site id out of any mesh address -- either a gateway identity
+ * (172.24.0.<id>) or an address inside a site's own network (10.<id>.x.y).
+ * Returns null for anything else, so a caller falls back rather than dialling
+ * a guess.
+ */
+function siteIdFrom(address) {
+	const value = String(address || '').trim();
+
+	const gateway = /^172\.24\.0\.(\d{1,3})$/.exec(value);
+	if (gateway) return inRange(Number(gateway[1]));
+
+	const inside = /^10\.(\d{1,3})\.\d{1,3}\.\d{1,3}$/.exec(value);
+	if (inside) return inRange(Number(inside[1]));
+
+	return null;
 }
 
-function meshServicePort(meshIndex) {
-	return MESH_SERVICE_PORT_BASE + Number(meshIndex);
+function inRange(id) {
+	if (!Number.isInteger(id) || id < MIN_SITE_ID || id > MAX_SITE_ID) return null;
+	return id;
 }
 
-// The local gateway's host:port that forwards to `meshIp`'s site, or null when
-// this deployment has no gateway configured or the IP isn't a mesh address.
-// Host comes from the same JUMP_INTERNAL_URL utils/jump_client.js already
-// uses, so there is no second place to configure the gateway.
-function meshServiceTarget(meshIp) {
-	const idx = meshIndexFrom(meshIp);
-	if (idx === null) return null;
-
-	const internal = process.env.JUMP_INTERNAL_URL || '';
-	let host;
-	try {
-		host = internal ? new URL(internal).hostname : '';
-	} catch (e) {
-		host = '';
-	}
-	if (!host) return null;
-
-	return { host, port: meshServicePort(idx), meshIndex: idx };
+/**
+ * Where a peer site's directory answers, or null when the address given is not
+ * a mesh address at all.
+ *
+ * Reaching it requires this container to have a route for 10.0.0.0/8 via the
+ * local gateway -- see docs/mesh.md. Callers keep a public-endpoint fallback
+ * (utils/site_replicate.js) precisely so that a deployment without that route
+ * still replicates, just over the internet rather than the tunnel.
+ */
+function meshServiceTarget(address) {
+	const siteId = siteIdFrom(address);
+	if (siteId === null) return null;
+	return { host: siteServiceIp(siteId), port: DIRECTORY_PORT, siteId };
 }
 
-module.exports = {
-	meshIndexFrom, meshServicePort, meshServiceTarget,
-	MESH_SERVICE_PORT_BASE, MESH_SUBNET_PREFIX
-};
+module.exports = { siteIdFrom, meshServiceTarget, DIRECTORY_PORT };

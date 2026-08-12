@@ -40,6 +40,12 @@ class MeshClient extends Model {
 		// 'manual' = created in the UI, server-generated key shown once.
 		source: { type: 'string', default: 'manual' },
 
+		// The theta-agent this device runs, when there is one. Set so the
+		// gateway's config can be PUSHED to the machine over the agent's
+		// existing websocket instead of a human copying a file around. Nullable:
+		// a phone has no agent and never will.
+		agentId: { type: 'string' },
+
 		createdAt: { type: 'integer' },
 		lastSeenAt: { type: 'integer' }
 	};
