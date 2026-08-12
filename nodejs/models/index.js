@@ -9,6 +9,8 @@ module.exports = Table;
 
 const { Token, AuthToken, InviteToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken } = require('./token');
 require('./verification');
+require('./activity_event');   // notification history (shape only, TTL-bounded)
+require('./activity_seen');    // per-user read watermark
 require('./oauth_code');
 require('./api_token');
 

@@ -94,6 +94,9 @@ app.use('/api/token', middleware.auth, require('./routes/token'));
 
 app.use('/api/group', middleware.auth, require('./routes/group'));
 app.use('/api/notification', middleware.auth, require('./routes/notification'));
+// The notification feed: model events replayed through the same read gates
+// that decided who received them live (routes/activity.js).
+app.use('/api/activity', middleware.auth, require('./routes/activity'));
 app.use('/api/discovery', middleware.auth, require('./routes/discovery'));
 app.use('/api/directory-admin', middleware.auth, require('./routes/api_directory_admin'));
 // Directory migration (docs/ldif-import.md). Admin-gated inside the router.
