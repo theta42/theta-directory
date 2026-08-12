@@ -48,12 +48,14 @@ async function authIO(socket, next){
 		// AuthToken.get(0) lookup that throws a noisy EntryNotFound trace.
 		let tok = socket.handshake.auth && socket.handshake.auth.token;
 		if(!tok) return next(Auth.errors.login());
-		let token = await Auth.checkToken(tok);
-		socket.user = await token.getUser();
-		// Group memberships captured at login. The socket read gate
-		// (utils/socket_pubsub.js) resolves what this identity may see from
-		// them, so a socket without groups would be treated as ungrouped.
-		socket.groups = typeof token.groupsArray === 'function' ? token.groupsArray() : [];
+		// `Auth.checkToken` takes `{token}` (as middleware.auth passes it) and
+		// returns the User itself — there is no `getUser()` on it. Passing the
+		// bare string and then calling `token.getUser()` threw
+		// "token.getUser is not a function" on every handshake, so no client in
+		// this app has ever had a working socket. Group membership is resolved
+		// live from LDAP by the read gate (utils/socket_pubsub.js), which needs
+		// only `user.dn`.
+		socket.user = await Auth.checkToken({token: tok});
 		next();
 	}catch(error){
 		next(error);
