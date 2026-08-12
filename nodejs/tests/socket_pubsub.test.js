@@ -207,3 +207,87 @@ describe('User payloads never carry credentials', () => {
 		bind(null);
 	});
 });
+
+describe('non-model channels (agent pushes)', () => {
+	const {CHANNELS} = require('../utils/socket_pubsub');
+
+	test('agent channels are admin-gated, mirroring routes/api_agent.js', () => {
+		for (const ch of ['agent.telemetry', 'agent.discovery', 'agent.response']) {
+			expect(typeof CHANNELS[ch]).toBe('function');
+			expect(CHANNELS[ch](ctx(['app_sso_admin']))).toBe(true);
+			expect(CHANNELS[ch](ctx(['app_sso_directory_admin']))).toBe(true);
+			expect(CHANNELS[ch](ctx(['god_admin']))).toBe(true);
+		}
+	});
+
+	test('an ordinary user receives no agent push', () => {
+		// These were bare io.emit calls. agent.response carries the OUTPUT of
+		// commands run on a host, on a channel that can run arbitrary bash, and
+		// every logged-in user was receiving it.
+		const plain = ctx(['some-team']);
+		expect(CHANNELS['agent.telemetry'](plain)).toBe(false);
+		expect(CHANNELS['agent.discovery'](plain)).toBe(false);
+		expect(CHANNELS['agent.response'](plain)).toBe(false);
+	});
+
+	test('a user with unresolvable group membership receives nothing', () => {
+		expect(CHANNELS['agent.response'](ctx([]))).toBe(false);
+	});
+
+	test('an unlisted channel has no gate, so emitChannel drops it', () => {
+		expect(CHANNELS['agent.secret']).toBeUndefined();
+		expect(CHANNELS['anything.else']).toBeUndefined();
+	});
+});
+
+describe('emitChannel delivery', () => {
+	const {emitChannel} = require('../utils/socket_pubsub');
+
+	// A socket with its authz context pre-seeded, so the delivery loop is
+	// exercised without reaching LDAP (contextFor honours the cache).
+	function fakeSocket(name, cns) {
+		return {
+			id: name,
+			user: {dn: 'uid=' + name + ',ou=people,dc=test,dc=local', uid: name},
+			_authzCtx: {user: {uid: name}, memberOfCns: cns, isSuperAdmin: cns.includes('god_admin')},
+			_authzCtxAt: Date.now(),
+			sent: [],
+			emit(ch, data) { this.sent.push([ch, data]); },
+		};
+	}
+
+	function fakeIo(sockets) {
+		return {sockets: {sockets: new Map(sockets.map((s) => [s.id, s]))}};
+	}
+
+	test('command output reaches the admin socket and not the ordinary one', async () => {
+		const admin = fakeSocket('root', ['app_sso_admin']);
+		const plain = fakeSocket('alice', ['some-team']);
+		emitChannel(fakeIo([admin, plain]), 'agent.response', {agentId: 'a1', payload: {output: 'root:x:0:0'}});
+		await new Promise((r) => setImmediate(r));
+
+		expect(admin.sent).toHaveLength(1);
+		expect(admin.sent[0][0]).toBe('agent.response');
+		expect(plain.sent).toHaveLength(0);
+		// The thing that used to go everywhere.
+		expect(JSON.stringify(plain.sent)).not.toContain('root:x:0:0');
+	});
+
+	test('an ungated channel is delivered to nobody', async () => {
+		const admin = fakeSocket('root', ['god_admin']);
+		emitChannel(fakeIo([admin]), 'agent.somethingNew', {payload: 'x'});
+		await new Promise((r) => setImmediate(r));
+		expect(admin.sent).toHaveLength(0);
+	});
+
+	test('a socket with no user is skipped', async () => {
+		const anon = {id: 'anon', user: null, sent: [], emit(c, d) { this.sent.push([c, d]); }};
+		emitChannel(fakeIo([anon]), 'agent.telemetry', {payload: 'x'});
+		await new Promise((r) => setImmediate(r));
+		expect(anon.sent).toHaveLength(0);
+	});
+
+	test('a missing io is a no-op rather than a throw', () => {
+		expect(() => emitChannel(null, 'agent.telemetry', {})).not.toThrow();
+	});
+});
