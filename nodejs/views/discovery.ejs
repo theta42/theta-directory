@@ -164,6 +164,16 @@
 
   $(document).ready(function() {
     loadResources();
+
+    // Live updates. Resource already publishes and is admin-gated; this view
+    // is the discovered-inventory list, which a plugin run rewrites wholesale,
+    // so it re-fetches rather than patching rows. Debounced because a discovery
+    // sweep writes many resources in a burst.
+    let timer = null;
+    app.subscribe(/^model:Resource:/, function(){
+      clearTimeout(timer);
+      timer = setTimeout(loadResources, 500);
+    });
   });
 </script>
 

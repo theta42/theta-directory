@@ -360,10 +360,32 @@
         }
     }
 
-    $(document).ready(function() {
+    function reload(){
         load().catch(function(e){
             console.error('Failed to load catalog:', e);
             app.messages.toast('Could not load the catalog', 'danger');
+        });
+    }
+
+    $(document).ready(function() {
+        reload();
+
+        // Live updates. Both models already publish and carry socket read
+        // gates: AccessRequest is owner-scoped (a directory admin sees all of
+        // them, everyone else only their own), Resource is admin-scoped.
+        //
+        // This page is one derived render — load() fetches the catalog, the
+        // caller's own access, their requests and any pending approvals, then
+        // renderAll() draws all four together. Patching a single tile would
+        // leave the others describing a different moment, so a change re-runs
+        // the whole load.
+        //
+        // The case that matters: an admin approves your request, and the tile
+        // you are looking at is still telling you that you cannot get in.
+        let timer = null;
+        app.subscribe(/^model:(AccessRequest|Resource):/, function(){
+            clearTimeout(timer);
+            timer = setTimeout(reload, 400);
         });
     });
 </script>
