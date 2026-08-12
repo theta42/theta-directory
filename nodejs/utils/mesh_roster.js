@@ -46,6 +46,24 @@ async function roster() {
 	return sites.sort((a, b) => Number(a.siteId) - Number(b.siteId));
 }
 
+/**
+ * The roster row as a NON-admin may see it: identity and addressing for the
+ * mesh page, but not the WireGuard keys and dial endpoints that would turn the
+ * roster into a full network map (and that only gateways and admins need).
+ * Kept as an explicit projection on the model's row so a future added field
+ * cannot leak by default.
+ */
+function toPublicSafe(site) {
+	const data = site.toJSON ? site.toJSON() : { ...site };
+	const { gatewayPublicKey, gatewayEndpoint, gatewayExitPublicKey, ...rest } = data;
+	return {
+		...rest,
+		// Non-admins still get to see whether a site is on the wire, just not
+		// the key that proves it.
+		gatewayPublished: !!gatewayPublicKey
+	};
+}
+
 async function bySiteId(siteId) {
 	return (await MeshSite.list({ where: { siteId: Number(siteId) } }))[0] || null;
 }
@@ -248,5 +266,5 @@ async function setHub(siteId) {
 
 module.exports = {
 	localSiteId, roster, bySiteId, publishLocalSite, syncFromSpokes, hub, setHub,
-	pushSelfToMaster, adoptRoster
+	pushSelfToMaster, adoptRoster, toPublicSafe
 };
