@@ -1,6 +1,7 @@
 'use strict';
 
 const Table = require('.');
+const {withEvents} = require('../utils/model_events');
 const UUID = function b(a){return a?(a^Math.random()*16>>a/4).toString(16):([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,b)};
 
 class Notification extends Table {
@@ -21,5 +22,8 @@ class Notification extends Table {
 	};
 }
 Notification.register();
+// Announce writes on the standard contract; the Overview page's history
+// panel subscribes. The socket gate is owner-scoped (utils/socket_pubsub.js).
+withEvents(Notification, 'Notification');
 
 module.exports = { Notification };

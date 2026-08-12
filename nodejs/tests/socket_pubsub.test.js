@@ -291,3 +291,61 @@ describe('emitChannel delivery', () => {
 		expect(() => emitChannel(null, 'agent.telemetry', {})).not.toThrow();
 	});
 });
+
+describe('withEvents on model-redis Tables', () => {
+	const {withEvents, bind} = require('../utils/model_events');
+
+	function makeTable() {
+		class Fake {
+			static _key = 'id';
+			constructor(d) { Object.assign(this, d); }
+			static async create(d) { return new Fake(d); }
+			async update(d) { Object.assign(this, d); return this; }
+			async remove() { return true; }
+			// model-redis strips isPrivate fields here.
+			toJSON() { const o = {...this}; delete o.secret_hash; return o; }
+		}
+		return Fake;
+	}
+
+	test('create, update and delete each announce once, with the record pk', async () => {
+		const sent = [];
+		bind({publish: (t, d) => sent.push([t, d.pk])});
+		const T = withEvents(makeTable(), 'Thing');
+		const inst = await T.create({id: 'abc', name: 'x'});
+		await inst.update({name: 'y'});
+		await inst.remove();
+		bind(null);
+		expect(sent).toEqual([
+			['model:Thing:create', 'abc'],
+			['model:Thing:update', 'abc'],
+			['model:Thing:delete', 'abc'],
+		]);
+	});
+
+	test('a delete announces the pk it had before removal', async () => {
+		const sent = [];
+		bind({publish: (t, d) => sent.push(d)});
+		const T = withEvents(makeTable(), 'Thing');
+		const inst = await T.create({id: 'gone'});
+		sent.length = 0;
+		await inst.remove();
+		bind(null);
+		expect(sent[0].pk).toBe('gone');
+		expect(sent[0].data).toBeNull();
+	});
+
+	test('an isPrivate field never reaches the payload', async () => {
+		// ApiToken.secret_hash is isPrivate; model-redis drops it in toJSON and
+		// the emitter honours that. Checked on the serialized frame, since
+		// `'k' in obj` is true even for undefined values.
+		const sent = [];
+		bind({publish: (t, d) => sent.push(d)});
+		const T = withEvents(makeTable(), 'ApiToken');
+		await T.create({id: 't1', created_by: 'alice', secret_hash: '$2b$10$SUPERSECRETHASH'});
+		bind(null);
+		expect(JSON.stringify(sent[0])).not.toContain('SUPERSECRETHASH');
+		expect(sent[0].data.secret_hash).toBeUndefined();
+		expect(sent[0].data.created_by).toBe('alice');
+	});
+});

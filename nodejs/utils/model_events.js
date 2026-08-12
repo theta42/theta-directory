@@ -72,3 +72,54 @@ function emit(model, action, pk, record){
 }
 
 module.exports = {bind, emit};
+
+/**
+ * Make a model-redis Table announce its own writes.
+ *
+ * These models have no custom mutators — they inherit `create`, `update` and
+ * `remove` from the base class — so there is nothing to hand-edit. Wrapping the
+ * three is the whole job, and it keeps the announcement next to the write
+ * rather than scattered across the routes that happen to call it.
+ *
+ * Deliberately NOT a Proxy over the class. proxy's ModelPs takes that approach
+ * and it published the *class* name as the primary key for every model keyed on
+ * `name`, because a class always has a built-in `.name` — the kind of bug that
+ * only shows up as a duplicated row months later. Overriding three known
+ * methods reads plainly and cannot mistake a class for an instance.
+ *
+ *     class Notification extends Table { ... }
+ *     withEvents(Notification, 'Notification');
+ *
+ * @param {Function} Model - the class (must extend a model-redis Table)
+ * @param {string} [name]  - model name for topics; defaults to the class name
+ */
+function withEvents(Model, name){
+	const modelName = name || Model.name;
+	const key = Model._key;
+
+	const origCreate = Model.create;
+	Model.create = async function(...args){
+		const instance = await origCreate.apply(this, args);
+		emit(modelName, 'create', instance && instance[key], instance);
+		return instance;
+	};
+
+	const origUpdate = Model.prototype.update;
+	Model.prototype.update = async function(...args){
+		const result = await origUpdate.apply(this, args);
+		emit(modelName, 'update', this[key], result || this);
+		return result;
+	};
+
+	const origRemove = Model.prototype.remove;
+	Model.prototype.remove = async function(...args){
+		const pk = this[key];
+		const result = await origRemove.apply(this, args);
+		emit(modelName, 'delete', pk, null);
+		return result;
+	};
+
+	return Model;
+}
+
+module.exports.withEvents = withEvents;
