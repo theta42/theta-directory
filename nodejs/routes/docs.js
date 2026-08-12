@@ -44,6 +44,7 @@ const DOCS = {
 	groups:          {title: 'Groups & Permissions',   file: path.join(__dirname, '../../docs/groups.md')},
 	'site-join':     {title: 'Multi-Site: Joining a Spoke', file: path.join(__dirname, '../../docs/site-join.md')},
 	'ldif-import':   {title: 'Importing an Existing Directory', file: path.join(__dirname, '../../docs/ldif-import.md')},
+  'network':       {title: 'The Site Network', file: path.join(__dirname, '../../docs/network.md')},
 
 	overview:        {title: 'Overview',        file: path.join(__dirname, '../../README.md')},
 	changelog:       {title: 'Changelog',       file: path.join(__dirname, '../../CHANGELOG.md')},
