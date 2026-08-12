@@ -221,6 +221,27 @@
 		}
 		$('#personal-group-uid-label').text(currentUser.uid);
 
+		// Live updates. Group is LDAP-backed and now announces changes on the
+		// standard model-event contract, so being added to (or removed from) a
+		// group by an admin updates this profile without a refresh — the case
+		// where a stale page is most misleading, since it is showing someone
+		// their own access.
+		let profileTimer = null;
+		app.subscribe(/^model:Group:/, function(){
+			clearTimeout(profileTimer);
+			profileTimer = setTimeout(function(){
+				renderUserGroups(currentUser);
+				renderPersonalGroupMembers(currentUser);
+			}, 400);
+		});
+		// The gate is owner-scoped server-side, so a socket only ever receives
+		// its own User record here.
+		let selfTimer = null;
+		app.subscribe(/^model:User:/, function(){
+			clearTimeout(selfTimer);
+			selfTimer = setTimeout(function(){ renderProfile(currentUser); }, 400);
+		});
+
 		addGroupSelect = app.ui.groupSelect('#add-group-select', {
 			name: 'groups', values: [], placeholder: 'Type a group name…',
 		});

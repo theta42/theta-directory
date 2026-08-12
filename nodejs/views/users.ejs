@@ -229,6 +229,21 @@
 			renderUsers();
 			loadInviteGroups();
 			loadInvites();
+
+			// Live updates. User is LDAP-backed and Group is too; both now
+			// announce changes on the standard model-event contract (see
+			// utils/model_events.js), so a user added or a group edited by
+			// another admin shows up here without a refresh. Debounced, since
+			// one edit commonly writes the user and its group memberships.
+			let userTimer = null, groupTimer = null;
+			app.subscribe(/^model:User:/, function(){
+				clearTimeout(userTimer);
+				userTimer = setTimeout(function(){ renderUsers(); }, 400);
+			});
+			app.subscribe(/^model:Group:/, function(){
+				clearTimeout(groupTimer);
+				groupTimer = setTimeout(function(){ loadInviteGroups(); }, 400);
+			});
 			$('form[action="user/"]').attr('evalAJAX', 'renderUsers("User added", "success"); bootstrap.Modal.getInstance(document.getElementById("addUserModal"))?.hide();')
 		});
 	})();
