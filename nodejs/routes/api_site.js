@@ -52,6 +52,8 @@ function logAudit(action, details) {
 }
 
 const { nextFreeLdapServerId, ldapHostFor } = require('../utils/ldap_replication');
+const meshRoster = require('../utils/mesh_roster');
+const { MeshSite } = require('../models/mesh_site');
 
 // slurpLdif dumps the local LDAP tree with slapcat (the sso-manager container
 // carries an OpenLDAP build with slapcat on PATH).
@@ -78,7 +80,10 @@ router.post('/export', async (req, res, next) => {
     const key = await SiteJoinKey.authenticate(rawKey);
     if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
 
-    const [ldif, resources, edges, signingKey] = await Promise.all([
+    // meshSites: the cluster roster. Without it a spoke has no idea any other
+    // site exists, its gateway builds no peers, and the mesh silently only
+    // works at whichever site happens to be the master.
+    const [ldif, resources, edges, signingKey, meshSites] = await Promise.all([
       slurpLdif(),
       Resource.list(),
       ResourceEdge.list(),
@@ -87,7 +92,11 @@ router.post('/export', async (req, res, next) => {
       // the spoke keeps whatever key (if any) it already has. Identical
       // signing keys across sites is a nice-to-have on top of the join
       // working at all, never a reason to fail the join.
-      agentKeys.load().then((k) => k && { privateKeyPem: k.privateKeyPem, publicKeyPem: k.publicKeyPem }).catch(() => null)
+      agentKeys.load().then((k) => k && { privateKeyPem: k.privateKeyPem, publicKeyPem: k.publicKeyPem }).catch(() => null),
+      // Make sure sites that joined but whose gateway has not published yet
+      // still appear, so a new site is visible to the rest of the cluster
+      // before anyone starts its gateway.
+      meshRoster.syncFromSpokes().then(() => meshRoster.roster()).catch(() => [])
     ]);
 
     await key.update({ use_count: (key.use_count || 0) + 1, last_used_on: Math.floor(Date.now() / 1000) }).catch(() => {});
@@ -99,6 +108,7 @@ router.post('/export', async (req, res, next) => {
       ldif,
       resources: (resources || []).map(r => (r.toJSON ? r.toJSON() : r)),
       edges: (edges || []).map(e => (e.toJSON ? e.toJSON() : e)),
+      meshSites: (meshSites || []).map(m => (m.toJSON ? m.toJSON() : m)),
       ...(signingKey ? { signingKey } : {})
     });
   } catch (e) { next(e); }
@@ -131,7 +141,7 @@ router.post('/spokes', async (req, res, next) => {
     const key = await SiteJoinKey.authenticate(rawKey);
     if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
 
-    const { endpoint, siteSlug, noInbound, meshIp, publicHost } = req.body || {};
+    const { endpoint, siteSlug, noInbound, meshIp, publicHost, gatewayPublicKey, gatewayEndpoint } = req.body || {};
     if (!endpoint || !/^https?:\/\//.test(endpoint)) {
       return res.status(400).json({ status: 'error', message: 'a valid http(s) endpoint is required' });
     }
@@ -160,6 +170,34 @@ router.post('/spokes', async (req, res, next) => {
       });
     }, { label: `spoke registration: ${endpoint}` });
 
+    // Mirror the spoke's gateway identity into the roster.
+    //
+    // Replication only flows master -> spoke, so this is the ONLY path by
+    // which a spoke's WireGuard public key and endpoint reach the master --
+    // and therefore the only way any other site can ever build a peer for it.
+    // The spoke re-posts here whenever its gateway publishes
+    // (utils/mesh_roster.js pushSelfToMaster). Best-effort: a roster write
+    // must never fail a registration.
+    if (spoke.ldapServerId && gatewayPublicKey) {
+      try {
+        const existing = await meshRoster.bySiteId(spoke.ldapServerId);
+        const patch = {
+          slug: spoke.siteSlug || '',
+          gatewayPublicKey,
+          gatewayEndpoint: gatewayEndpoint || '',
+          publishedAt: now,
+          lastSeenAt: now
+        };
+        if (existing) await existing.update(patch);
+        else await MeshSite.create({ id: crypto.randomUUID(), siteId: spoke.ldapServerId, name: spoke.siteSlug || '', ...patch });
+        // Every other site needs this too, so push it out rather than waiting
+        // for the next unrelated catalog change.
+        require('../utils/site_replicate').replicateToSpokes('mesh-roster-changed');
+      } catch (e) {
+        console.warn(`[site] could not record spoke ${spoke.ldapServerId}'s gateway details: ${e.message}`);
+      }
+    }
+
     // No-inbound relay automation: best-effort, never blocks registration.
     // See utils/proxy_client.js for why this reuses theta-proxy's existing
     // API token system rather than a new credential type.
@@ -167,11 +205,11 @@ router.post('/spokes', async (req, res, next) => {
     if (noInbound) {
       if (meshIp && publicHost) {
         const proxyClient = require('../utils/proxy_client');
-        // The relay target is this site's OWN gateway forwarding port, not
-        // the spoke's mesh IP: theta-proxy sits on the docker bridge and has
-        // no route into the mesh subnet, which lives inside the peer
-        // gateway's namespace (utils/mesh_route.js). Pointing it at the mesh
-        // IP produced a route that could never carry a byte.
+        // The relay points at the spoke's DIRECTORY over the routed mesh
+        // (10.<siteId>.0.2), not at its gateway address -- the gateway is an
+        // identifier for the site, not a service. theta-proxy needs a route
+        // for 10.0.0.0/8 via the local gateway for this to carry traffic;
+        // see docs/mesh.md.
         const target = meshServiceTarget(meshIp);
         if (target) {
           const result = await proxyClient.ensureRelayRoute({
@@ -179,7 +217,7 @@ router.post('/spokes', async (req, res, next) => {
           });
           relayNote = result.note;
         } else {
-          relayNote = `skipped: cannot derive a mesh route for ${meshIp} (JUMP_INTERNAL_URL unset, or not a mesh address)`;
+          relayNote = `skipped: ${meshIp} is not a mesh address`;
         }
       } else {
         relayNote = 'skipped: noInbound set but meshIp/publicHost missing';
@@ -719,6 +757,19 @@ async function adoptFromMaster({ masterUrl, joinKey }) {
 
   // 1. Adopt the resource catalog.
   const imp = await importDirectory({ Resource, ResourceEdge, exportData });
+
+  // 1b. Adopt the cluster roster, so this site's gateway knows the others
+  //     exist. Best-effort: a missing or malformed roster must not fail a
+  //     join that is otherwise fine -- the site simply has no peers until the
+  //     next resync carries them.
+  let rosterNote = 'no roster in export';
+  try {
+    const { adopted } = await meshRoster.adoptRoster(exportData.meshSites);
+    rosterNote = `${adopted} site(s) adopted`;
+  } catch (e) {
+    rosterNote = `failed: ${e.message}`;
+    console.warn(`[site] could not adopt the cluster roster: ${e.message}`);
+  }
 
   // 2. Adopt the LDAP tree. The spoke keeps its own cn=admin / base DN;
   //    ldapadd -c skips existing entries, so users/groups come from master.

@@ -1,0 +1,463 @@
+<%- include('top') %>
+<script type="text/javascript">app.auth.forceLogin();</script>
+
+<div class="container mt-4 mb-5">
+	<div class="d-flex align-items-center justify-content-between mb-4">
+		<div>
+			<h3 class="mb-1"><i class="fa-solid fa-diagram-project text-primary me-2"></i>Network</h3>
+			<p class="text-muted small mb-0">
+				Sites, devices and internet exits for the whole cluster. Each site's gateway
+				reads this and configures itself — joining this directory is joining the mesh.
+			</p>
+		</div>
+	</div>
+
+	<div id="mesh-alerts"></div>
+
+	<ul class="nav nav-tabs mb-3" role="tablist">
+		<li class="nav-item"><button class="nav-link active" data-bs-toggle="tab" data-bs-target="#tab-sites" type="button">Sites</button></li>
+		<li class="nav-item"><button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-devices" type="button">My Devices</button></li>
+		<li class="nav-item group-required group-required-app_sso_admin group-required-admin">
+			<button class="nav-link" data-bs-toggle="tab" data-bs-target="#tab-exits" type="button">Exit Access</button>
+		</li>
+	</ul>
+
+	<div class="tab-content">
+		<div class="tab-pane fade show active" id="tab-sites">
+			<div class="card shadow-sm">
+				<div class="card-header d-flex justify-content-between align-items-center">
+					<span><i class="fa-solid fa-network-wired me-2"></i>Sites</span>
+					<span class="small text-muted" id="mesh-addressing-note"></span>
+				</div>
+				<div class="card-body p-0" id="mesh-sites-wrap"><div class="text-center py-4 text-muted">Loading...</div></div>
+			</div>
+		</div>
+
+		<div class="tab-pane fade" id="tab-devices">
+			<div class="card shadow-sm">
+				<div class="card-header d-flex justify-content-between align-items-center">
+					<span><i class="fa-solid fa-laptop me-2"></i>My Devices</span>
+					<button class="btn btn-sm btn-success" onclick="openEnrollModal()"><i class="fa-solid fa-plus me-1"></i> Add a device</button>
+				</div>
+				<div class="card-body p-0" id="mesh-devices-wrap"><div class="text-center py-4 text-muted">Loading...</div></div>
+			</div>
+		</div>
+
+		<div class="tab-pane fade" id="tab-exits">
+			<div class="card shadow-sm">
+				<div class="card-header"><i class="fa-solid fa-globe me-2"></i>Who may use which exit</div>
+				<div class="card-body">
+					<p class="small text-muted">
+						A site marked <em>offers an exit</em> is only saying it is willing to carry traffic.
+						Granting it to a user is a separate, explicit decision.
+					</p>
+					<div class="row g-2 align-items-end mb-3">
+						<div class="col-md-4">
+							<label class="form-label small fw-semibold">User</label>
+							<input type="text" class="form-control form-control-sm" id="grant-uid" placeholder="uid">
+						</div>
+						<div class="col-md-4">
+							<label class="form-label small fw-semibold">Exit site</label>
+							<select class="form-select form-select-sm" id="grant-site"></select>
+						</div>
+						<div class="col-md-4">
+							<button class="btn btn-sm btn-primary" onclick="addGrant()"><i class="fa-solid fa-plus me-1"></i> Grant</button>
+						</div>
+					</div>
+					<div id="mesh-grants-wrap"><div class="text-muted small">Loading...</div></div>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- Site settings -->
+<div class="modal fade" id="siteModal" tabindex="-1">
+	<div class="modal-dialog modal-lg">
+		<div class="modal-content">
+			<div class="modal-header"><h5 class="modal-title" id="siteModalTitle">Site</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+			<div class="modal-body">
+				<input type="hidden" id="site-id">
+				<div class="row g-3">
+					<div class="col-md-6">
+						<label class="form-label small fw-semibold">Name</label>
+						<input type="text" class="form-control form-control-sm" id="site-name">
+					</div>
+					<div class="col-md-6">
+						<label class="form-label small fw-semibold">Slug</label>
+						<input type="text" class="form-control form-control-sm" id="site-slug">
+					</div>
+					<div class="col-12"><hr class="my-1"><div class="small fw-semibold text-muted">LOCAL NETWORKS</div></div>
+					<div class="col-md-6">
+						<label class="form-label small fw-semibold">LAN mapped to <code>.168</code></label>
+						<input type="text" class="form-control form-control-sm font-monospace" id="site-lan168" placeholder="192.168.1.0/24">
+					</div>
+					<div class="col-md-6">
+						<label class="form-label small fw-semibold">LAN mapped to <code>.172</code></label>
+						<input type="text" class="form-control form-control-sm font-monospace" id="site-lan172" placeholder="172.16.0.0/24">
+					</div>
+					<div class="col-12">
+						<div class="small text-muted">
+							Every site's LAN is likely <code>192.168.1.0/24</code>, so each is mapped 1:1 into its own
+							range. With the mapping above, <span class="font-monospace" id="site-shadow-example">10.x.168.53</span>
+							is the machine at <span class="font-monospace" id="site-physical-example">192.168.1.53</span> here.
+						</div>
+					</div>
+					<div class="col-md-6">
+						<label class="form-label small fw-semibold">DNS server (an address on a LAN above)</label>
+						<input type="text" class="form-control form-control-sm font-monospace" id="site-dns" placeholder="192.168.1.1">
+						<div class="form-text small" id="site-dns-note">
+							Pushed to devices translated into its mapped address, so it resolves from anywhere —
+							the real LAN address only works while physically on that network.
+						</div>
+					</div>
+					<div class="col-12"><hr class="my-1"><div class="small fw-semibold text-muted">INTERNET EXIT</div></div>
+					<div class="col-md-4">
+						<div class="form-check form-switch mt-2">
+							<input class="form-check-input" type="checkbox" id="site-exit-open">
+							<label class="form-check-label small" for="site-exit-open">Offers an exit</label>
+						</div>
+					</div>
+					<div class="col-md-4">
+						<label class="form-label small fw-semibold">Country</label>
+						<input type="text" class="form-control form-control-sm" id="site-country" placeholder="NL" maxlength="2">
+					</div>
+					<div class="col-md-4">
+						<label class="form-label small fw-semibold">City</label>
+						<input type="text" class="form-control form-control-sm" id="site-city" placeholder="Amsterdam">
+					</div>
+				</div>
+			</div>
+			<div class="modal-footer">
+				<button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+				<button class="btn btn-sm btn-primary" onclick="saveSite()">Save</button>
+			</div>
+		</div>
+	</div>
+</div>
+
+<!-- Enrol a device -->
+<div class="modal fade" id="enrollModal" tabindex="-1">
+	<div class="modal-dialog">
+		<div class="modal-content">
+			<div class="modal-header"><h5 class="modal-title">Add a device</h5>
+				<button type="button" class="btn-close" data-bs-dismiss="modal"></button></div>
+			<div class="modal-body" id="enroll-body">
+				<div class="mb-3">
+					<label class="form-label small fw-semibold">Device name</label>
+					<input type="text" class="form-control form-control-sm" id="enroll-name" placeholder="work laptop">
+				</div>
+				<div class="mb-3">
+					<label class="form-label small fw-semibold">Public key <span class="text-muted fw-normal">(optional)</span></label>
+					<input type="text" class="form-control form-control-sm font-monospace" id="enroll-pubkey" placeholder="leave blank to have one generated">
+					<div class="form-text small">
+						Paste a key generated on the device and its private half never leaves it.
+						Leave blank and one is generated here, shown once, and forgotten.
+					</div>
+				</div>
+			</div>
+			<div class="modal-footer" id="enroll-footer">
+				<button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+				<button class="btn btn-sm btn-primary" onclick="enrollDevice()">Add</button>
+			</div>
+		</div>
+	</div>
+</div>
+
+<%- include('bottom') %>
+<script type="text/javascript">
+var meshState = { sites: [], devices: [], allowedExits: [], isAdmin: false, localSiteId: null };
+
+function esc(s) {
+	return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+$(document).ready(function(){
+	app.api.get('user/me', function(err, me){
+		meshState.isAdmin = !!(me && (me.isAdmin || (me.groups || []).indexOf('app_sso_admin') >= 0));
+		loadAll();
+	});
+	$('#site-lan168, #site-dns').on('input', updateShadowExample);
+});
+
+function loadAll() { loadSites(); loadDevices(); if (meshState.isAdmin) loadGrants(); }
+
+function loadSites() {
+	app.api.get('mesh/roster', function(err, data){
+		if (err || !data) {
+			$('#mesh-sites-wrap').html('<div class="text-center py-4 text-danger">Could not load sites: ' + esc((err && err.message) || 'unknown') + '</div>');
+			return;
+		}
+		meshState.sites = data.sites || [];
+		meshState.localSiteId = data.localSiteId;
+		$('#mesh-addressing-note').text('site ids 1–' + data.addressing.maxSiteId + ', ' + meshState.sites.length + ' in use');
+		renderSites(data);
+		renderGrantSiteOptions();
+	});
+}
+
+function renderSites(data) {
+	if (!meshState.sites.length) {
+		$('#mesh-sites-wrap').html('<div class="text-center py-4 text-muted">No sites yet.</div>');
+		return;
+	}
+	var rows = meshState.sites.map(function(s){
+		var isLocal = Number(s.siteId) === Number(data.localSiteId);
+		// A site with no published key has joined the directory but its gateway
+		// has never started -- it is in the roster and not yet on the wire.
+		var published = !!s.gatewayPublicKey;
+		return '<tr' + (isLocal ? ' class="table-active"' : '') + '>'
+			+ '<td><span class="badge bg-primary">' + esc(s.siteId) + '</span></td>'
+			+ '<td>' + esc(s.name || s.slug || '—') + (isLocal ? ' <span class="badge text-bg-light text-dark ms-1">this site</span>' : '') + '</td>'
+			+ '<td>' + (s.isHub
+				? '<span class="badge text-bg-info">hub</span>'
+				: (meshState.isAdmin ? '<button class="btn btn-sm btn-outline-secondary py-0" onclick="setHub(' + s.siteId + ')">make hub</button>' : '')) + '</td>'
+			+ '<td><code class="small">172.24.0.' + esc(s.siteId) + '</code><br><code class="small text-muted">10.' + esc(s.siteId) + '.0.0/16</code></td>'
+			+ '<td>' + (published
+				? '<span class="badge text-bg-success">on the wire</span>'
+				: '<span class="badge text-bg-warning" title="This site has joined but its gateway has not published a key yet">not started</span>') + '</td>'
+			+ '<td>' + (s.exitOpen
+				? '<span class="badge text-bg-success">' + esc([s.city, s.country].filter(Boolean).join(', ') || 'yes') + '</span>'
+				: '<span class="text-muted small">no</span>') + '</td>'
+			+ '<td><code class="small">' + esc(s.lan168 || '—') + '</code></td>'
+			+ '<td class="text-end">' + (meshState.isAdmin
+				? '<button class="btn btn-sm btn-outline-primary" onclick="openSiteModal(' + s.siteId + ')"><i class="fa-solid fa-pen"></i></button>' : '') + '</td>'
+			+ '</tr>';
+	}).join('');
+	$('#mesh-sites-wrap').html('<div class="table-responsive"><table class="table table-striped mb-0 align-middle">'
+		+ '<thead><tr><th>ID</th><th>Site</th><th>Role</th><th>Addresses</th><th>Gateway</th><th>Exit</th><th>LAN</th><th></th></tr></thead>'
+		+ '<tbody>' + rows + '</tbody></table></div>');
+}
+
+function siteById(id) {
+	return meshState.sites.filter(function(s){ return Number(s.siteId) === Number(id); })[0];
+}
+
+function openSiteModal(siteId) {
+	var s = siteById(siteId); if (!s) return;
+	$('#site-id').val(s.siteId);
+	$('#siteModalTitle').text('Site ' + s.siteId + ' — ' + (s.name || s.slug || ''));
+	$('#site-name').val(s.name || ''); $('#site-slug').val(s.slug || '');
+	$('#site-lan168').val(s.lan168 || ''); $('#site-lan172').val(s.lan172 || '');
+	$('#site-dns').val(s.dnsHost || ''); $('#site-exit-open').prop('checked', !!s.exitOpen);
+	$('#site-country').val(s.country || ''); $('#site-city').val(s.city || '');
+	updateShadowExample();
+	new bootstrap.Modal(document.getElementById('siteModal')).show();
+}
+
+// Show the operator the actual translation rather than making them work it out
+// from the addressing scheme.
+function updateShadowExample() {
+	var siteId = $('#site-id').val() || 'x';
+	var lan = ($('#site-lan168').val() || '192.168.1.0/24').split('/')[0].split('.');
+	var host = lan.length === 4 ? lan.slice(0, 3).join('.') + '.53' : '192.168.1.53';
+	$('#site-shadow-example').text('10.' + siteId + '.168.53');
+	$('#site-physical-example').text(host);
+
+	var dns = ($('#site-dns').val() || '').trim();
+	if (!dns) { $('#site-dns-note').removeClass('text-danger'); return; }
+	var parts = dns.split('.');
+	var matches168 = matchesLan(dns, $('#site-lan168').val());
+	var matches172 = matchesLan(dns, $('#site-lan172').val());
+	if (!matches168 && !matches172) {
+		$('#site-dns-note').addClass('text-danger').text(
+			'This address is not inside either LAN above, so it cannot be mapped and devices will get no DNS server.');
+	} else {
+		var slot = matches168 ? '168' : '172';
+		$('#site-dns-note').removeClass('text-danger').text(
+			'Devices will be told to use 10.' + siteId + '.' + slot + '.' + parts[3] + ', which resolves from anywhere in the mesh.');
+	}
+}
+
+function matchesLan(host, cidr) {
+	if (!cidr) return false;
+	var base = String(cidr).split('/')[0].split('.');
+	var h = String(host).split('.');
+	if (base.length !== 4 || h.length !== 4) return false;
+	return base[0] === h[0] && base[1] === h[1] && base[2] === h[2];
+}
+
+function saveSite() {
+	var siteId = $('#site-id').val();
+	app.api.put('mesh/sites/' + siteId, {
+		name: $('#site-name').val(), slug: $('#site-slug').val(),
+		lan168: $('#site-lan168').val(), lan172: $('#site-lan172').val(),
+		dnsHost: $('#site-dns').val(), exitOpen: $('#site-exit-open').is(':checked'),
+		country: $('#site-country').val(), city: $('#site-city').val()
+	}, function(err){
+		if (err) return app.messages.toast('Could not save: ' + err.message, 'danger');
+		bootstrap.Modal.getInstance(document.getElementById('siteModal')).hide();
+		app.messages.toast('Saved — the site gateway will pick this up on its next pass', 'success');
+		loadSites();
+	});
+}
+
+function setHub(siteId) {
+	app.api.put('mesh/hub/' + siteId, {}, function(err){
+		if (err) return app.messages.toast('Could not set the hub: ' + err.message, 'danger');
+		app.messages.toast('Hub set — it now carries traffic between sites that are not directly peered', 'success');
+		loadSites();
+	});
+}
+
+// ── devices ────────────────────────────────────────────────────────────────
+
+function loadDevices() {
+	app.api.get('mesh/clients', function(err, data){
+		if (err || !data) {
+			$('#mesh-devices-wrap').html('<div class="text-center py-4 text-danger">Could not load devices: ' + esc((err && err.message) || 'unknown') + '</div>');
+			return;
+		}
+		meshState.devices = data.clients || [];
+		meshState.allowedExits = data.allowedExits || [];
+		renderDevices();
+	});
+}
+
+function renderDevices() {
+	if (!meshState.devices.length) {
+		$('#mesh-devices-wrap').html('<div class="text-center py-4 text-muted">No devices yet.'
+			+ '<br><small>Add one to reach every site from a laptop or phone.</small></div>');
+		return;
+	}
+	var rows = meshState.devices.map(function(c){
+		return '<tr>'
+			+ '<td>' + esc(c.name) + '</td>'
+			+ '<td><code class="small">' + esc(c.assignedIp) + '</code></td>'
+			+ '<td>' + esc((siteById(c.siteId) || {}).name || ('site ' + c.siteId)) + '</td>'
+			+ '<td>' + exitSelect(c) + '</td>'
+			+ '<td class="text-end">'
+			// Only devices running theta-agent can be reconfigured remotely; a
+			// phone has no agent and never will.
+			+ (c.agentId ? '<button class="btn btn-sm btn-outline-secondary me-1" title="Push this configuration to the machine" onclick="pushDevice(\'' + esc(c.id) + '\')"><i class="fa-solid fa-download"></i></button>' : '')
+			+ '<button class="btn btn-sm btn-outline-danger" onclick="removeDevice(\'' + esc(c.id) + '\', \'' + esc(c.name) + '\')"><i class="fa-solid fa-trash"></i></button></td>'
+			+ '</tr>';
+	}).join('');
+	$('#mesh-devices-wrap').html('<div class="table-responsive"><table class="table table-striped mb-0 align-middle">'
+		+ '<thead><tr><th>Device</th><th>Address</th><th>Home site</th><th>Internet exit</th><th></th></tr></thead>'
+		+ '<tbody>' + rows + '</tbody></table>'
+		+ '<div class="p-3 small text-muted border-top">Changing an exit takes effect on the gateway without reconfiguring the device — '
+		+ 'no reconnect and no new config.</div></div>');
+}
+
+function exitSelect(c) {
+	// Only exits this user was actually granted, plus whatever is already set.
+	var options = ['<option value="">Local breakout</option>'];
+	meshState.sites.forEach(function(s){
+		if (!s.exitOpen) return;
+		var allowed = meshState.allowedExits.indexOf(Number(s.siteId)) >= 0 || meshState.isAdmin;
+		if (!allowed && Number(c.exitSiteId) !== Number(s.siteId)) return;
+		var label = (s.city || s.name || s.slug || ('site ' + s.siteId));
+		if (s.country) label += ' (' + s.country + ')';
+		options.push('<option value="' + esc(s.siteId) + '"' + (Number(c.exitSiteId) === Number(s.siteId) ? ' selected' : '') + '>' + esc(label) + '</option>');
+	});
+	if (options.length === 1) return '<span class="text-muted small">No exits available to you</span>';
+	return '<select class="form-select form-select-sm" onchange="setExit(\'' + esc(c.id) + '\', this.value)">' + options.join('') + '</select>';
+}
+
+function setExit(id, value) {
+	app.api.put('mesh/clients/' + id + '/exit', { exitSiteId: value === '' ? null : Number(value) }, function(err){
+		if (err) return app.messages.toast('Could not change the exit: ' + err.message, 'danger');
+		app.messages.toast(value === '' ? 'Now breaking out locally' : 'Exit changed', 'success');
+		loadDevices();
+	});
+}
+
+function openEnrollModal() {
+	$('#enroll-name').val(''); $('#enroll-pubkey').val('');
+	$('#enroll-body').find('.mb-3').show();
+	$('#enroll-footer').html('<button class="btn btn-sm btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>'
+		+ '<button class="btn btn-sm btn-primary" onclick="enrollDevice()">Add</button>');
+	new bootstrap.Modal(document.getElementById('enrollModal')).show();
+}
+
+function enrollDevice() {
+	var name = ($('#enroll-name').val() || '').trim();
+	if (!name) return app.messages.toast('Give the device a name', 'warning');
+	app.api.post('mesh/clients', { name: name, publicKey: ($('#enroll-pubkey').val() || '').trim() }, function(err, data){
+		if (err) return app.messages.toast('Could not add the device: ' + err.message, 'danger');
+		showEnrollResult(data);
+		loadDevices();
+	});
+}
+
+// The config is shown ONCE. If a private key was generated here it exists in
+// this response and nowhere else -- it was never written down.
+function showEnrollResult(data) {
+	var warning = data.privateKeyIssued
+		? '<div class="alert alert-warning small py-2 mb-2"><strong>Shown once.</strong> This config contains a private key that was '
+			+ 'not saved anywhere. Copy it now — it cannot be shown again.</div>'
+		: '<div class="alert alert-info small py-2 mb-2">Your device keeps its own private key. Fill it into the config below.</div>';
+	$('#enroll-body').html(warning
+		+ '<label class="form-label small fw-semibold">WireGuard configuration</label>'
+		+ '<textarea class="form-control form-control-sm font-monospace" rows="12" readonly onclick="this.select()">' + esc(data.conf) + '</textarea>'
+		+ '<div class="form-text small mt-2">Address <code>' + esc(data.client.assignedIp) + '</code>. '
+		+ 'Devices running theta-agent are configured automatically and do not need this.</div>');
+	$('#enroll-footer').html('<button class="btn btn-sm btn-primary" data-bs-dismiss="modal">Done</button>');
+}
+
+function pushDevice(id) {
+	app.api.post('mesh/clients/' + id + '/push', {}, function(err){
+		if (err) return app.messages.toast('Could not push: ' + err.message, 'danger');
+		app.messages.toast('Configuration sent to the device', 'success');
+	});
+}
+
+async function removeDevice(id, name) {
+	var ok = await app.messages.confirm('Remove "' + name + '"? It will lose access immediately and its address returns to the pool.', $('#mesh-devices-wrap'), 'danger');
+	if (!ok) return;
+	app.api.delete('mesh/clients/' + id, function(err){
+		if (err) return app.messages.toast('Could not remove: ' + err.message, 'danger');
+		app.messages.toast('Device removed', 'success');
+		loadDevices();
+	});
+}
+
+// ── exit grants (admin) ────────────────────────────────────────────────────
+
+function renderGrantSiteOptions() {
+	var opts = meshState.sites.filter(function(s){ return s.exitOpen; }).map(function(s){
+		return '<option value="' + esc(s.siteId) + '">' + esc((s.city || s.name || s.slug || ('site ' + s.siteId))) + (s.country ? ' (' + esc(s.country) + ')' : '') + '</option>';
+	});
+	$('#grant-site').html(opts.length ? opts.join('') : '<option value="">No site offers an exit yet</option>');
+}
+
+function loadGrants() {
+	app.api.get('mesh/exit-grants', function(err, data){
+		if (err || !data) { $('#mesh-grants-wrap').html('<div class="text-danger small">Could not load grants.</div>'); return; }
+		var grants = data.grants || [];
+		if (!grants.length) { $('#mesh-grants-wrap').html('<div class="text-muted small">No exit access granted yet.</div>'); return; }
+		var rows = grants.map(function(g){
+			var s = siteById(g.siteId) || {};
+			return '<tr><td>' + esc(g.uid) + '</td>'
+				+ '<td>' + esc(s.name || s.slug || ('site ' + g.siteId)) + ' <span class="badge bg-primary ms-1">' + esc(g.siteId) + '</span></td>'
+				+ '<td class="text-end"><button class="btn btn-sm btn-outline-danger" onclick="revokeGrant(\'' + esc(g.uid) + '\', ' + esc(g.siteId) + ')"><i class="fa-solid fa-trash"></i></button></td></tr>';
+		}).join('');
+		$('#mesh-grants-wrap').html('<div class="table-responsive"><table class="table table-sm table-striped mb-0 align-middle">'
+			+ '<thead><tr><th>User</th><th>May exit through</th><th></th></tr></thead><tbody>' + rows + '</tbody></table></div>');
+	});
+}
+
+function addGrant() {
+	var uid = ($('#grant-uid').val() || '').trim();
+	var siteId = $('#grant-site').val();
+	if (!uid || !siteId) return app.messages.toast('Pick a user and an exit site', 'warning');
+	app.api.post('mesh/exit-grants', { uid: uid, siteId: Number(siteId) }, function(err){
+		if (err) return app.messages.toast('Could not grant: ' + err.message, 'danger');
+		$('#grant-uid').val('');
+		app.messages.toast('Granted', 'success');
+		loadGrants();
+	});
+}
+
+async function revokeGrant(uid, siteId) {
+	var ok = await app.messages.confirm('Revoke ' + uid + '\'s access to site ' + siteId + '? Any device using it falls back to local breakout.', $('#mesh-grants-wrap'), 'danger');
+	if (!ok) return;
+	app.api.delete('mesh/exit-grants/' + encodeURIComponent(uid) + '/' + siteId, function(err){
+		if (err) return app.messages.toast('Could not revoke: ' + err.message, 'danger');
+		app.messages.toast('Revoked', 'success');
+		loadGrants();
+	});
+}
+</script>
