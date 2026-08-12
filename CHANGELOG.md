@@ -1,3 +1,41 @@
+## v2.13.0
+
+### Security
+- **`PUT /api/mesh/self` is admin-gated.** It writes this site's WireGuard
+  identity, exit posture and LAN/DNS mapping — previously any authenticated
+  user could clobber the gateway public key (breaking every tunnel to this
+  site cluster-wide), flip `exitOpen`, or remap DNS/LAN. The legitimate
+  gateway authenticates with a PAT minted as the directory admin
+  (bootstrap's `provisionJumpHost`), so `requireAdmin` lets it through while
+  keeping everyone else out.
+- **`GET /api/mesh/peers` and `/api/mesh/site-clients` are admin-gated.** Both
+  expose the full network map (every site's keys/endpoints/AllowedIPs and the
+  whole device registry with public keys + assigned IPs) and exist for the
+  gateway to consume; a low-privilege user had no need of them.
+- **`GET /api/mesh/roster` scrubs WireGuard keys/endpoints for non-admins.**
+  The mesh page still shows site name, role, addresses and exit metadata, but
+  no longer hands a regular user every site's dial endpoints (full network
+  enumeration). Non-admins get a `gatewayPublished` boolean in place of the
+  key; admins get the complete row.
+
+### Fixed
+- **The Multi-Site modal's gateway-mesh count no longer 404s.** It called
+  `GET /api/mesh/gateways`, an endpoint that died with the mesh-v2 rewrite —
+  the modal always reported "failed: HTTP 404". The count is now computed
+  locally from the `MeshSite` roster (the directory IS the registry in v2),
+  counting sites that have published a gateway key. `utils/jump_client.js`
+  no longer needs a jump-host API token at all.
+- **The LDIF import confirm is no longer a native `confirm()`.** `runImport`
+  used the blocking browser `confirm()`; it now uses the app's promise-based
+  `app.messages.confirm(...)` modal like every other destructive action.
+
+### Other
+- **Synced the served `theta-agent/install.sh`** (`nodejs/public/resources/
+  theta-agent/install.sh`) with theta-agent v2.5.0: it now merges freshly
+  supplied `--url`/`--token`/`--join-key`/`--public-key` into an existing
+  `agent.yml` instead of dropping them, and picks the right Linux tray
+  binary by arch.
+
 ## v2.12.0
 
 The directory is now where the WireGuard cluster is configured. Sites, devices,

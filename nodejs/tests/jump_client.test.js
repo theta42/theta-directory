@@ -1,80 +1,49 @@
 'use strict';
 
-let mockBaoStore = new Map();
-jest.mock('@simpleworkjs/bao-conf', () => ({
-  get: jest.fn(async (path) => mockBaoStore.get(path) || null),
-  set: jest.fn(async (path, value) => { mockBaoStore.set(path, value); })
+// jump_client now computes the gateway count locally from the MeshSite table
+// (the roster lives in the directory in mesh v2), so the tests mock that table
+// rather than the deleted /api/mesh/gateways HTTP endpoint.
+
+const mockRows = { sites: [] };
+jest.mock('../models/mesh_site', () => ({
+  MeshSite: { list: async () => mockRows.sites }
 }));
 
 describe('jump_client', () => {
   let jumpClient;
-  let originalFetch;
-  let mockFetchImpl;
-  let calls;
 
   beforeEach(() => {
     jest.resetModules();
-    mockBaoStore = new Map();
-    calls = [];
-    mockFetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ status: 'ok', gateways: [] }) });
-    originalFetch = global.fetch;
-    global.fetch = (...args) => { calls.push(args); return mockFetchImpl(...args); };
+    mockRows.sites = [];
     jumpClient = require('../utils/jump_client');
-    jumpClient._reset();
-    delete process.env.JUMP_INTERNAL_URL;
   });
 
-  afterEach(() => {
-    global.fetch = originalFetch;
-  });
-
-  test('reports null count (not zero) when JUMP_INTERNAL_URL is not configured', async () => {
-    const result = await jumpClient.getGatewayCount();
-    expect(result.count).toBeNull();
-    expect(result.note).toMatch(/JUMP_INTERNAL_URL/);
-    expect(calls.length).toBe(0);
-  });
-
-  test('reports null count when no token is stored in OpenBao', async () => {
-    process.env.JUMP_INTERNAL_URL = 'http://jump-host.internal';
-    const result = await jumpClient.getGatewayCount();
-    expect(result.count).toBeNull();
-    expect(result.note).toMatch(/no jump-host API token/);
-    expect(calls.length).toBe(0);
-  });
-
-  test('returns the real gateway count on success', async () => {
-    process.env.JUMP_INTERNAL_URL = 'http://jump-host.internal';
-    mockBaoStore.set('integrations/theta-jump', { token: 'jmp_test_token' });
-    mockFetchImpl = async () => ({
-      ok: true, status: 200,
-      json: async () => ({ status: 'ok', gateways: [{ siteSlug: '(self)' }, { siteSlug: 'site-b' }] })
-    });
-
+  test('counts only sites that have published a gateway public key', async () => {
+    mockRows.sites = [
+      { siteId: 1, slug: 'hq', gatewayPublicKey: 'pub-1' },
+      { siteId: 2, slug: 'branch', gatewayPublicKey: '' },
+      { siteId: 3, slug: 'branch2', gatewayPublicKey: 'pub-3' }
+    ];
     const result = await jumpClient.getGatewayCount();
     expect(result.count).toBe(2);
     expect(result.note).toBe('ok');
-    expect(calls[0][0]).toBe('http://jump-host.internal/api/mesh/gateways');
-    expect(calls[0][1].headers.Authorization).toBe('Bearer jmp_test_token');
   });
 
-  test('reports null count on a non-2xx response', async () => {
-    process.env.JUMP_INTERNAL_URL = 'http://jump-host.internal';
-    mockBaoStore.set('integrations/theta-jump', { token: 'jmp_test_token' });
-    mockFetchImpl = async () => ({ ok: false, status: 403 });
-
+  test('reports zero gateways when none have published', async () => {
+    mockRows.sites = [
+      { siteId: 1, slug: 'hq', gatewayPublicKey: '' },
+      { siteId: 2, slug: 'branch', gatewayPublicKey: '' }
+    ];
     const result = await jumpClient.getGatewayCount();
-    expect(result.count).toBeNull();
-    expect(result.note).toMatch(/HTTP 403/);
+    expect(result.count).toBe(0);
+    expect(result.note).toBe('ok');
   });
 
-  test('reports a network failure without throwing', async () => {
-    process.env.JUMP_INTERNAL_URL = 'http://jump-host.internal';
-    mockBaoStore.set('integrations/theta-jump', { token: 'jmp_test_token' });
-    mockFetchImpl = async () => { throw new Error('connection refused'); };
-
+  test('reports null count (not zero) when the table query fails', async () => {
+    const { MeshSite } = require('../models/mesh_site');
+    MeshSite.list = async () => { throw new Error('table gone'); };
     const result = await jumpClient.getGatewayCount();
     expect(result.count).toBeNull();
-    expect(result.note).toMatch(/failed: connection refused/);
+    expect(result.note).toMatch(/failed: table gone/);
   });
 });

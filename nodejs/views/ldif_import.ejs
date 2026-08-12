@@ -303,7 +303,8 @@
 	}
 
 	async function runImport(){
-		if(!confirm('Import these accounts now? Accounts are created as the import runs and are not rolled back if it fails partway.')) return;
+		const ok = await app.messages.confirm('Import these accounts now? Accounts are created as the import runs and are not rolled back if it fails partway.', null, 'warning');
+		if(!ok) return;
 
 		const button = document.getElementById('applyBtn');
 		button.disabled = true;
