@@ -27,7 +27,7 @@
     "@simpleworkjs/bao-conf": "^1.0.1",
     "@simpleworkjs/conf": "^1.2.0",
     "@simpleworkjs/directory-schema": "^1.1.0",
-    "@simpleworkjs/frontend": "^0.3.0",
+    "@simpleworkjs/frontend": "^0.4.0",
     "@simpleworkjs/ldap": "^1.0.0",
     "@simpleworkjs/orm": "^0.2.8",
     "bcrypt": "^6.0.0",

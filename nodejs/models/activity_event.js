@@ -59,11 +59,19 @@ const ACTOR_FIELDS = ['updated_by', 'created_by', 'actor', 'uid'];
 // ...and the owner.
 const OWNER_FIELDS = ['created_by', 'uid', 'username', 'owner', 'requestedBy'];
 
+// Placeholders these apps write when a field has no real value yet — a record
+// created but never updated carries updated_by: '__NONE__'. Treating them as
+// absent lets the lookup fall through to created_by rather than reporting
+// "__NONE__ added a host".
+const PLACEHOLDERS = new Set(['__NONE__', 'undefined', 'null']);
+
 function pick(record, fields){
 	if (!record || typeof record !== 'object') return '';
 	for (const field of fields) {
 		const value = record[field];
-		if (value !== undefined && value !== null && value !== '') return String(value);
+		if (value === undefined || value === null || value === '') continue;
+		if (PLACEHOLDERS.has(String(value))) continue;
+		return String(value);
 	}
 	return '';
 }
