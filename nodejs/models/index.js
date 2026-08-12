@@ -14,6 +14,7 @@ require('./api_token');
 
 const { init } = require('@simpleworkjs/orm');
 const socketPubsub = require('../utils/socket_pubsub');
+const modelEvents = require('../utils/model_events');
 const { Resource, ResourceEdge, ResourceGroup } = require('./resource');
 const { AccessRequest } = require('./access_request');
 const { Webhook } = require('./webhook');
@@ -34,6 +35,12 @@ async function initORM() {
   };
   ormConf.redis = conf.redis;
 
+  // One bus for every model, ORM-managed or not: the ORM publishes through it
+  // directly, and utils/model_events routes the LDAP- and Redis-backed models
+  // through the same filter (see utils/socket_pubsub.liveBus).
+  const liveBus = socketPubsub.liveBus(require('../controller').ps);
+  modelEvents.bind(liveBus);
+
   console.log('[initORM] Starting ORM initialization...');
   try {
     // `pubsub` makes every model publish model:<Name>:<action> on save/delete,
@@ -43,7 +50,7 @@ async function initORM() {
     // OtpToken / PasswordResetToken, written on every login and password reset.
     await init({
       conf: { orm: ormConf },
-      pubsub: socketPubsub.ormBus(require('../controller').ps),
+      pubsub: liveBus,
       models: [
         Resource, ResourceEdge, ResourceGroup, AccessRequest, Webhook, PluginInstance,
         SharedSecret, SharedSecretGrant, VaultAppToken, Agent, AgentJoinKey, SiteJoinKey, SiteSpoke,

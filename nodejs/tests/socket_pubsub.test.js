@@ -13,9 +13,13 @@ jest.mock('../utils/permission', () => ({
 	isSuperAdmin: async (cns) => cns.includes('god_admin') || cns.includes('app_super_admin'),
 }));
 
-const {READERS, LIVE_MODELS, parseTopic, ormBus} = require('../utils/socket_pubsub');
+const {READERS, LIVE_MODELS, parseTopic, liveBus} = require('../utils/socket_pubsub');
 
-const ctx = (cns) => ({user: {dn: 'uid=x,ou=people,dc=test,dc=local'}, memberOfCns: cns, isSuperAdmin: cns.includes('god_admin')});
+const ctx = (cns, uid) => ({
+	user: {dn: 'uid=' + (uid || 'x') + ',ou=people,dc=test,dc=local', uid: uid || 'x'},
+	memberOfCns: cns,
+	isSuperAdmin: cns.includes('god_admin'),
+});
 
 describe('parseTopic', () => {
 	test('splits a model event', () => {
@@ -82,10 +86,10 @@ describe('models without a gate', () => {
 	});
 });
 
-describe('ormBus', () => {
+describe('liveBus', () => {
 	test('forwards only models that have a gate', () => {
 		const published = [];
-		const bus = ormBus({publish: (t, d) => published.push(t), subscribe: () => {}});
+		const bus = liveBus({publish: (t, d) => published.push(t), subscribe: () => {}});
 
 		bus.publish('model:Resource:create', {model: 'Resource', action: 'create', pk: '1'});
 		bus.publish('model:PluginInstance:update', {model: 'PluginInstance', action: 'update', pk: '2'});
@@ -98,7 +102,7 @@ describe('ormBus', () => {
 
 	test('a payload with no model is dropped rather than thrown on', () => {
 		const published = [];
-		const bus = ormBus({publish: (t) => published.push(t), subscribe: () => {}});
+		const bus = liveBus({publish: (t) => published.push(t), subscribe: () => {}});
 		expect(() => bus.publish('model:Weird:create', null)).not.toThrow();
 		expect(published).toEqual([]);
 	});
@@ -107,5 +111,99 @@ describe('ormBus', () => {
 		// Publishing something ungated would leak; gating something that never
 		// publishes would be dead code.
 		expect([...LIVE_MODELS].sort()).toEqual(Object.keys(READERS).sort());
+	});
+});
+
+describe('row-scoped gates', () => {
+	// Being allowed to read *a* model is not the same as being allowed every
+	// record of it. These four are per-row.
+	test('a user sees their own User record and nobody else\'s', () => {
+		const alice = ctx(['staff'], 'alice');
+		expect(READERS.User(alice, {uid: 'alice'})).toBe(true);
+		expect(READERS.User(alice, {uid: 'bob'})).toBe(false);
+	});
+
+	test('an admin sees every User record', () => {
+		expect(READERS.User(ctx(['app_sso_admin'], 'root'), {uid: 'bob'})).toBe(true);
+	});
+
+	test('the User gate falls back to the topic pk when there is no body', () => {
+		// Deletes carry no record.
+		expect(READERS.User(ctx(['staff'], 'alice'), null, 'alice')).toBe(true);
+		expect(READERS.User(ctx(['staff'], 'alice'), null, 'bob')).toBe(false);
+	});
+
+	test('notifications, PATs, mesh clients and access requests are owner-scoped', () => {
+		const alice = ctx(['staff'], 'alice');
+		expect(READERS.Notification(alice, {uid: 'alice'})).toBe(true);
+		expect(READERS.Notification(alice, {uid: 'bob'})).toBe(false);
+		expect(READERS.ApiToken(alice, {created_by: 'alice'})).toBe(true);
+		expect(READERS.ApiToken(alice, {created_by: 'bob'})).toBe(false);
+		expect(READERS.MeshClient(alice, {uid: 'alice'})).toBe(true);
+		expect(READERS.MeshClient(alice, {uid: 'bob'})).toBe(false);
+		expect(READERS.AccessRequest(alice, {uid: 'alice'})).toBe(true);
+		expect(READERS.AccessRequest(alice, {uid: 'bob'})).toBe(false);
+	});
+
+	test('an unidentifiable record is withheld rather than shared', () => {
+		const alice = ctx(['staff'], 'alice');
+		expect(READERS.User(alice, {}, undefined)).toBe(false);
+		expect(READERS.Notification(alice, {}, undefined)).toBe(false);
+		expect(READERS.ApiToken(alice, {}, undefined)).toBe(false);
+	});
+
+	test('a PAT is never visible to an admin who does not own it', () => {
+		// Deliberately no admin bypass: a personal access token is nobody
+		// else's business, and the REST route is owner-scoped with no admin path.
+		expect(READERS.ApiToken(ctx(['app_sso_admin', 'god_admin'], 'root'), {created_by: 'alice'})).toBe(false);
+	});
+
+	test('Group mirrors its ungated REST route', () => {
+		// routes/group.js:8 has no authz guard. Mirrored on purpose; see the
+		// comment on the gate. Tightening the route tightens this automatically.
+		expect(READERS.Group(ctx([], 'anyone'))).toBe(true);
+	});
+});
+
+describe('User payloads never carry credentials', () => {
+	// userPassword is on a record read with attributes ['*','+'] as the admin
+	// bind. It survives to the wire only because user_parse() sets it to
+	// `undefined` inside a conditional — incidental, so user_ldap's announce()
+	// strips it explicitly. This pins that.
+	const {emit, bind} = require('../utils/model_events');
+
+	test('the emitter forwards what it is given, so stripping must happen upstream', () => {
+		const sent = [];
+		bind({publish: (t, d) => sent.push(d)});
+		emit('User', 'update', 'alice', {uid: 'alice', userPassword: '{SSHA512}deadbeef'});
+		// The emitter is deliberately dumb; this documents that it does NOT
+		// sanitize, which is why announce() must.
+		expect(sent[0].data.userPassword).toBe('{SSHA512}deadbeef');
+		bind(null);
+	});
+
+	test('a record with no toJSON is passed through as-is', () => {
+		const sent = [];
+		bind({publish: (t, d) => sent.push(d)});
+		emit('Group', 'update', 'cn1', {cn: 'cn1', member: ['a']});
+		expect(sent[0]).toEqual({model: 'Group', action: 'update', pk: 'cn1', data: {cn: 'cn1', member: ['a']}});
+		bind(null);
+	});
+
+	test('toJSON is honoured when present, so isPrivate fields are dropped', () => {
+		const sent = [];
+		bind({publish: (t, d) => sent.push(d)});
+		emit('DnsProvider', 'update', 'p1', {name: 'p1', token: 'SECRET', toJSON(){ return {name: this.name}; }});
+		expect(sent[0].data).toEqual({name: 'p1'});
+		expect(JSON.stringify(sent[0])).not.toContain('SECRET');
+		bind(null);
+	});
+
+	test('a delete carries no body', () => {
+		const sent = [];
+		bind({publish: (t, d) => sent.push(d)});
+		emit('Group', 'delete', 'cn1', {cn: 'cn1', member: ['a']});
+		expect(sent[0].data).toBeNull();
+		bind(null);
 	});
 });

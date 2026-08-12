@@ -1,5 +1,6 @@
 'use strict';
 
+const modelEvents = require('../utils/model_events');
 const { Client, Attribute, Change } = require('ldapts');
 const { LRUCache } = require('lru-cache');
 const crypto = require('crypto');
@@ -462,6 +463,31 @@ User.exists = async function(data, key){
 //   preserveIds     keep the caller's uidNumber/gidNumber, fail on collision
 //   preserveHash    write an already-hashed userPassword through untouched
 //   suppressWelcome skip the welcome email (a migration should not mail everyone)
+// Announce a change on the standard model-event contract (utils/model_events).
+// LDAP being the store is not a reason to stay silent; this code is what mutates
+// it. The socket gate is owner-scoped for non-admins, so a user only ever
+// receives their own record.
+//
+// userPassword is dropped explicitly. It IS present on a record read with
+// attributes ['*','+'] as the admin bind, and today it survives to the wire only
+// because user_parse() happens to set it to `undefined` (which JSON omits) —
+// and only inside an `if (data[userNameAttribute])` branch. That is an
+// incidental protection in an unrelated function, not something to hang a
+// credential on, so strip it here where the payload is actually built.
+const SECRET_USER_FIELDS = ['userPassword'];
+
+function announce(action, user){
+	if (action === 'delete') {
+		return modelEvents.emit('User', action, user && user.uid, null);
+	}
+	if (!user) return;
+	const safe = {};
+	for (const key of Object.keys(user)) {
+		if (!SECRET_USER_FIELDS.includes(key)) safe[key] = user[key];
+	}
+	modelEvents.emit('User', action, user.uid, safe);
+}
+
 User.add = async function(data, options = {}) {
 	try{
 		if (data.mail && await this.exists(data.mail, 'mail')) {
@@ -477,6 +503,7 @@ User.add = async function(data, options = {}) {
 		cache.clear();
 
 		let user = await this.get(data.uid);
+		announce('create', user);
 
 		await UserVerification.getOrCreate(user.uid);
 
@@ -606,6 +633,7 @@ User.update = async function(data){
 			}
 		});
 		cache.clear();
+		announce('update', this);
 
 		return this;
 
@@ -781,6 +809,7 @@ User.remove = async function(data){
 			await deleteLdapUser(client, this);
 		});
 		cache.clear();
+		announce('delete', this);
 
 		return true;
 
