@@ -43,6 +43,9 @@ module.exports = {
 		{href: '/users', icon: 'fa-solid fa-users', label: 'Users', groups: ['app_sso_admin', 'admin']},
 		{href: '/conf', icon: 'fas fa-cogs', label: 'Configuration', groups: ['app_sso_admin']},
 		{href: '/directory', icon: 'fa-solid fa-server', label: 'Directory', groups: ['app_sso_admin', 'app_sso_directory_admin', 'admin']},
+		// Any signed-in user: this is where they enrol their own devices and
+		// pick an exit. The admin-only tabs inside are group-gated in the view.
+		{href: '/network', icon: 'fa-solid fa-diagram-project', label: 'Network', groups: ['login']},
 		{href: '/overview', icon: 'fa-solid fa-gauge-high', label: 'Overview', groups: ['app_sso_admin', 'admin']},
 	],
 };

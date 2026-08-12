@@ -259,7 +259,7 @@ router.post('/clients', middleware.auth, async (req, res, next) => {
 			});
 		}
 
-		const { client, privateKey } = await clients.enroll({ uid, name, siteId: targetSite, publicKey });
+		const { client, privateKey } = await clients.enroll({ uid, name, siteId: targetSite, publicKey, agentId: req.body.agentId });
 		logAudit('mesh_client_enrolled', { actor: req.user.uid, uid, name, siteId: targetSite, ip: client.assignedIp });
 
 		res.status(201).json({
@@ -271,6 +271,51 @@ router.post('/clients', middleware.auth, async (req, res, next) => {
 			privateKeyIssued: !!privateKey
 		});
 	} catch (e) { next(e); }
+});
+
+// Push a device's config to the machine over its theta-agent websocket, so a
+// laptop configures itself instead of a human copying a file around.
+//
+// This only works for a device whose key the agent generated locally: the
+// server does not keep private keys, so a config generated here cannot be
+// re-rendered later. That is the intended trade -- the push carries a config
+// the agent completes with the key it already holds.
+router.post('/clients/:id/push', middleware.auth, async (req, res, next) => {
+	try {
+		const client = (await MeshClient.list({ where: { id: req.params.id } }))[0];
+		if (!client) return res.status(404).json({ status: 'error', message: 'no such device' });
+		if (client.uid !== req.user.uid && !(await isAdmin(req.user))) {
+			return res.status(403).json({ status: 'error', message: 'not your device' });
+		}
+		if (!client.agentId) {
+			return res.status(409).json({ status: 'error', message: 'this device does not run theta-agent' });
+		}
+		const site = await roster.bySiteId(client.siteId);
+		if (!site || !site.gatewayPublicKey) {
+			return res.status(409).json({ status: 'error', message: 'this site\'s gateway has not published its identity yet' });
+		}
+
+		const { Agent } = require('../models/agent');
+		const agent = (await Agent.list({ where: { id: client.agentId } }))[0];
+		if (!agent) return res.status(404).json({ status: 'error', message: 'the agent for this device no longer exists' });
+
+		const agentManager = require('../utils/agent_manager');
+		// privateKey is null: the agent holds its own and fills in the
+		// placeholder. wireguard_apply is signed and gated on the agent's
+		// `wireguard` capability at the far end.
+		await agentManager.sendCommand(agent, 'wireguard_apply', {
+			config: renderClientConf({ client, site, privateKey: null }),
+			routes: clientRoutes({ client, site })
+		}, true);
+
+		logAudit('mesh_client_pushed', { actor: req.user.uid, client: client.id, agent: agent.id });
+		res.json({ status: 'ok' });
+	} catch (e) {
+		if (/not connected/.test(e.message)) {
+			return res.status(409).json({ status: 'error', message: e.message });
+		}
+		next(e);
+	}
 });
 
 router.put('/clients/:id/exit', middleware.auth, async (req, res, next) => {

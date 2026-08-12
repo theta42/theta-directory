@@ -167,11 +167,11 @@ router.post('/spokes', async (req, res, next) => {
     if (noInbound) {
       if (meshIp && publicHost) {
         const proxyClient = require('../utils/proxy_client');
-        // The relay target is this site's OWN gateway forwarding port, not
-        // the spoke's mesh IP: theta-proxy sits on the docker bridge and has
-        // no route into the mesh subnet, which lives inside the peer
-        // gateway's namespace (utils/mesh_route.js). Pointing it at the mesh
-        // IP produced a route that could never carry a byte.
+        // The relay points at the spoke's DIRECTORY over the routed mesh
+        // (10.<siteId>.0.2), not at its gateway address -- the gateway is an
+        // identifier for the site, not a service. theta-proxy needs a route
+        // for 10.0.0.0/8 via the local gateway for this to carry traffic;
+        // see docs/mesh.md.
         const target = meshServiceTarget(meshIp);
         if (target) {
           const result = await proxyClient.ensureRelayRoute({
@@ -179,7 +179,7 @@ router.post('/spokes', async (req, res, next) => {
           });
           relayNote = result.note;
         } else {
-          relayNote = `skipped: cannot derive a mesh route for ${meshIp} (JUMP_INTERNAL_URL unset, or not a mesh address)`;
+          relayNote = `skipped: ${meshIp} is not a mesh address`;
         }
       } else {
         relayNote = 'skipped: noInbound set but meshIp/publicHost missing';

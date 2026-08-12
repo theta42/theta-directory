@@ -53,7 +53,7 @@ async function nextFreeIp(siteId) {
  * ServerID allocator hit for real (routes/api_site.js), where it silently
  * broke replication rather than erroring.
  */
-async function enroll({ uid, name, siteId, publicKey, source }) {
+async function enroll({ uid, name, siteId, publicKey, source, agentId }) {
 	if (!uid) throw Object.assign(new Error('uid is required'), { status: 400 });
 	if (!name) throw Object.assign(new Error('a device name is required'), { status: 400 });
 	assertSiteId(siteId);
@@ -82,6 +82,7 @@ async function enroll({ uid, name, siteId, publicKey, source }) {
 			publicKey: pub,
 			exitSiteId: null,
 			source: source || (privateKey ? 'manual' : 'agent'),
+			agentId: agentId || null,
 			createdAt: now(),
 			lastSeenAt: 0
 		});

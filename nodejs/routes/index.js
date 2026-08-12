@@ -122,6 +122,14 @@ router.get('/users', async function(req, res, next) {
   res.render('users', {...values});
 });
 
+// The WireGuard cluster: sites, devices and exits. Renders the shell for any
+// signed-in user -- ordinary users manage their own devices here, and the
+// admin-only parts are gated per-route in routes/api_mesh.js and revealed
+// client-side by group.
+router.get('/network', async function(req, res, next) {
+  res.render('mesh', {...values});
+});
+
 // Directory migration wizard. Like every other page here this renders the shell
 // for anyone; the data behind it is admin-gated in routes/api_ldif_import.js and
 // the view calls app.auth.forceLogin before it fetches anything.
