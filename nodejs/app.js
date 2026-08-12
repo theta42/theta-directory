@@ -102,6 +102,9 @@ app.use('/api/ldif-import', middleware.auth, require('./routes/api_ldif_import')
 // the 404 catch-all; /api/site/export is reachable by other hosts with a
 // Bearer site-join-key (no admin session).
 app.use('/api/site', require('./routes/api_site'));
+// The WireGuard cluster control API. Auth is per-route inside (gateways,
+// admins, and users enrolling their own devices are three different levels).
+app.use('/api/mesh', require('./routes/api_mesh'));
 // Self-service access requests — any authenticated user may ask; deciding is
 // gated per-resource inside the router (owner or directory admin).
 app.use('/api/access-requests', middleware.auth, require('./routes/access_request'));
