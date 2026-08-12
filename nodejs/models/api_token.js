@@ -1,6 +1,7 @@
 'use strict';
 
 const Table = require('.');
+const {withEvents} = require('../utils/model_events');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 
@@ -74,5 +75,10 @@ class ApiToken extends Table {
 	}
 }
 ApiToken.register();
+// Announce writes on the standard contract so a PAT created or revoked in one
+// tab updates the list in another. The socket gate is owner-scoped with no
+// admin path (utils/socket_pubsub.js) — a personal access token is nobody
+// else's business, matching the REST route.
+withEvents(ApiToken, 'ApiToken');
 
 module.exports = { ApiToken };
