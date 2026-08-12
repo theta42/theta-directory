@@ -16,6 +16,7 @@ module.exports = app;
 
 // Hold onto the auth middleware
 const middleware = require('./middleware/auth');
+const socketPubsub = require('./utils/socket_pubsub');
 
 // OAuth routes
 const { router: oauthRouter, authRouter: oauthApiRouter, discovery } = require('./routes/oauth');
@@ -27,23 +28,22 @@ app.contoller = require('./controller');
 require('./services/update_check');
 require('./services/ldap_monitor');
 
-// Push pubsub over the socket and back.
+// Model events over the socket, server -> client only.
+//
+// This used to be an unconditional `app.io.emit`, forwarding every event on
+// the bus — with its full record — to every authenticated socket, plus a
+// `socket.on('P2PSub')` handler that republished anything a client sent to
+// every other client. Nothing in this app publishes model events yet, so the
+// broadcast half carried no traffic, but the inbound half was a live topic
+// injection path with no legitimate use (no app code calls app.publish()).
+//
+// Nothing is broadcast until a model opts in via a read gate — see
+// utils/socket_pubsub.js. That way live updates can be added here model by
+// model without a leak arriving first.
 app.onListen.push(function(){
   app.io.use(middleware.authIO);
+  socketPubsub.attach(app.io, app.contoller.ps);
 
-  app.contoller.ps.subscribe(/./g, function(data, topic){
-    app.io.emit('P2PSub', { topic, data });
-  });                                 
-
-  app.io.on('connection', (socket) => {
-    // console.log('socket', socket)
-    var user = socket.user;
-    socket.on('P2PSub', (msg) => {
-      app.contoller.ps.publish(msg.topic, {...msg.data, __from:socket.user});
-      // socket.broadcast.emit('P2PSub', msg);
-    });
-  });
-  
   // Initialize Theta Agent WebSockets. The REST router is already mounted
   // synchronously above (see the /api/agent mount); this hook only wires the WS.
   require('./routes/api_agent').initAgentWebSockets(app);
