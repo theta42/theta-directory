@@ -13,6 +13,7 @@ require('./oauth_code');
 require('./api_token');
 
 const { init } = require('@simpleworkjs/orm');
+const socketPubsub = require('../utils/socket_pubsub');
 const { Resource, ResourceEdge, ResourceGroup } = require('./resource');
 const { AccessRequest } = require('./access_request');
 const { Webhook } = require('./webhook');
@@ -35,8 +36,14 @@ async function initORM() {
 
   console.log('[initORM] Starting ORM initialization...');
   try {
+    // `pubsub` makes every model publish model:<Name>:<action> on save/delete,
+    // which is what the browser's app.sync layer consumes. It is wrapped so
+    // only the models that have a socket read gate are forwarded onto the bus:
+    // the ORM publishes for everything it loads, and that includes AuthToken /
+    // OtpToken / PasswordResetToken, written on every login and password reset.
     await init({
       conf: { orm: ormConf },
+      pubsub: socketPubsub.ormBus(require('../controller').ps),
       models: [
         Resource, ResourceEdge, ResourceGroup, AccessRequest, Webhook, PluginInstance,
         SharedSecret, SharedSecretGrant, VaultAppToken, Agent, AgentJoinKey, SiteJoinKey, SiteSpoke,
