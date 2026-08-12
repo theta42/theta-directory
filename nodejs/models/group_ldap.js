@@ -1,5 +1,6 @@
 'use strict';
 
+const modelEvents = require('../utils/model_events');
 const { Client, Attribute, Change } = require('ldapts');
 const { LRUCache } = require('lru-cache');
 const conf = require('@simpleworkjs/conf').ldap;
@@ -334,12 +335,22 @@ Group.get = async function(data){
 	});
 }
 
+// Announce a change on the standard model-event contract, so a group edit
+// reaches open browsers the same way an ORM-managed model's would. LDAP being
+// the store is not a reason to stay silent — this code is what mutates it.
+// Named `Group` in topics; the pk is the cn.
+function announce(action, group){
+	modelEvents.emit('Group', action, group && (group.cn || group.name), action === 'delete' ? null : group);
+}
+
 Group.add = async function(data){
 	return withClient(async (client) => {
 		await addGroup(client, data);
 		cache.clear();
 		resolverCache.clear();
-		return this.get(data);
+		const created = await this.get(data);
+		announce('create', created);
+		return created;
 	});
 }
 
@@ -348,6 +359,7 @@ Group.addMember = async function(user){
 	this.member = [].concat(this.member || []).concat([user.dn]);
 	cache.clear();
 	resolverCache.clear();
+	announce('update', this);
 	return this;
 };
 
@@ -361,6 +373,7 @@ Group.removeMember = async function(user){
 	this.member = [].concat(this.member || []).filter(dn => dn !== user.dn);
 	cache.clear();
 	resolverCache.clear();
+	announce('update', this);
 	return this;
 };
 
@@ -369,6 +382,7 @@ Group.addOwner = async function(user){
 	this.owner = [].concat(this.owner || []).concat([user.dn]);
 	cache.clear();
 	resolverCache.clear();
+	announce('update', this);
 	return this;
 };
 
@@ -382,6 +396,7 @@ Group.removeOwner = async function(user){
 	this.owner = [].concat(this.owner || []).filter(dn => dn !== user.dn);
 	cache.clear();
 	resolverCache.clear();
+	announce('update', this);
 	return this;
 };
 
@@ -389,6 +404,7 @@ Group.remove = async function(){
 	await withClient(async (client) => client.del(this.dn));
 	cache.clear();
 	resolverCache.clear();
+	announce('delete', this);
 	return true;
 }
 
