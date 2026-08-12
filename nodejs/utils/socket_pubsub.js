@@ -49,6 +49,79 @@ const READERS = {
 	PluginInstance(ctx){
 		return isDirectoryAdmin(ctx);
 	},
+
+	// The parent/child edges the Directory tree is derived from; served by the
+	// same admin-gated router as the resources themselves.
+	ResourceEdge(ctx){
+		return isDirectoryAdmin(ctx);
+	},
+
+	// GET /api/group (routes/group.js:8) has no authz guard: any authenticated
+	// user may list groups today. Mirrored rather than tightened here on
+	// purpose — a socket stricter than the endpoint feeding the same page shows
+	// a list that silently stops updating, which reads as a broken page rather
+	// than a security control. Tighten the route and this follows automatically.
+	Group(){
+		return true;
+	},
+
+	// GET /api/user requires app_sso_admin, but GET /api/user/me is self-service
+	// — so an admin sees every user, and everyone else sees only their own
+	// record. Row-level, not just model-level.
+	User(ctx, record, pk){
+		if (isDirectoryAdmin(ctx) || ctx.memberOfCns.includes('app_sso_admin')) return true;
+		const self = ctx.user && ctx.user.uid;
+		if (!self) return false;
+		const subject = (record && (record.uid || record.username)) || pk;
+		return !!subject && String(subject) === String(self);
+	},
+
+	// GET /api/notification is owner-scoped (routes/notification.js).
+	Notification(ctx, record, pk){
+		if (isDirectoryAdmin(ctx)) return true;
+		const self = ctx.user && ctx.user.uid;
+		const owner = record && (record.uid || record.created_by || record.username);
+		return !!self && !!owner && String(owner) === String(self);
+	},
+
+	// Self-service PATs (routes/api_token.js) — owner-scoped, never anyone else's.
+	ApiToken(ctx, record, pk){
+		const self = ctx.user && ctx.user.uid;
+		const owner = record && (record.created_by || record.uid);
+		return !!self && !!owner && String(owner) === String(self);
+	},
+
+	// Mesh views (views/mesh.ejs). Client enrolment is per-user; the roster and
+	// exit grants are admin-facing.
+	MeshClient(ctx, record, pk){
+		if (isDirectoryAdmin(ctx)) return true;
+		const self = ctx.user && ctx.user.uid;
+		const owner = record && (record.uid || record.username || record.created_by);
+		return !!self && !!owner && String(owner) === String(self);
+	},
+
+	MeshSite(ctx){
+		return isDirectoryAdmin(ctx);
+	},
+
+	MeshExitGrant(ctx){
+		return isDirectoryAdmin(ctx);
+	},
+
+	// Self-service access requests: any authenticated user may raise one and see
+	// their own; deciding is gated per-resource inside the router, and a
+	// directory admin sees all of them.
+	AccessRequest(ctx, record, pk){
+		if (isDirectoryAdmin(ctx)) return true;
+		const self = ctx.user && ctx.user.uid;
+		const requester = record && (record.uid || record.requestedBy || record.created_by);
+		return !!self && !!requester && String(requester) === String(self);
+	},
+
+	// theta-agent enrolment state, rendered on the Directory page.
+	Agent(ctx){
+		return isDirectoryAdmin(ctx);
+	},
 };
 
 // Models whose events are forwarded onto the bus at all. Derived from READERS
@@ -72,14 +145,19 @@ function parseTopic(topic){
 }
 
 /**
- * A pubsub wrapper for @simpleworkjs/orm's `init({pubsub})` hook.
+ * The bus every model publishes through — ORM-managed or not.
  *
- * The ORM publishes for every model it loads, which here includes AuthToken,
- * OtpToken and PasswordResetToken — created on every login and every password
- * reset. Forwarding those onto the bus would be constant churn for events no
- * view wants and no socket may read. This filters to LIVE_MODELS at the source.
+ * Passed to `@simpleworkjs/orm`'s `init({pubsub})` hook, and bound into
+ * utils/model_events for models the ORM does not manage (LDAP groups and users,
+ * Redis-backed notifications). One filter for both, so "does this model have a
+ * read gate?" is answered in exactly one place.
+ *
+ * The filter matters most for the ORM, which publishes for every model it loads
+ * — here that includes AuthToken, OtpToken and PasswordResetToken, written on
+ * every login and every password reset. Those must never reach a browser, and
+ * would be constant churn besides.
  */
-function ormBus(ps){
+function liveBus(ps){
 	return {
 		publish(topic, data){
 			if(data && LIVE_MODELS.has(data.model)) ps.publish(topic, data);
@@ -162,4 +240,4 @@ function attach(io, ps){
 	// Deliberately no `socket.on('P2PSub')`: events flow server -> client only.
 }
 
-module.exports = {attach, parseTopic, ormBus, READERS, LIVE_MODELS};
+module.exports = {attach, parseTopic, liveBus, READERS, LIVE_MODELS};
