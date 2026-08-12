@@ -48,6 +48,26 @@ roster and configures itself. Requires theta-gateway v3.0.0.
   scheme deliberately resolves to nothing rather than silently naming a
   different site. The public-endpoint fallback stays, so a deployment whose
   containers have no route into the mesh still replicates over the internet.
+- fix: **the roster now reaches every site.** It is written at each site (a
+  gateway publishes to its own directory) but replication only flows
+  master -> spoke, so two halves were missing: a spoke's public key never left
+  the spoke, and a spoke never learned any other site existed. Either alone
+  means the mesh works only at whichever site happens to be the master. Spokes
+  now forward their gateway details over `POST /api/site/spokes` — the channel
+  they already have, with the credential they already hold — and the master
+  carries the whole roster in its export. Roster edits push a resync
+  immediately instead of waiting for an unrelated catalog change. A site's own
+  row is never overwritten by an incoming export, since the local copy is
+  always at least as fresh.
+- fix: **exit interfaces need their own key.** A gateway's exit interface and
+  its mesh interface presented the same public key to the same remote, which
+  keeps one endpoint and one session per peer key — so the remote's endpoint
+  flapped between the two and they invalidated each other's session. Verified
+  against wireguard-go: with one key on two interfaces the remote settled on
+  whichever handshook last while both kept re-handshaking; with separate keys
+  it holds two stable peers. Gateways now publish a second `gatewayExitPublicKey`
+  and `GET /api/mesh/peers` tells an exit site which gateways to accept under
+  it, allowed only the device addresses actually using that exit.
 - docs: [The Site Network](docs/network.md).
 
 # v2.11.0 - 2026-08-11

@@ -82,15 +82,16 @@ async function publishLocalSite(patch = {}) {
 	// Only overwrite gateway-published fields that were actually supplied, so a
 	// partial publish (say, a liveness ping) cannot blank out the site's LAN
 	// config.
-	for (const key of ['gatewayPublicKey', 'gatewayEndpoint', 'exitOpen', 'country', 'city', 'lan168', 'lan172', 'dnsHost']) {
+	for (const key of ['gatewayPublicKey', 'gatewayEndpoint', 'gatewayExitPublicKey', 'exitOpen', 'country', 'city', 'lan168', 'lan172', 'dnsHost']) {
 		if (patch[key] !== undefined) fields[key] = patch[key];
 	}
 
 	if (existing) {
 		await existing.update(fields);
+		await pushSelfToMaster(existing);
 		return existing;
 	}
-	return MeshSite.create({
+	const created = await MeshSite.create({
 		id: crypto.randomUUID(),
 		siteId,
 		isHub: siteId === 1 && !(await anyHub()),
@@ -98,6 +99,96 @@ async function publishLocalSite(patch = {}) {
 		lan172: SHADOW_DEFAULTS[172],
 		...fields
 	});
+	await pushSelfToMaster(created);
+	return created;
+}
+
+/**
+ * Tell the master what this site's gateway published.
+ *
+ * Replication only flows master -> spoke, so without this a spoke's gateway
+ * key and endpoint never leave the spoke: the master would not have them, and
+ * neither would any other site, so nothing could ever build a peer for it.
+ *
+ * Reuses POST /api/site/spokes -- the channel a spoke already has to the
+ * master, authenticated with the join key it already holds -- rather than
+ * inventing a second credential and a second endpoint. That route is
+ * upsert-by-endpoint and preserves the existing pushToken, so calling it again
+ * is safe.
+ *
+ * Best-effort and never throws: a gateway must still configure itself from
+ * what it knows when the master is unreachable.
+ */
+async function pushSelfToMaster(site) {
+	const cfg = siteConfig.get();
+	if (cfg.isMaster) return { pushed: false, reason: 'this node is the master' };
+	if (!cfg.masterUrl || !cfg.masterJoinKey || !cfg.selfUrl) {
+		return { pushed: false, reason: 'no master registration details on this node' };
+	}
+	if (!site.gatewayPublicKey) return { pushed: false, reason: 'nothing published yet' };
+
+	const controller = new AbortController();
+	const timer = setTimeout(() => controller.abort(), 10000);
+	try {
+		const resp = await fetch(String(cfg.masterUrl).replace(/\/+$/, '') + '/api/site/spokes', {
+			method: 'POST',
+			headers: { Authorization: 'Bearer ' + cfg.masterJoinKey, 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				endpoint: cfg.selfUrl,
+				siteSlug: site.slug || cfg.siteSlug,
+				gatewayPublicKey: site.gatewayPublicKey,
+				gatewayEndpoint: site.gatewayEndpoint || ''
+			}),
+			signal: controller.signal
+		});
+		if (!resp.ok) {
+			console.warn(`[mesh] master rejected this site's gateway details: HTTP ${resp.status}`);
+			return { pushed: false, reason: `HTTP ${resp.status}` };
+		}
+		return { pushed: true };
+	} catch (err) {
+		console.warn(`[mesh] could not send this site's gateway details to the master: ${err.message}`);
+		return { pushed: false, reason: err.message };
+	} finally {
+		clearTimeout(timer);
+	}
+}
+
+/**
+ * Adopt the roster carried in a master export.
+ *
+ * This site's OWN row is skipped: its gateway publishes locally and pushes up,
+ * so the local copy is always at least as fresh as the master's, and letting a
+ * (possibly stale) export overwrite it would blank out a key that was just
+ * published.
+ */
+async function adoptRoster(meshSites) {
+	if (!Array.isArray(meshSites) || !meshSites.length) return { adopted: 0 };
+	const ownId = localSiteId();
+	let adopted = 0;
+	for (const row of meshSites) {
+		const siteId = Number(row.siteId);
+		if (!siteId || siteId > MAX_SITE_ID) continue;
+		if (ownId && siteId === Number(ownId)) continue;
+
+		const fields = {
+			slug: row.slug || '', name: row.name || '',
+			gatewayPublicKey: row.gatewayPublicKey || '',
+			gatewayEndpoint: row.gatewayEndpoint || '',
+			gatewayExitPublicKey: row.gatewayExitPublicKey || '',
+			isHub: !!row.isHub, exitOpen: !!row.exitOpen,
+			country: row.country || '', city: row.city || '',
+			lan168: row.lan168 || '', lan172: row.lan172 || '',
+			dnsHost: row.dnsHost || '',
+			publishedAt: Number(row.publishedAt || 0),
+			lastSeenAt: Number(row.lastSeenAt || 0)
+		};
+		const existing = await bySiteId(siteId);
+		if (existing) await existing.update(fields);
+		else await MeshSite.create({ id: crypto.randomUUID(), siteId, ...fields });
+		adopted++;
+	}
+	return { adopted };
 }
 
 async function anyHub() {
@@ -156,5 +247,6 @@ async function setHub(siteId) {
 }
 
 module.exports = {
-	localSiteId, roster, bySiteId, publishLocalSite, syncFromSpokes, hub, setHub
+	localSiteId, roster, bySiteId, publishLocalSite, syncFromSpokes, hub, setHub,
+	pushSelfToMaster, adoptRoster
 };

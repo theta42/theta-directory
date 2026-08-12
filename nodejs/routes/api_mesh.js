@@ -83,9 +83,9 @@ router.get('/roster', middleware.auth, async (req, res, next) => {
 // compromised or confused gateway cannot rewrite another site's config.
 router.put('/self', middleware.auth, async (req, res, next) => {
 	try {
-		const { gatewayPublicKey, gatewayEndpoint, exitOpen, country, city, lan168, lan172, dnsHost, name, slug } = req.body || {};
+		const { gatewayPublicKey, gatewayEndpoint, gatewayExitPublicKey, exitOpen, country, city, lan168, lan172, dnsHost, name, slug } = req.body || {};
 		const site = await roster.publishLocalSite({
-			gatewayPublicKey, gatewayEndpoint, exitOpen, country, city, lan168, lan172, dnsHost, name, slug
+			gatewayPublicKey, gatewayEndpoint, gatewayExitPublicKey, exitOpen, country, city, lan168, lan172, dnsHost, name, slug
 		});
 		res.json({ status: 'ok', site: site.toPublic() });
 	} catch (e) { next(e); }
@@ -118,10 +118,36 @@ router.get('/peers', middleware.auth, async (req, res, next) => {
 					: meshAddressing.peerAllowedIps(s.siteId)
 			}));
 
+		// Gateways that route internet traffic OUT through this site. They dial
+		// this gateway's mesh interface with their EXIT key, so it needs a peer
+		// entry for that key -- otherwise the handshake is refused and the exit
+		// silently does not work at the far end.
+		//
+		// Each is allowed only the specific device addresses actually using
+		// this exit, not the whole originating site: an exit is permission to
+		// send internet traffic, not a route into someone's network.
+		const exitPeers = [];
+		if (localId) {
+			const exiting = await MeshClient.list({ where: { exitSiteId: Number(localId) } });
+			const bySite = new Map();
+			for (const client of exiting) {
+				const homeId = Number(client.siteId);
+				if (homeId === Number(localId)) continue; // local breakout, no tunnel
+				if (!bySite.has(homeId)) bySite.set(homeId, []);
+				bySite.get(homeId).push(`${client.assignedIp}/32`);
+			}
+			for (const [homeId, allowedIps] of bySite) {
+				const home = sites.find((s) => Number(s.siteId) === homeId);
+				if (!home || !home.gatewayExitPublicKey) continue;
+				exitPeers.push({ siteId: homeId, slug: home.slug, publicKey: home.gatewayExitPublicKey, allowedIps });
+			}
+		}
+
 		res.json({
 			status: 'ok',
 			localSiteId: localId,
 			hubSiteId: hub ? hub.siteId : null,
+			exitPeers,
 			meshAddress: localId ? meshAddressing.meshAddress(localId) : null,
 			siteCidr: localId ? meshAddressing.siteCidr(localId) : null,
 			gatewayIp: localId ? meshAddressing.siteGatewayIp(localId) : null,
@@ -161,6 +187,9 @@ router.put('/sites/:siteId', middleware.auth, requireAdmin, async (req, res, nex
 			if (req.body[key] !== undefined) patch[key] = req.body[key];
 		}
 		await site.update(patch);
+		// Every site's gateway needs this, not just ours -- push it out rather
+		// than waiting for an unrelated catalog change to carry it.
+		require('../utils/site_replicate').replicateToSpokes('mesh-roster-changed');
 		logAudit('mesh_site_updated', { actor: req.user.uid, siteId: site.siteId, fields: Object.keys(patch) });
 		res.json({ status: 'ok', site: site.toPublic() });
 	} catch (e) { next(e); }
@@ -171,6 +200,9 @@ router.put('/sites/:siteId', middleware.auth, requireAdmin, async (req, res, nex
 router.put('/hub/:siteId', middleware.auth, requireAdmin, async (req, res, next) => {
 	try {
 		const site = await roster.setHub(req.params.siteId);
+		// The hub carries the whole mesh as a catch-all, so a change here
+		// alters what every other gateway routes through.
+		require('../utils/site_replicate').replicateToSpokes('mesh-roster-changed');
 		logAudit('mesh_hub_set', { actor: req.user.uid, siteId: site.siteId });
 		res.json({ status: 'ok', site: site.toPublic() });
 	} catch (e) { next(e); }
