@@ -64,6 +64,7 @@ backend, that's the niche.
 - **[Theta Agent & Endpoint C2](agents.html)** — 2-way Go daemon (`theta-agent`) for real-time telemetry (CPU, RAM, Disk, ZFS, GPU), automated host discovery, SSSD/LDAP configuration, and local capability-controlled management operations.
 - **[Vault secrets](vault.html)** — an OpenBao-backed key-value store built into the UI, for stashing passwords/API keys/credentials with encryption and access control.
 - **[API tokens](concepts-api-tokens.html)** — self-service personal access tokens for calling the management API from scripts/CI without a browser session.
+- **[The site network](network.html)** — the WireGuard cluster: sites, per-user device VPN, LAN mapping and internet exits, all keyed off the site id that multi-site join allocates.
 - **[Importing an existing directory](ldif-import.html)** — migrate users and group memberships from an LDIF export of an existing LDAP server, keeping every `uidNumber`, `gidNumber` and password hash intact.
 
 ## Get it

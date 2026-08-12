@@ -59,11 +59,10 @@ describe('site_replicate', () => {
     expect(JSON.parse(optsA.body).reason).toBe('catalog-changed');
   });
 
-  // The mesh path goes through THIS site's gateway, on a port derived from
-  // the peer's mesh index -- never at the peer's mesh IP directly, which no
-  // container here can route to (utils/mesh_route.js).
-  test('prefers the local gateway forwarding port when the spoke reported a mesh IP', async () => {
-    process.env.JUMP_INTERNAL_URL = 'http://jump-host:3002';
+  // The mesh path now addresses the peer site's DIRECTORY directly
+  // (10.<siteId>.0.2:3001). The gateway is a real router, so there is no
+  // relay port and no local-gateway hop to derive (utils/mesh_route.js).
+  test('prefers the peer directory over the mesh when the spoke reported a mesh IP', async () => {
     jest.resetModules();
     jest.doMock('../models/site_spoke', () => ({ SiteSpoke: makeSpokeMock() }));
     siteReplicate = require('../utils/site_replicate');
@@ -71,20 +70,19 @@ describe('site_replicate', () => {
     global.fetch = trackedFetch;
 
     SiteSpoke._seed([
-      { endpoint: 'https://spoke-a.example.com:8443', pushToken: 'token-a', meshIp: '172.24.5.1' }
+      { endpoint: 'https://spoke-a.example.com:8443', pushToken: 'token-a', meshIp: '172.24.0.5' }
     ]);
 
     await siteReplicate.replicateToSpokes('catalog-changed');
     await new Promise((r) => setImmediate(r));
 
     expect(mockFetchCalls.length).toBe(1);
-    expect(mockFetchCalls[0][0]).toBe('http://jump-host:30005/api/site/resync');
-    // The old, unroutable target must never be attempted again.
-    expect(mockFetchCalls[0][0]).not.toContain('172.24.5.1');
+    expect(mockFetchCalls[0][0]).toBe('http://10.5.0.2:3001/api/site/resync');
+    // The gateway address identifies the site; it is never itself a service.
+    expect(mockFetchCalls[0][0]).not.toContain('172.24.0.5');
   });
 
   test('falls back to the public endpoint if the mesh attempt fails', async () => {
-    process.env.JUMP_INTERNAL_URL = 'http://jump-host:3002';
     jest.resetModules();
     jest.doMock('../models/site_spoke', () => ({ SiteSpoke: makeSpokeMock() }));
     siteReplicate = require('../utils/site_replicate');
@@ -92,10 +90,12 @@ describe('site_replicate', () => {
     global.fetch = trackedFetch;
 
     SiteSpoke._seed([
-      { endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', meshIp: '172.24.5.1' }
+      { endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', meshIp: '172.24.0.5' }
     ]);
+    // A deployment whose containers have no route for 10.0.0.0/8 via the
+    // gateway must still replicate -- just over the internet, not the tunnel.
     mockFetchImpl = async (url) => {
-      if (url.startsWith('http://jump-host:')) throw new Error('mesh unreachable');
+      if (url.startsWith('http://10.')) throw new Error('mesh unreachable');
       return { ok: true, status: 200 };
     };
 
@@ -103,14 +103,14 @@ describe('site_replicate', () => {
     await new Promise((r) => setImmediate(r));
 
     expect(mockFetchCalls.length).toBe(2);
-    expect(mockFetchCalls[0][0]).toBe('http://jump-host:30005/api/site/resync');
+    expect(mockFetchCalls[0][0]).toBe('http://10.5.0.2:3001/api/site/resync');
     expect(mockFetchCalls[1][0]).toBe('https://spoke-a.example.com/api/site/resync');
   });
 
-  // No gateway configured: there is no mesh path to take, so the public
-  // endpoint is the only option -- never a guessed mesh dial.
-  test('a mesh IP with no gateway configured falls straight through to the endpoint', async () => {
-    delete process.env.JUMP_INTERNAL_URL;
+  // An address in the RETIRED scheme (site index in the third octet) is not a
+  // mesh address any more. It must fall through to the public endpoint rather
+  // than resolve to some other site's directory.
+  test('an address in the retired scheme falls straight through to the endpoint', async () => {
     jest.resetModules();
     jest.doMock('../models/site_spoke', () => ({ SiteSpoke: makeSpokeMock() }));
     siteReplicate = require('../utils/site_replicate');
