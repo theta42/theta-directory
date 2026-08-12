@@ -129,6 +129,33 @@ const READERS = {
 // leak, and gating something that never publishes would be dead code.
 const LIVE_MODELS = new Set(Object.keys(READERS));
 
+// ── non-model channels ───────────────────────────────────────────────────────
+//
+// Not everything pushed to a browser is a model event. theta-agent streams
+// telemetry, discovery results and command output over its own WebSocket, and
+// those were sent with a bare `app.io.emit` — every frame to every
+// authenticated socket, with no read check at all.
+//
+// `agent.response` carries the OUTPUT of commands run on a host, on a channel
+// this app's own comments describe as able to "run arbitrary bash". `agent.
+// discovery` carries host inventory (open ports, services). Neither is
+// something every logged-in user should receive.
+//
+// These mirror the REST gate on routes/api_agent.js, which is admin-only for
+// the whole router (ADMIN_GROUPS there).
+const AGENT_ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_admin'];
+
+function isAgentAdmin(ctx){
+	if(ctx.isSuperAdmin) return true;
+	return AGENT_ADMIN_GROUPS.some((g) => ctx.memberOfCns.includes(g));
+}
+
+const CHANNELS = {
+	'agent.telemetry': isAgentAdmin,
+	'agent.discovery': isAgentAdmin,
+	'agent.response': isAgentAdmin,
+};
+
 const warnedModels = new Set();
 
 // `model:Resource:update:abc` -> {model, action, pk}
@@ -240,4 +267,44 @@ function attach(io, ps){
 	// Deliberately no `socket.on('P2PSub')`: events flow server -> client only.
 }
 
-module.exports = {attach, parseTopic, liveBus, READERS, LIVE_MODELS};
+/**
+ * Emit on a non-model channel, to the sockets allowed to receive it.
+ *
+ * Drop-in for `io.emit(channel, data)` — which is what these were, and why
+ * command output was reaching every connected browser.
+ *
+ * A channel with no entry in CHANNELS is not sent at all: same fail-closed rule
+ * as models, so a new push channel cannot start broadcasting before someone
+ * decides who may see it.
+ */
+function emitChannel(io, channel, data){
+	if(!io) return;
+
+	const canRead = CHANNELS[channel];
+	if(!canRead){
+		if(!warnedModels.has('channel:' + channel)){
+			warnedModels.add('channel:' + channel);
+			console.warn(`[socket_pubsub] no read gate for channel '${channel}'; it is not broadcast. Add it to CHANNELS in utils/socket_pubsub.js.`);
+		}
+		return;
+	}
+
+	for(const socket of io.sockets.sockets.values()){
+		if(!socket.user || !socket.user.dn) continue;
+
+		contextFor(socket).then(function(ctx){
+			let allowed = false;
+			try{
+				allowed = canRead(ctx, data);
+			}catch(error){
+				console.error(`[socket_pubsub] read gate for channel '${channel}' threw:`, error);
+				allowed = false;
+			}
+			if(allowed) socket.emit(channel, data);
+		}).catch(function(error){
+			console.error('[socket_pubsub] could not resolve rights for socket:', error);
+		});
+	}
+}
+
+module.exports = {attach, parseTopic, liveBus, emitChannel, READERS, LIVE_MODELS, CHANNELS};

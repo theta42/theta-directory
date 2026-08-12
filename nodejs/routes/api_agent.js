@@ -23,6 +23,11 @@ const HIGH_RISK_COMMANDS = ['reboot', 'shutdown', 'service_restart', 'systemd_ac
 // handler would make every /api/agent/* request 404, no matter the WS server
 // state. The WebSocket handler is separate (initAgentWebSockets below) and is
 // the only part that needs the post-listen onListen hook.
+// Agent pushes go through the same per-socket read gate as model events.
+// These were bare `app.io.emit` calls: every telemetry frame, discovery
+// result and command OUTPUT to every authenticated socket, unfiltered.
+const socketPubsub = require('../utils/socket_pubsub');
+
 const router = express.Router();
 
 // Structured audit line for anything that reaches a host. The agent channel can
@@ -391,7 +396,7 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
         switch (data.type) {
           case 'discovery':
             await agentManager.handleDiscovery(current, payload);
-            if (app.io) app.io.emit('agent.discovery', { agentId: current.id, payload });
+            socketPubsub.emitChannel(app.io, 'agent.discovery', { agentId: current.id, payload });
             if (payload.capabilities && payload.capabilities.configure_ldap) {
               const conf = require('@simpleworkjs/conf');
               const os = require('os');
@@ -454,14 +459,14 @@ refresh_expired_interval = 300
             break;
           case 'telemetry':
             await agentManager.handleTelemetry(current, payload);
-            if (app.io) app.io.emit('agent.telemetry', { agentId: current.id, payload });
+            socketPubsub.emitChannel(app.io, 'agent.telemetry', { agentId: current.id, payload });
             break;
           case 'heartbeat':
             await agentManager.handleHeartbeat(current, payload, ws);
             break;
           case 'response':
             await agentManager.handleResponse(current, payload);
-            if (app.io) app.io.emit('agent.response', { agentId: current.id, payload });
+            socketPubsub.emitChannel(app.io, 'agent.response', { agentId: current.id, payload });
             break;
           case 'ldap_tunnel':
             // Raw LDAP bytes from the agent's local socket → relay into OpenLDAP
