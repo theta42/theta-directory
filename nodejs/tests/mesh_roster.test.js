@@ -170,4 +170,26 @@ describe('the hub', () => {
 	test('making a site the hub when it is not in the roster fails loudly', async () => {
 		await expect(roster.setHub(9)).rejects.toThrow(/no site with id 9/);
 	});
+
+	describe('toPublicSafe (non-admin roster projection)', () => {
+		test('strips WireGuard identity fields and exposes gatewayPublished', async () => {
+			await roster.adoptRoster([
+				{ siteId: 1, slug: 'hub', gatewayPublicKey: 'key-1', gatewayEndpoint: 'gw.example:51820', gatewayExitPublicKey: 'exit-key-1', exitOpen: true }
+			]);
+			const safe = roster.toPublicSafe(await roster.bySiteId(1));
+			expect(safe.gatewayPublished).toBe(true);
+			expect(safe.gatewayPublicKey).toBeUndefined();
+			expect(safe.gatewayEndpoint).toBeUndefined();
+			expect(safe.gatewayExitPublicKey).toBeUndefined();
+			expect(safe.siteId).toBe(1);
+			expect(safe.slug).toBe('hub');
+		});
+
+		test('reports not-published when the gateway has no key', async () => {
+			await roster.adoptRoster([{ siteId: 2, slug: 'office' }]);
+			const safe = roster.toPublicSafe(await roster.bySiteId(2));
+			expect(safe.gatewayPublished).toBe(false);
+			expect(safe.gatewayPublicKey).toBeUndefined();
+		});
+	});
 });

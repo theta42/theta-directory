@@ -56,6 +56,12 @@ function requireAdmin(req, res, next) {
 // What every gateway pulls. Any authenticated caller may read it: it is public
 // keys, endpoints and subnets -- the things peers must know about each other
 // to talk at all. Nothing here is a credential.
+//
+// Non-admins get the identity fields scrubbed: the mesh page shows site name,
+// role, addresses and exit metadata, but a low-privilege user has no business
+// seeing every site's WireGuard keys and dial endpoints (full network
+// enumeration). The gateway itself authenticates as the directory admin, so
+// admins still get the complete roster.
 router.get('/roster', middleware.auth, async (req, res, next) => {
 	try {
 		// Pick up sites that have joined the directory but whose gateway has
@@ -64,11 +70,12 @@ router.get('/roster', middleware.auth, async (req, res, next) => {
 		await roster.syncFromSpokes().catch(() => ({ created: 0 }));
 		const sites = await roster.roster();
 		const hub = sites.find((s) => s.isHub) || null;
+		const admin = await isAdmin(req.user);
 		res.json({
 			status: 'ok',
 			localSiteId: roster.localSiteId(),
 			hubSiteId: hub ? hub.siteId : null,
-			sites: sites.map((s) => s.toPublic()),
+			sites: sites.map((s) => admin ? s.toPublic() : roster.toPublicSafe(s)),
 			addressing: {
 				maxSiteId: meshAddressing.MAX_SITE_ID,
 				softLimit: meshAddressing.SOFT_SITE_LIMIT,
@@ -81,7 +88,14 @@ router.get('/roster', middleware.auth, async (req, res, next) => {
 // A gateway publishing facts about its own site. It cannot name a site: the
 // row it writes is decided by which node it is talking to (localSiteId), so a
 // compromised or confused gateway cannot rewrite another site's config.
-router.put('/self', middleware.auth, async (req, res, next) => {
+//
+// Admin-gated: this row carries the site's WireGuard identity, exit posture
+// and LAN/DNS mapping, so a low-privilege user must not be able to rewrite it
+// (clobber the gateway public key -> every tunnel to this site breaks;
+// flip exitOpen -> unplanned egress). The legitimate gateway authenticates
+// with a PAT minted as the directory admin (bootstrap/provisionJumpHost), so
+// requireAdmin lets it through while keeping everyone else out.
+router.put('/self', middleware.auth, requireAdmin, async (req, res, next) => {
 	try {
 		const { gatewayPublicKey, gatewayEndpoint, gatewayExitPublicKey, exitOpen, country, city, lan168, lan172, dnsHost, name, slug } = req.body || {};
 		const site = await roster.publishLocalSite({
@@ -95,7 +109,11 @@ router.put('/self', middleware.auth, async (req, res, next) => {
 // sites are directly reachable, and what each one's AllowedIPs are. Computing
 // it here keeps the addressing rules in one place rather than reimplemented on
 // every gateway.
-router.get('/peers', middleware.auth, async (req, res, next) => {
+//
+// Admin-gated: this is the full build plan for every tunnel in the cluster
+// (keys, endpoints, AllowedIPs, exit peers) -- only a gateway (or an admin)
+// has a reason to read it. The gateway authenticates as the directory admin.
+router.get('/peers', middleware.auth, requireAdmin, async (req, res, next) => {
 	try {
 		const localId = roster.localSiteId();
 		const sites = await roster.roster();
@@ -159,7 +177,12 @@ router.get('/peers', middleware.auth, async (req, res, next) => {
 // Every client this gateway is responsible for, with the exit each one should
 // be policy-routed to. This is what the gateway turns into wg peer entries and
 // `ip rule` lines.
-router.get('/site-clients', middleware.auth, async (req, res, next) => {
+//
+// Admin-gated: it lists every device at the local site with its public key
+// and assigned IP -- the whole device registry. Only a gateway (which
+// authenticates as the directory admin) or an admin has a reason to read it;
+// a regular user manages their own devices through /clients instead.
+router.get('/site-clients', middleware.auth, requireAdmin, async (req, res, next) => {
 	try {
 		const localId = roster.localSiteId();
 		if (!localId) return res.json({ status: 'ok', localSiteId: null, clients: [] });

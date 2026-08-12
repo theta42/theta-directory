@@ -206,7 +206,9 @@ function renderSites(data) {
 		var isLocal = Number(s.siteId) === Number(data.localSiteId);
 		// A site with no published key has joined the directory but its gateway
 		// has never started -- it is in the roster and not yet on the wire.
-		var published = !!s.gatewayPublicKey;
+		// Non-admins get the scrubbed projection (gatewayPublished boolean);
+		// admins get the raw key.
+		var published = !!(meshState.isAdmin ? s.gatewayPublicKey : s.gatewayPublished);
 		return '<tr' + (isLocal ? ' class="table-active"' : '') + '>'
 			+ '<td><span class="badge bg-primary">' + esc(s.siteId) + '</span></td>'
 			+ '<td>' + esc(s.name || s.slug || '—') + (isLocal ? ' <span class="badge text-bg-light text-dark ms-1">this site</span>' : '') + '</td>'
