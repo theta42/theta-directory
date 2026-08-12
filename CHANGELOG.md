@@ -1,3 +1,12 @@
+## v2.19.0
+- feat: **notifications, with history and a bell.** Every model event you are allowed to see is a notification — the socket read gate already decides that, live and per row, so there is no recipient resolution and no fan-out: a notification is an event that reached you, and history is those same events replayed through the same gate. Clicking one opens the record that changed.
+- feat: recording hooks into the one bus every gated event already flows through, ORM-managed or not, so nothing has to remember to log. It stores the **shape** only — model, action, pk, actor, owner, timestamp — with no payload, so history never becomes a second copy of the data retaining a deleted record's contents. Bounded by a 30-day TTL.
+- feat: unread is one watermark per user rather than a read flag per item, so opening the bell on one device clears the badge on all of them.
+- feat: collapsing is not cosmetic here — creating one resource emits eleven events (the resource, its groups, its edges), and a discovery sweep emits hundreds. The feed says "11 resource groups added"; history keeps every row.
+- feat: `Notification` and `ApiToken` announce their writes via a small `withEvents()` wrapper. Deliberately not a Proxy over the class: that approach published the *class* name as the primary key for every model keyed on `name`, because a class always has a built-in `.name`.
+- fix: `__NONE__` — the placeholder a record carries when it has been created but never updated — is treated as an absent actor rather than reported as the person who did it.
+- chore: the notification client now comes from `@simpleworkjs/frontend` 0.4.0 rather than a copy in this repo; this app supplies only its link map.
+
 ## v2.18.0
 - feat: **the Catalog and Discovered Inventory views update themselves.** Both read models that already published and already carried socket read gates — `AccessRequest` (owner-scoped: a directory admin sees all of them, everyone else only their own) and `Resource` (admin-scoped) — and neither view subscribed. The Catalog is one derived render (catalog, your access, your requests, pending approvals, drawn together), so a change re-runs the load rather than patching a tile that would then disagree with the others. The case that matters: an admin approves your request while the tile you are looking at still tells you that you cannot get in.
 - note: `views/user_form.ejs` is deliberately not wired. It fetches resources once to prefill a location default; re-running that on a live event would overwrite what the operator has typed.
