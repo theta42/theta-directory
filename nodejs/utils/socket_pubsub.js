@@ -18,6 +18,7 @@
  */
 
 const permission = require('./permission');
+const activityEvent = require('../models/activity_event');
 
 // How long a socket's resolved group membership is cached. Sockets are
 // long-lived and membership is resolved from LDAP transitively, so without a
@@ -187,7 +188,13 @@ function parseTopic(topic){
 function liveBus(ps){
 	return {
 		publish(topic, data){
-			if(data && LIVE_MODELS.has(data.model)) ps.publish(topic, data);
+			if(!data || !LIVE_MODELS.has(data.model)) return;
+			ps.publish(topic, data);
+			// Every event that goes out is a notification, so this is also the
+			// one place history needs recording. Deliberately not awaited: a
+			// model write must not fail, or slow down, because its history row
+			// did not save.
+			activityEvent.record(data);
 		},
 		subscribe(pattern, listener){
 			return ps.subscribe(pattern, listener);
@@ -198,26 +205,36 @@ function liveBus(ps){
 // Resolve (and briefly cache) a socket's group membership, the same way
 // utils/permission.byGroup does: transitively from LDAP, so a user who is an
 // admin through a nested group is treated as one.
-async function contextFor(socket){
-	const now = Date.now();
-	if(socket._authzCtx && socket._authzCtxAt > now - GROUPS_TTL_MS){
-		return socket._authzCtx;
-	}
-
+/**
+ * The authorization context a read gate is evaluated against.
+ *
+ * Split out from contextFor so a REST request can build the very same thing a
+ * socket does — history is the same events replayed through the same gates, so
+ * it must be the same decision, not a second implementation of it.
+ */
+async function contextForUser(user){
 	const {Group} = require('../models/group_ldap');
 	let memberOfCns = [];
 	try{
-		memberOfCns = await Group.list(socket.user.dn);
+		memberOfCns = await Group.list(user.dn);
 	}catch(error){
 		// Deny rather than guess if membership cannot be resolved.
 		memberOfCns = [];
 	}
 
-	socket._authzCtx = {
-		user: socket.user,
+	return {
+		user,
 		memberOfCns,
 		isSuperAdmin: await permission.isSuperAdmin(memberOfCns),
 	};
+}
+
+async function contextFor(socket){
+	const now = Date.now();
+	if(socket._authzCtx && socket._authzCtxAt > now - GROUPS_TTL_MS){
+		return socket._authzCtx;
+	}
+	socket._authzCtx = await contextForUser(socket.user);
 	socket._authzCtxAt = now;
 	return socket._authzCtx;
 }
@@ -307,4 +324,4 @@ function emitChannel(io, channel, data){
 	}
 }
 
-module.exports = {attach, parseTopic, liveBus, emitChannel, READERS, LIVE_MODELS, CHANNELS};
+module.exports = {attach, parseTopic, liveBus, emitChannel, contextForUser, READERS, LIVE_MODELS, CHANNELS};

@@ -349,3 +349,31 @@ describe('withEvents on model-redis Tables', () => {
 		expect(sent[0].data.created_by).toBe('alice');
 	});
 });
+
+describe('notification history', () => {
+	const {LIVE_MODELS: LIVE, READERS: R} = require('../utils/socket_pubsub');
+
+	test('ActivityEvent is not gated, so it never publishes and cannot record itself', () => {
+		// LIVE_MODELS is derived from READERS. If ActivityEvent were gated it
+		// would publish, liveBus would record that write, which would publish
+		// again — an unbounded loop that is obvious now and baffling later.
+		expect(R.ActivityEvent).toBeUndefined();
+		expect(LIVE.has('ActivityEvent')).toBe(false);
+	});
+
+	test('the read watermark is not gated either', () => {
+		// Reading your own notifications is not an event anyone needs to hear.
+		expect(R.ActivitySeen).toBeUndefined();
+		expect(LIVE.has('ActivitySeen')).toBe(false);
+	});
+
+	test('every gated model is one the feed can render', () => {
+		// The feed replays events through READERS; a gate that throws on the
+		// reduced record the history stores would drop that model silently.
+		const reduced = {uid: 'alice', username: 'alice', created_by: 'alice', host: 'a.example.com'};
+		const ctx = {user: {uid: 'alice', dn: 'uid=alice'}, memberOfCns: ['app_sso_admin'], isSuperAdmin: false};
+		for (const model of Object.keys(R)) {
+			expect(() => R[model](ctx, reduced, 'a.example.com')).not.toThrow();
+		}
+	});
+});

@@ -680,7 +680,8 @@
     await loadResources();
     const slug = app.modal.deepLinkSlug('/directory');
     if (slug) {
-      const match = Object.values(resourcesById).find(r => r.slug === slug);
+      // Match by slug or id: a notification links from the record's pk.
+      const match = Object.values(resourcesById).find(r => r.slug === slug || r.id === slug);
       if (match) openEditModal(match.id);
     }
     startLiveUpdates();
