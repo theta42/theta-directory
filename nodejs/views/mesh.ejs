@@ -179,6 +179,35 @@ $(document).ready(function(){
 		loadAll();
 	});
 	$('#site-lan168, #site-dns').on('input', updateShadowExample);
+
+	// Live updates. All three models already publish and carry socket read
+	// gates (utils/socket_pubsub.js): MeshSite and MeshExitGrant are
+	// admin-scoped, MeshClient is owner-scoped, so a non-admin only ever hears
+	// about their own devices. Each list reloads its own fetch rather than
+	// patching a row: renderSites() and renderDevices() derive their rows from
+	// the roster (peer counts, exit routing, per-site shape), which a
+	// single-row patch would leave stale.
+	//
+	// Debounced — enrolling one device writes the client and its grant, and a
+	// site join writes several records in a burst.
+	let siteTimer = null, deviceTimer = null, grantTimer = null;
+	app.subscribe(/^model:MeshSite:/, function(){
+		clearTimeout(siteTimer);
+		siteTimer = setTimeout(loadSites, 400);
+	});
+	app.subscribe(/^model:MeshClient:/, function(){
+		clearTimeout(deviceTimer);
+		deviceTimer = setTimeout(loadDevices, 400);
+	});
+	app.subscribe(/^model:MeshExitGrant:/, function(){
+		clearTimeout(grantTimer);
+		grantTimer = setTimeout(function(){
+			// Grants drive the exit routing shown against each site, so the
+			// roster is re-read alongside them.
+			if (meshState.isAdmin) loadGrants();
+			loadSites();
+		}, 400);
+	});
 });
 
 function loadAll() { loadSites(); loadDevices(); if (meshState.isAdmin) loadGrants(); }
