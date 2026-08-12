@@ -303,9 +303,14 @@ router.post('/clients/:id/push', middleware.auth, async (req, res, next) => {
 		// privateKey is null: the agent holds its own and fills in the
 		// placeholder. wireguard_apply is signed and gated on the agent's
 		// `wireguard` capability at the far end.
+		// Only the config. The agent applies it with wg-quick, which installs
+		// routes from AllowedIPs itself -- 10.0.0.0/8 + 172.24.0.0/16 for a
+		// split-tunnel device, 0.0.0.0/0 for one using an exit. Sending a
+		// separate route list would imply the agent acts on it, which it does
+		// not; clientRoutes() stays for the enrolment response, where a human
+		// setting a device up by hand needs to see them.
 		await agentManager.sendCommand(agent, 'wireguard_apply', {
-			config: renderClientConf({ client, site, privateKey: null }),
-			routes: clientRoutes({ client, site })
+			config: renderClientConf({ client, site, privateKey: null })
 		}, true);
 
 		logAudit('mesh_client_pushed', { actor: req.user.uid, client: client.id, agent: agent.id });
