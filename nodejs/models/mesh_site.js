@@ -37,6 +37,13 @@ class MeshSite extends Model {
 		gatewayPublicKey: { type: 'string' },
 		gatewayEndpoint: { type: 'string' },
 
+		// A SECOND public key, used only by this gateway's exit interfaces.
+		// Separate because a remote keeps one endpoint and one session per peer
+		// key: if a gateway's exit interface presented the same key as its mesh
+		// interface, the remote would see one peer whose endpoint flapped
+		// between them and the two would invalidate each other's session.
+		gatewayExitPublicKey: { type: 'string' },
+
 		// The hub carries 10.0.0.0/8 as a catch-all so sites that are not
 		// directly peered still reach each other. Configurable rather than
 		// implied by "is the master": the natural hub is a cheap always-up VPS,

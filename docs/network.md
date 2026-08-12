@@ -110,6 +110,23 @@ config.
 Peer AllowedIPs are resolved here rather than on each gateway, so the addressing
 rules live in one place.
 
+## How the roster reaches every site
+
+Written at each site, distributed by the master:
+
+- A gateway publishes its keys and endpoint to **its own** directory.
+- A spoke's directory forwards that to the master over the channel it already
+  has (`POST /api/site/spokes`, with the join key it already holds) — without
+  this upward path a spoke's public key never leaves the spoke and no other
+  site could build a peer for it.
+- The master carries the whole roster in its export, so joining and every
+  resync bring it down to every spoke. Roster edits push a resync immediately
+  rather than waiting for an unrelated catalog change.
+
+A site's own row is never overwritten by an incoming export: its gateway
+publishes locally first and pushes up second, so the local copy is always at
+least as fresh.
+
 ## Reaching another site's directory
 
 A peer site's directory is `10.<siteId>.0.2:3001`. Replication prefers that
