@@ -1,3 +1,22 @@
+## v2.22.0
+- feat: **HP iLO discovery + power control.** A new `ilo` discovery plugin
+  (`plugins/discovery/ilo.js`, Redfish-based, self-signed-cert tolerant like
+  the existing Proxmox plugin) pulls a physical server's model, serial,
+  firmware, health, power state, CPU/memory summary, and both the iLO
+  management NIC's and the host OS's own NICs' MAC/IP from one iLO endpoint
+  per server. Unlike most existing subtype drivers (Proxmox, Docker socket,
+  DB, network, K8s — all still fixed sample-data stubs pending real backend
+  wiring), the new `ilo` driver is fully real: `getMetrics` polls live
+  power/health from Redfish, and `execAction` (`power_on`/`reboot`/
+  `force_restart`/`shutdown`/`force_off`) issues a real
+  `ComputerSystem.Reset` against the target read directly off the System
+  resource (never hardcoded, since it's not guaranteed at the same path
+  across iLO generations). Credentials are resolved from the discovering
+  plugin instance's OpenBao secret via `discovery_sources`, reusing the
+  existing per-instance secret storage rather than inventing a second one.
+  The resource modal shows a live power/health card with one-click power
+  buttons for any `host` resource with `subType: 'ilo'`.
+
 ## v2.21.1
 - fix: **clicking "Run Import" on the LDIF import page threw an uncaught
   exception instead of showing the confirmation dialog.** `ldif_import.ejs`
