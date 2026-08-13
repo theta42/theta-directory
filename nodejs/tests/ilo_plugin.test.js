@@ -51,7 +51,7 @@ describe('ilo discovery plugin manifest', () => {
     expect(ilo.type).toBe('ilo');
     expect(ilo.category).toBe('discovery');
     const keys = ilo.configSchema.map((f) => f.key);
-    expect(keys).toEqual(expect.arrayContaining(['url', 'username', 'password', 'location', 'autoPromote']));
+    expect(keys).toEqual(expect.arrayContaining(['url', 'username', 'password', 'hostSlug', 'location', 'autoPromote']));
     const password = ilo.configSchema.find((f) => f.key === 'password');
     expect(password.secret).toBe(true);
   });
@@ -73,13 +73,16 @@ describe('ilo discovery plugin manifest', () => {
 describe('ilo discovery plugin discover()', () => {
   const config = { url: 'https://ilo.example.com', username: 'Administrator', password: 'secret' };
 
-  test('builds one host resource from the System + Manager Redfish data', async () => {
+  test('builds one bmc resource from the System + Manager Redfish data, unlinked without hostSlug', async () => {
     const { resources, edges } = await ilo.discover(config);
     expect(edges).toEqual([]);
     expect(resources).toHaveLength(1);
 
     const r = resources[0];
-    expect(r.kind).toBe('host');
+    // Deliberately NOT 'host' -- see ilo.js's comment: this keeps the
+    // generic reconciler from ever merging the iLO's own out-of-band
+    // address into the server's real host resource.
+    expect(r.kind).toBe('bmc');
     expect(r.name).toBe('web01');
     expect(r.slug).toBe('ilo-abc123xyz');
     expect(r.metadata).toMatchObject({
@@ -107,6 +110,11 @@ describe('ilo discovery plugin discover()', () => {
     ]);
     expect(r.metadata.hostIp).toBe('10.0.1.10');
     expect(r.metadata.hostMac).toBe('aa:bb:cc:dd:ee:11');
+  });
+
+  test('hostSlug produces an edge linking the bmc resource to the server resource', async () => {
+    const { resources, edges } = await ilo.discover({ ...config, hostSlug: 'host_web01' });
+    expect(edges).toEqual([{ parentSlug: 'host_web01', childSlug: resources[0].slug, relation: 'bmc' }]);
   });
 
   test('an offline server (PowerState Off) is not marked production', async () => {

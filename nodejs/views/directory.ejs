@@ -2061,8 +2061,11 @@
     // driver-metrics endpoint, a different response shape -- see
     // serviceStatusHtml's subType === 'ilo' branch). Tracked so telemetry
     // frames can re-render just the open panel.
-    const isIloHost = r.kind === 'host' && (r.metadata || {}).subType === 'ilo';
-    const showLive = r.kind === 'service' || isIloHost;
+    // ilo.js reports kind: 'bmc', not 'host' -- see its comment for why
+    // (keeping the generic reconciler from ever folding an iLO's own
+    // out-of-band address into the server's real host resource).
+    const isIloBmc = (r.metadata || {}).subType === 'ilo';
+    const showLive = r.kind === 'service' || isIloBmc;
     currentServiceResourceId = showLive ? id : null;
     const $svc = $('#service-live-container');
     if ($svc.length) {
