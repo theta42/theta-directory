@@ -1,3 +1,14 @@
+## v2.21.0
+- feat: **`POST /api/site/ping` now reports `baseDn`.** A spoke joining this
+  site as master can fetch its LDAP base DN with only the join key it was
+  handed — before it has any local LDAP of its own — and derive its
+  `CFG_DOMAIN` automatically instead of the operator having to separately
+  learn and correctly re-type the master's own domain into a second config
+  file. Part of theta-suite's `master.env`/`spoke.env` split (see
+  MULTI_SITE_SPEC.md §4): a spoke's `spoke.env` no longer needs `CFG_DOMAIN`
+  at all, and a bad/unreachable join key now fails in the first second of
+  bring-up instead of after a full local bootstrap.
+
 ## v2.20.0
 - feat: **register and monitor services of many types.** The Directory now
   reconciles the services an agent registers (`register <type> <name>` for

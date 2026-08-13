@@ -116,14 +116,19 @@ router.post('/export', async (req, res, next) => {
 
 // ── Ping (MASTER side, Bearer site-join-key; no admin session) ─────────────
 // Lightweight reachability probe a spoke uses for WAN-health — deliberately
-// cheap (no LDAP dump / catalog), unlike /export.
+// cheap (no LDAP dump / catalog), unlike /export. Also doubles as the spoke
+// bring-up pre-flight: theta-suite's setup.sh calls this (with only the join
+// key it was handed, before it has any local LDAP of its own) to learn
+// baseDn and derive CFG_DOMAIN automatically, instead of requiring the
+// operator to separately know and re-type the master's own domain into a
+// second config file (see spoke.env.example / MULTI_SITE_SPEC.md §4).
 router.post('/ping', async (req, res, next) => {
   try {
     const auth = req.headers.authorization || '';
     const rawKey = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
     const key = await SiteJoinKey.authenticate(rawKey);
     if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
-    res.json({ status: 'ok', siteSlug: siteConfig.get().siteSlug, ts: Math.floor(Date.now() / 1000) });
+    res.json({ status: 'ok', siteSlug: siteConfig.get().siteSlug, baseDn: baseDnFrom(conf), ts: Math.floor(Date.now() / 1000) });
   } catch (e) { next(e); }
 });
 
