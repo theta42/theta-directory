@@ -1,3 +1,15 @@
+## v2.21.1
+- fix: **clicking "Run Import" on the LDIF import page threw an uncaught
+  exception instead of showing the confirmation dialog.** `ldif_import.ejs`
+  calls `app.messages.confirm(message, null, 'warning')` — that page has no
+  inline `.actionMessage` element — and `@simpleworkjs/frontend`'s
+  `renderActionHtml` called `.closest()` directly on the null target.
+  Bumped to `@simpleworkjs/frontend` v0.4.1, which also fixes `confirm()`
+  having no toast fallback at all for a page with no inline target (it
+  previously just logged a console warning and left the promise pending
+  forever, which would have made the button look broken even after the
+  crash itself was fixed).
+
 ## v2.21.0
 - feat: **`POST /api/site/ping` now reports `baseDn`.** A spoke joining this
   site as master can fetch its LDAP base DN with only the join key it was
