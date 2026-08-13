@@ -1,10 +1,6 @@
 {
   "name": "t42-theta-directory",
-<<<<<<< HEAD
   "version": "2.20.0",
-=======
-  "version": "2.20.0",
->>>>>>> affc51e (release(v2.20.0): service subtype registration, per-service metrics, live service UI)
   "description": "A very simple LDAP management and SSO system",
   "author": [
     {
