@@ -377,6 +377,16 @@
         </small>
       </div>
     </div>
+
+    <!-- Live service status (kind === 'service'). Populated by
+         loadServiceStatus() when the modal opens. -->
+    <div id="service-live-container" style="display: none;">
+      <hr>
+      <h6 class="text-muted">Live status &amp; metrics</h6>
+      <div id="service-live-body" class="service-live-body">
+        <div class="text-muted small"><i class="fa-solid fa-spinner fa-spin me-1"></i>Loading live status…</div>
+      </div>
+    </div>
   `;
 
   var detailsTabHtml = `
@@ -675,6 +685,12 @@
   var rawResources = [];
   var accessSummary = {};
   var promoteSlug = null;
+  // The id of the service resource whose live-status panel is currently open in
+  // the modal; null when the modal is showing a non-service resource or none.
+  var currentServiceResourceId = null;
+  // Debounce handle for re-rendering the open service-status panel on telemetry
+  // frames.
+  var serviceStatusTimer = null;
 
   $(document).ready(async function() {
     await loadResources();
@@ -1410,6 +1426,12 @@
     populateHostDropdown($('#res-host-id').val());
   }
 
+  // Clear the live service-status panel's tracked state when the modal closes.
+  $(document).on('hidden.bs.modal', function(){
+    currentServiceResourceId = null;
+    clearTimeout(serviceStatusTimer);
+  });
+
   // Delegated (not direct) since app.modal.open() rebuilds the modal body
   // from scratch every call -- a direct .on() bind here would silently stop
   // firing after the first Add/Edit.
@@ -1835,6 +1857,94 @@
     });
   }
 
+  // Fetch and render the live status/metrics for a service resource (kind ===
+  // 'service'). Called when the modal opens and re-called on every agent
+  // telemetry frame so the panel stays live. Falls back to the last good data
+  // (or a clear message) rather than throwing when the agent is offline.
+  async function loadServiceStatus(id) {
+    const r = resourcesById[id];
+    const $body = $('#service-live-body');
+    if (!r || !$body.length) return;
+
+    try {
+      const res = await app.api.get(`directory-admin/resources/${id}/driver-metrics`);
+      const m = (res && res.metrics) || {};
+      $body.html(serviceStatusHtml(r, m));
+      const $container = $('#service-live-container');
+      if ($container.length) $container.show();
+    } catch (err) {
+      $body.html(
+        '<div class="text-muted small"><i class="fa-solid fa-triangle-exclamation me-1"></i>Live status unavailable: ' +
+        esc((err && err.message) || 'agent offline or not bound') + '</div>'
+      );
+    }
+  }
+
+  // Render a service resource's live status card from the driver-metrics
+  // response. Handles the different per-subtype shapes (active/cpu/mem/restarts
+  ///uptime for systemd/docker/podman/process; next_run/last_run for schedules;
+  //status for VMs).
+  function serviceStatusHtml(r, m) {
+    const meta = r.metadata || {};
+    const subType = meta.subType || 'systemd';
+    const svc = m.service || {};
+
+    const badge = (on) =>
+      `<span class="badge ${on ? 'bg-success' : 'bg-danger'}">${on ? 'Active' : 'Inactive'}</span>`;
+
+    const fmtBytes = (b) => {
+      if (b == null) return 'N/A';
+      if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GiB';
+      if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MiB';
+      if (b >= 1024) return (b / 1024).toFixed(0) + ' KiB';
+      return b + ' B';
+    };
+    const fmtDur = (s) => {
+      if (s == null) return 'N/A';
+      const d = moment.duration(s, 'seconds');
+      if (d.asDays() >= 1) return Math.floor(d.asDays()) + 'd ' + d.hours() + 'h';
+      if (d.asHours() >= 1) return Math.floor(d.asHours()) + 'h ' + d.minutes() + 'm';
+      return Math.floor(d.asMinutes()) + 'm ' + d.seconds() + 's';
+    };
+    const fmtTs = (ts) => ts ? moment(ts).format('YYYY-MM-DD HH:mm') : 'N/A';
+
+    const row = (label, val) =>
+      `<div class="col-6 col-md-3"><div class="text-muted small">${label}</div><div class="fw-semibold">${val}</div></div>`;
+
+    let extra = '';
+    if (svc.next_run || svc.last_run) {
+      extra = `
+        <div class="row g-2 mt-1">
+          ${row('Next run', fmtTs(svc.next_run))}
+          ${row('Last run', fmtTs(svc.last_run))}
+          ${row('Triggered', svc.triggered_count != null ? esc(svc.triggered_count) : 'N/A')}
+        </div>`;
+    }
+    if (svc.status) {
+      extra += `<div class="mt-2"><span class="badge bg-info">${esc(svc.status)}</span></div>`;
+    }
+
+    return `
+      <div class="card mb-0 border shadow-sm">
+        <div class="card-body p-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong><i class="fa-solid fa-cube me-1"></i>${esc(r.name)}</strong>
+            ${badge(svc.active !== false)}
+          </div>
+          <div class="row g-2">
+            ${row('Sub type', esc(subType))}
+            ${row('State', esc(svc.substate || svc.status || 'N/A'))}
+            ${row('CPU', (svc.cpu_usage_percent != null && svc.cpu_usage_percent >= 0)
+              ? esc(svc.cpu_usage_percent.toFixed(1)) + '%' : 'N/A')}
+            ${row('Memory', fmtBytes(svc.memory_bytes))}
+            ${row('Restarts', svc.n_restarts != null ? esc(svc.n_restarts) : 'N/A')}
+            ${row('Uptime', fmtDur(svc.uptime_seconds))}
+          </div>
+          ${extra}
+        </div>
+      </div>`;
+  }
+
   async function openEditModal(id) {
     const r = resourcesById[id];
     if (!r) return;
@@ -1886,6 +1996,19 @@
     refreshChildrenUI(r.id);
     loadResourceSecrets(r.id);
     await loadLdapGroups();
+
+    // Live status/metrics for service resources. Tracked so telemetry frames
+    // can re-render just the open panel.
+    currentServiceResourceId = r.kind === 'service' ? id : null;
+    const $svc = $('#service-live-container');
+    if ($svc.length) {
+      if (r.kind === 'service') {
+        loadServiceStatus(id);
+      } else {
+        currentServiceResourceId = null;
+        $svc.hide();
+      }
+    }
   }
 
   var currentResourceSecretsList = [];
@@ -3727,6 +3850,12 @@
       dirAgentSocket.on('agent.telemetry', function(msg){
         const a = msg && agentsById[msg.agentId];
         if (a) { a.lastTelemetry = msg.payload; a.isOnline = true; renderTable(); }
+        // Keep an open service-status panel live: re-fetch metrics when the
+        // host's telemetry advances. Debounced so bursts collapse to one call.
+        if (currentServiceResourceId) {
+          clearTimeout(serviceStatusTimer);
+          serviceStatusTimer = setTimeout(function(){ loadServiceStatus(currentServiceResourceId); }, 400);
+        }
       });
       dirAgentSocket.on('agent.discovery', function(msg){
         const a = msg && agentsById[msg.agentId];

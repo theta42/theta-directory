@@ -461,6 +461,26 @@ refresh_expired_interval = 300
             await agentManager.handleTelemetry(current, payload);
             socketPubsub.emitChannel(app.io, 'agent.telemetry', { agentId: current.id, payload });
             break;
+          case 'register_service':
+            try {
+              await agentManager.handleServiceRegistration(current, payload);
+              ws.send(JSON.stringify({ type: 'response', payload: { status: 'ok', message: 'service registered' } }));
+            } catch (err) {
+              console.error(`[Theta Agent] register_service for ${current.name} failed:`, err.message);
+              ws.send(JSON.stringify({ type: 'response', payload: { status: 'error', message: err.message } }));
+            }
+            socketPubsub.emitChannel(app.io, 'agent.service_registered', { agentId: current.id, payload });
+            break;
+          case 'unregister_service':
+            try {
+              await agentManager.handleServiceUnregistration(current, payload);
+              ws.send(JSON.stringify({ type: 'response', payload: { status: 'ok', message: 'service unregistered' } }));
+            } catch (err) {
+              console.error(`[Theta Agent] unregister_service for ${current.name} failed:`, err.message);
+              ws.send(JSON.stringify({ type: 'response', payload: { status: 'error', message: err.message } }));
+            }
+            socketPubsub.emitChannel(app.io, 'agent.service_unregistered', { agentId: current.id, payload });
+            break;
           case 'heartbeat':
             await agentManager.handleHeartbeat(current, payload, ws);
             break;

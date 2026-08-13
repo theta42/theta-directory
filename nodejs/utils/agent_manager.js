@@ -142,21 +142,153 @@ class AgentManager {
   }
 
   async handleTelemetry(agent, payload) {
-    await this.touch(agent, {
-      lastTelemetry: {
-        cpu_usage_percent: payload.cpu_usage_percent || 0,
-        cpu_details: payload.cpu_details || {},
-        ram_usage_percent: payload.ram_usage_percent || 0,
-        ram_details: payload.ram_details || {},
-        disk_usage_percent: payload.disk_usage_percent || 0,
-        disks: Array.isArray(payload.disks) ? payload.disks : [],
-        logged_users: Array.isArray(payload.logged_users) ? payload.logged_users : [],
-        host_details: payload.host_details || {},
-        zfs_health: payload.zfs_health || 'N/A',
-        gpu_usage_percent: payload.gpu_usage_percent ?? -1,
-        timestamp: payload.timestamp || new Date().toISOString()
+    const stored = {
+      cpu_usage_percent: payload.cpu_usage_percent || 0,
+      cpu_details: payload.cpu_details || {},
+      ram_usage_percent: payload.ram_usage_percent || 0,
+      ram_details: payload.ram_details || {},
+      disk_usage_percent: payload.disk_usage_percent || 0,
+      disks: Array.isArray(payload.disks) ? payload.disks : [],
+      logged_users: Array.isArray(payload.logged_users) ? payload.logged_users : [],
+      host_details: payload.host_details || {},
+      zfs_health: payload.zfs_health || 'N/A',
+      gpu_usage_percent: payload.gpu_usage_percent ?? -1,
+      timestamp: payload.timestamp || new Date().toISOString()
+    };
+    // Registered systemd services and their live status, so the driver can
+    // surface per-service health from telemetry alone.
+    if (Array.isArray(payload.services)) {
+      stored.services = payload.services;
+    }
+    await this.touch(agent, { lastTelemetry: stored });
+
+    // The telemetry stream is a second, softer reconciliation pass: if a
+    // register_service frame was ever lost, the periodic telemetry keeps the
+    // directory's service children in sync with the agent's `services:` list.
+    if (Array.isArray(payload.services) && payload.services.length > 0) {
+      await this.reconcileServicesFromTelemetry(agent, payload.services).catch(err =>
+        console.error(`[AgentManager] telemetry service reconcile failed for ${agent.id}:`, err.message)
+      );
+    }
+  }
+
+  // Ensure a `service` resource exists in the directory for each registered
+  // service (systemd unit or docker container), parented under this agent's
+  // host. Idempotent and safe to run on every telemetry tick -- it matches by
+  // (host, subtype, name) and only creates when missing.
+  async reconcileServicesFromTelemetry(agent, services) {
+    const { Resource, ResourceEdge } = require('../models/resource');
+
+    // Resolve this agent's host resource (its own binding, or the host a
+    // service inherits from).
+    let hostRes = null;
+    if (agent.resourceId) {
+      hostRes = await Resource.get(agent.resourceId).catch(() => null);
+    }
+    if (!hostRes) {
+      // Unbound agent: find the host that carries this agent's id in metadata.
+      const hosts = await Resource.list({ where: { kind: 'host' } }).catch(() => []);
+      hostRes = hosts.find(h => h.metadata && h.metadata.agentId === agent.id) || null;
+    }
+    if (!hostRes) {
+      console.warn(`[AgentManager] cannot reconcile services for ${agent.id}: no bound host resource`);
+      return;
+    }
+
+    for (const svc of services) {
+      const name = (typeof svc === 'string') ? svc : (svc && svc.name);
+      if (!name) continue;
+      const subtype = (svc && (svc.subtype || svc.subType)) || 'systemd';
+      const slug = `svc-${hostRes.slug.replace(/^host-/, '')}-${subtype}-${name.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`;
+
+      // Match on subtype+name so units/containers/processes of the same name
+      // don't collide. A generic `serviceName` field is authoritative; the
+      // legacy `systemdService`/`dockerContainer` keys are also matched so
+      // resources created before the generic field keep reconciling in place.
+      let serviceRes = (await Resource.list({ where: { kind: 'service' } }).catch(() => []))
+        .find(r => r.metadata && r.metadata.subType === subtype && r.metadata.hostId === hostRes.id &&
+          (r.metadata.serviceName === name || r.metadata.systemdService === name || r.metadata.dockerContainer === name));
+
+      if (!serviceRes) {
+        const metadata = {
+          subType: subtype,
+          serviceName: name,
+          hostId: hostRes.id,
+          agentId: agent.id,
+          managed: true,
+          discovery_sources: ['theta-agent'],
+          last_seen: Date.now()
+        };
+        serviceRes = await Resource.create({
+          id: crypto.randomUUID(),
+          kind: 'service',
+          name: name,
+          slug: slug,
+          metadata: metadata,
+          created_on: Math.floor(Date.now() / 1000)
+        }).catch(() => null);
+      } else {
+        // Backfill the generic field on legacy rows so lookups stay uniform.
+        const md = serviceRes.metadata || {};
+        if (!md.serviceName) {
+          await serviceRes.update({ metadata: { ...md, serviceName: name } }).catch(() => {});
+        }
       }
-    });
+
+      if (serviceRes) {
+        // Parent it under the host unless an edge already exists.
+        const edges = await ResourceEdge.list({ where: { childId: serviceRes.id } }).catch(() => []);
+        if (!edges.length) {
+          await ResourceEdge.create({
+            id: crypto.randomUUID(),
+            parentId: hostRes.id,
+            childId: serviceRes.id,
+            relation: 'hosts'
+          }).catch(() => {});
+        }
+      }
+    }
+  }
+
+  // Register a single service (from an explicit register_service frame).
+  async handleServiceRegistration(agent, payload) {
+    const name = payload && payload.service;
+    if (!name) throw new Error('register_service: missing service name');
+    const subtype = (payload && (payload.subtype || payload.subType)) || 'systemd';
+    await this.reconcileServicesFromTelemetry(agent, [{ name, subtype }]);
+    console.log(`[AgentManager] "${agent.name}" registered ${subtype} service ${name}`);
+  }
+
+  // Remove a service resource (and its host edge) from the directory.
+  async handleServiceUnregistration(agent, payload) {
+    const name = payload && payload.service;
+    if (!name) throw new Error('unregister_service: missing service name');
+
+    const { Resource, ResourceEdge } = require('../models/resource');
+    let hostRes = null;
+    if (agent.resourceId) {
+      hostRes = await Resource.get(agent.resourceId).catch(() => null);
+    }
+    if (!hostRes) {
+      const hosts = await Resource.list({ where: { kind: 'host' } }).catch(() => []);
+      hostRes = hosts.find(h => h.metadata && h.metadata.agentId === agent.id) || null;
+    }
+
+    const services = await Resource.list({ where: { kind: 'service' } }).catch(() => []);
+    const target = services.find(r =>
+      r.metadata &&
+      (r.metadata.serviceName === name || r.metadata.systemdService === name || r.metadata.dockerContainer === name) &&
+      (!hostRes || r.metadata.hostId === hostRes.id)
+    );
+
+    if (!target) {
+      console.log(`[AgentManager] "${agent.name}" unregister ${name}: no such service resource`);
+      return;
+    }
+    const edges = await ResourceEdge.list({ where: { childId: target.id } }).catch(() => []);
+    for (const e of edges) await e.delete().catch(() => {});
+    await target.delete().catch(() => {});
+    console.log(`[AgentManager] "${agent.name}" unregistered ${name}`);
   }
 
   async handleHeartbeat(agent, payload, ws) {

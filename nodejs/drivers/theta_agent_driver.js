@@ -11,7 +11,8 @@ class ThetaAgentDriver extends BaseDriver {
   constructor() {
     super('theta_agent');
     this.supportedSubtypes = new Set([
-      'systemd', 'docker', 'zfs_pool', 'desktop_linux', 'openrc', 'wireguard'
+      'systemd', 'docker', 'podman', 'process', 'systemd-timer', 'cron',
+      'lxc', 'kvm', 'libvirt', 'zfs_pool', 'desktop_linux', 'openrc', 'wireguard'
     ]);
   }
 
@@ -59,13 +60,39 @@ class ThetaAgentDriver extends BaseDriver {
       result.zfs = telemetry.zfs || { status: 'ONLINE', pools: [] };
     } else if (subType === 'wireguard') {
       result.wireguard = telemetry.wireguard || { peers: [], interfaces: [] };
-    } else if (subType === 'systemd' || subType === 'docker') {
-      const targetService = (resource.metadata && (resource.metadata.systemdService || resource.metadata.installPath || resource.name)) || resource.slug;
+    } else if (subType === 'systemd' || subType === 'docker' || subType === 'podman' || subType === 'process' || subType === 'systemd-timer' || subType === 'cron' || subType === 'lxc' || subType === 'kvm' || subType === 'libvirt') {
+      const targetService = (resource.metadata && (resource.metadata.serviceName || resource.metadata.systemdService || resource.metadata.dockerContainer || resource.metadata.installPath || resource.name)) || resource.slug;
+      // Live status + resource usage come from the telemetry stream (per
+      // registered service), falling back to active:true so a freshly created
+      // resource still reads healthy before the next 30s tick lands.
+      const live = (telemetry.services || []).find(s =>
+        s.name === targetService || s.name === (resource.metadata && resource.metadata.serviceName) || s.name === (resource.metadata && resource.metadata.systemdService) || s.name === (resource.metadata && resource.metadata.dockerContainer)
+      );
       result.service = {
         name: targetService,
         subType,
-        active: true
+        active: live ? !!live.active : true,
+        registered: !!live,
+        // Rich per-service metrics reported by the agent (telemetry.go).
+        substate: live ? live.substate || null : null,
+        load_state: live ? live.load_state || null : null,
+        cpu_usage_percent: live && typeof live.cpu_usage_percent === 'number' ? live.cpu_usage_percent : null,
+        memory_bytes: live && typeof live.memory_bytes === 'number' ? live.memory_bytes : null,
+        n_restarts: live && typeof live.n_restarts === 'number' ? live.n_restarts : null,
+        uptime_seconds: live && typeof live.uptime_seconds === 'number' ? live.uptime_seconds : null,
+        // Schedule semantics (systemd-timer/cron).
+        next_run: live ? live.next_run || null : null,
+        last_run: live ? live.last_run || null : null,
+        triggered_count: live && typeof live.triggered_count === 'number' ? live.triggered_count : null,
+        // VM state (lxc/kvm/libvirt).
+        status: live ? live.status || null : null
       };
+    }
+
+    // Any resource backed by this agent also exposes the agent's full list of
+    // registered services (host-level view).
+    if (Array.isArray(telemetry.services) && telemetry.services.length > 0) {
+      result.registeredServices = telemetry.services;
     }
 
     return result;
