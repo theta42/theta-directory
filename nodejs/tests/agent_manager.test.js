@@ -105,6 +105,24 @@ describe('AgentManager PROTOCOL.md v1.2.0 Compliance', () => {
     expect(agent.persisted.lastTelemetry.zfs_health).toBe('ONLINE');
   });
 
+  test('persists registered service status in telemetry (Section 3.2)', async () => {
+    agentManager.registerAgent(agent, mockWs, '192.168.1.100');
+    await agentManager.handleTelemetry(agent, {
+      cpu_usage_percent: 14.5,
+      services: [
+        { name: 'nginx', active: true },
+        { name: 'gitea', active: false }
+      ],
+      timestamp: new Date().toISOString()
+    });
+
+    const services = agent.persisted.lastTelemetry.services;
+    expect(services).toBeDefined();
+    expect(services).toHaveLength(2);
+    expect(services[0]).toEqual({ name: 'nginx', active: true });
+    expect(services[1]).toEqual({ name: 'gitea', active: false });
+  });
+
   test('responds to heartbeat with heartbeat_ack (Section 3.3)', async () => {
     agentManager.registerAgent(agent, mockWs, '192.168.1.100');
     await agentManager.handleHeartbeat(agent, { timestamp: new Date().toISOString() }, mockWs);

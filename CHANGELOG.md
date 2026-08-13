@@ -1,3 +1,21 @@
+## v2.20.0
+- feat: **register and monitor services of many types.** The Directory now
+  reconciles the services an agent registers (`register <type> <name>` for
+  systemd, docker, podman, process, systemd-timer, cron, lxc, kvm/libvirt) into
+  `service` child resources under the host, keyed by a generic `serviceName` +
+  `subType`. Legacy `systemdService`/`dockerContainer` resources are backfilled
+  so they keep reconciling in place.
+- feat: **per-service live metrics.** The theta-agent driver surfaces each
+  service's active state, CPU%, memory, restart count and uptime, plus schedule
+  fields (`next_run`, `last_run`, `triggered_count`) for timers/cron and VM
+  `status` for lxc/kvm.
+- feat: **live service status in the UI.** A service resource's edit modal now
+  shows a live "Status & metrics" card (active badge, CPU/mem/restarts/uptime,
+  schedule or VM state) that re-renders on every `agent.telemetry` WebSocket
+  frame, so the panel updates in near-real-time while open.
+- feat: agent `register_service`/`unregister_service` frames are handled over
+  the agent WebSocket and acknowledged with a response.
+
 ## v2.19.1
 - fix: **the notification bell broke the nav bar.** The container holding username / bell / Log Out is `.form-inline`, a Bootstrap 4 class that does not exist in Bootstrap 5 — it laid out only because everything inside it happened to be an inline element. The bell is a `<div class="dropdown">` (Bootstrap requires that), so it forced a line break and pushed Log Out onto a third row. Replaced with `d-flex align-items-center`, which is what makes a row in Bootstrap 5 and does not depend on what the children are.
 
