@@ -7,6 +7,7 @@ const DockerSocketDriver = require('../drivers/docker_socket_driver');
 const DbDriver = require('../drivers/db_driver');
 const NetworkDriver = require('../drivers/network_driver');
 const K8sDriver = require('../drivers/k8s_driver');
+const IloDriver = require('../drivers/ilo_driver');
 const AgentManager = require('../utils/agent_manager');
 
 /**
@@ -26,6 +27,7 @@ class DriverRegistry {
     this.dbDriver = new DbDriver();
     this.networkDriver = new NetworkDriver();
     this.k8sDriver = new K8sDriver();
+    this.iloDriver = new IloDriver();
 
     // Register drivers in priority order
     this.register(this.thetaAgentDriver);
@@ -34,6 +36,7 @@ class DriverRegistry {
     this.register(this.dbDriver);
     this.register(this.networkDriver);
     this.register(this.k8sDriver);
+    this.register(this.iloDriver);
   }
 
   /**

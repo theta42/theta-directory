@@ -1887,6 +1887,9 @@
   function serviceStatusHtml(r, m) {
     const meta = r.metadata || {};
     const subType = meta.subType || 'systemd';
+
+    if (subType === 'ilo') return iloStatusHtml(r, m);
+
     const svc = m.service || {};
 
     const badge = (on) =>
@@ -1945,6 +1948,63 @@
       </div>`;
   }
 
+  // Render an iLO host's live power/health state (kind === 'host', subType
+  // === 'ilo') plus its power-control buttons. m.ilo comes from
+  // drivers/ilo_driver.js's getMetrics -- a real Redfish read, not a mock.
+  function iloStatusHtml(r, m) {
+    const ilo = m.ilo || {};
+    const on = ilo.powerState === 'On';
+    const healthOk = !ilo.health || ilo.health === 'OK';
+    const powerBadge = `<span class="badge ${on ? 'bg-success' : 'bg-secondary'}">${esc(ilo.powerState || 'Unknown')}</span>`;
+    const healthBadge = ilo.health
+      ? `<span class="badge ${healthOk ? 'bg-success' : 'bg-danger'} ms-1">${esc(ilo.health)}</span>`
+      : '';
+
+    const btn = (label, action, cls, disabled) =>
+      `<button type="button" class="btn btn-sm ${cls} me-1 mb-1" ${disabled ? 'disabled' : ''}
+         onclick="iloAction('${r.id}', '${action}')"><i class="fa-solid fa-power-off me-1"></i>${esc(label)}</button>`;
+
+    return `
+      <div class="card mb-0 border shadow-sm">
+        <div class="card-body p-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <strong><i class="fa-solid fa-server me-1"></i>${esc(r.name)}</strong>
+            <span>${powerBadge}${healthBadge}</span>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6 col-md-3"><div class="text-muted small">Model</div><div class="fw-semibold">${esc(ilo.model || 'N/A')}</div></div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Serial</div><div class="fw-semibold">${esc(ilo.serial || 'N/A')}</div></div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Power</div><div class="fw-semibold">${esc(ilo.powerState || 'N/A')}</div></div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Health</div><div class="fw-semibold">${esc(ilo.health || 'N/A')}</div></div>
+          </div>
+          <div>
+            ${btn('Power On', 'power_on', 'btn-success', on)}
+            ${btn('Reboot', 'reboot', 'btn-warning', !on)}
+            ${btn('Shutdown', 'shutdown', 'btn-outline-danger', !on)}
+            ${btn('Force Off', 'force_off', 'btn-danger', !on)}
+          </div>
+        </div>
+      </div>`;
+  }
+
+  // Power-control button handler for an iLO host -- POSTs to the same
+  // generic driver-action endpoint agentDesktopControl() uses, with an
+  // action name drivers/ilo_driver.js maps to a Redfish ResetType.
+  async function iloAction(resourceId, action) {
+    const labels = { power_on: 'power on', reboot: 'gracefully reboot', shutdown: 'gracefully shut down', force_off: 'force off (hard power-cut)' };
+    const confirmed = await app.messages.confirm(`Are you sure you want to ${labels[action] || action} this server via iLO?`, $('#res-modal'), 'danger');
+    if (!confirmed) return;
+    try {
+      app.messages.action(`Sending '${action}' to iLO...`, $('#res-modal'), 'info');
+      const res = await app.api.post(`directory-admin/resources/${resourceId}/driver-action`, { action });
+      if (res && res.result && res.result.status === 'error') throw new Error(res.result.message);
+      app.messages.action(`iLO '${action}' dispatched.`, $('#res-modal'), 'success');
+      setTimeout(function(){ loadServiceStatus(resourceId); }, 2000);
+    } catch (err) {
+      app.messages.action(err.message || 'iLO action failed', $('#res-modal'), 'danger');
+    }
+  }
+
   async function openEditModal(id) {
     const r = resourcesById[id];
     if (!r) return;
@@ -1997,12 +2057,16 @@
     loadResourceSecrets(r.id);
     await loadLdapGroups();
 
-    // Live status/metrics for service resources. Tracked so telemetry frames
-    // can re-render just the open panel.
-    currentServiceResourceId = r.kind === 'service' ? id : null;
+    // Live status/metrics for service resources, and for an iLO host (same
+    // driver-metrics endpoint, a different response shape -- see
+    // serviceStatusHtml's subType === 'ilo' branch). Tracked so telemetry
+    // frames can re-render just the open panel.
+    const isIloHost = r.kind === 'host' && (r.metadata || {}).subType === 'ilo';
+    const showLive = r.kind === 'service' || isIloHost;
+    currentServiceResourceId = showLive ? id : null;
     const $svc = $('#service-live-container');
     if ($svc.length) {
-      if (r.kind === 'service') {
+      if (showLive) {
         loadServiceStatus(id);
       } else {
         currentServiceResourceId = null;
