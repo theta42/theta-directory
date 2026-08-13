@@ -38,6 +38,17 @@ module.exports = {
     { key: 'url',      label: 'iLO URL',  type: 'url',      required: true, placeholder: 'https://ilo.example.com' },
     { key: 'username', label: 'Username', type: 'text',     required: true, placeholder: 'Administrator' },
     { key: 'password', label: 'Password', type: 'password', required: true, secret: true },
+    // Links the iLO resource to the server it belongs to, however that
+    // server is already tracked in the Directory (theta-agent, Proxmox,
+    // manual entry, ...) -- same "operator supplies the slug, since a plugin
+    // has no DB access to look it up itself" pattern as docker.js's
+    // hostSlug. Find the target's slug on its own edit page. Deliberately
+    // NOT auto-matched by MAC/IP: this resource's own `ip`/`macAddress` are
+    // the iLO's out-of-band management NIC, not the host's -- merging by
+    // that would misrepresent the host's real address as the iLO's, or vice
+    // versa, on whichever resource the generic reconciler folded into the
+    // other. See `kind: 'bmc'` below for the other half of that guard.
+    { key: 'hostSlug', label: 'Server resource slug (optional)', type: 'text', required: false, placeholder: 'host_dl380-01' },
     { key: 'location',    label: 'Location / Site (optional)', type: 'site_select', required: false, placeholder: 'Default Site' },
     { key: 'autoPromote', label: 'Auto-promote to Directory',  type: 'boolean',     required: false, default: false }
   ],
@@ -110,16 +121,24 @@ module.exports = {
     const primaryIface = interfaces.find(i => i.ip) || null;
 
     const resources = [{
-      kind: 'host',
+      // NOT 'host'. This resource is the BMC, not the server -- a real,
+      // separately-addressable device with its own IP/MAC, health and
+      // firmware, reachable even when the server it manages is fully off.
+      // Deliberately a DIFFERENT kind than the server's own directory entry
+      // (kind: 'host', however it got there -- theta-agent, Proxmox, manual)
+      // so the generic reconciler's MAC/IP/name matching (discovery_reconciler.js,
+      // `kindCompatible`: candidates are filtered to the same kind before any
+      // match rule runs) can never fold this into that resource and let the
+      // iLO's own out-of-band address silently overwrite the host's real
+      // one, or vice versa, depending on merge order. They're linked
+      // explicitly instead -- see the `hostSlug` config field above and the
+      // edge below.
+      kind: 'bmc',
       name: system.HostName || system.Model || `iLO (${url.replace(/^https?:\/\//, '')})`,
       slug,
       metadata: {
         subType: 'ilo',
         address: url,
-        // The iLO management NIC is what "reaches" this resource -- the
-        // reconciler's ip/macAddress-based matching should key off that, not
-        // an OS NIC that may belong to an already-discovered `host` row for
-        // the same box via theta-agent/proxmox/docker.
         ip: iloIp,
         macAddress: iloMac,
         model: system.Model || null,
@@ -133,9 +152,9 @@ module.exports = {
         cpuCount: (system.ProcessorSummary && system.ProcessorSummary.Count) || null,
         cpuModel: (system.ProcessorSummary && system.ProcessorSummary.Model) || null,
         memoryGiB: (system.MemorySummary && system.MemorySummary.TotalSystemMemoryGiB) || null,
-        // The host's own NICs, recorded for the reconciler to match against
-        // (see the ip/macAddress comment above for why the iLO's own NIC is
-        // what's used for THIS resource's primary address instead).
+        // The host's own NICs, as the BMC sees them -- informational only
+        // (e.g. "does this match the host I linked via hostSlug"); kind: 'bmc'
+        // above already rules out these ever driving an accidental merge.
         interfaces,
         hostIp: primaryIface ? primaryIface.ip : null,
         hostMac: primaryIface ? primaryIface.mac : null,
@@ -144,7 +163,11 @@ module.exports = {
       }
     }];
 
-    return { resources, edges: [] };
+    const edges = [];
+    const hostSlug = (config.hostSlug || '').trim();
+    if (hostSlug) edges.push({ parentSlug: hostSlug, childSlug: slug, relation: 'bmc' });
+
+    return { resources, edges };
   },
 
   // The generalized plugin contract calls `run`; the discovery plugins keep

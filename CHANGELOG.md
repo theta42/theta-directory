@@ -1,3 +1,18 @@
+## v2.22.1
+- fix: **an iLO resource could merge into and corrupt the actual server's
+  host resource.** The `ilo` plugin (v2.22.0) reported `kind: 'host'` with
+  the iLO's own out-of-band management IP/MAC as `ip`/`macAddress` — the
+  generic discovery reconciler only matches/merges resources of the same
+  `kind`, and a server already in the Directory (via theta-agent, Proxmox,
+  ...) is also `kind: 'host'`, so an overlapping MAC in the interfaces the
+  iLO plugin also collects from the server's own NICs could fold the two
+  into one row, with whichever side merged second silently overwriting the
+  other's real address. The `ilo` plugin now reports `kind: 'bmc'` instead
+  — a different kind the reconciler can never auto-merge into a `host` row
+  — and a new optional `hostSlug` config field (same pattern as `docker.js`'s
+  `hostSlug`) explicitly links the BMC to the server resource it belongs to
+  via a `bmc` edge, however that server is already tracked.
+
 ## v2.22.0
 - feat: **HP iLO discovery + power control.** A new `ilo` discovery plugin
   (`plugins/discovery/ilo.js`, Redfish-based, self-signed-cert tolerant like
