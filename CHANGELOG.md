@@ -1,3 +1,6 @@
+## v2.22.2
+- feat: **interactive notification controls and live toast popups.** Adopted `@simpleworkjs/frontend` 0.4.2 with live in-app toast alerts (`toast: true`) for foreground real-time notifications, rich FontAwesome model category icons with semantic badge coloring, and interactive dropdown controls (*Mark all read*, *Clear list*).
+
 ## v2.22.1
 - fix: **an iLO resource could merge into and corrupt the actual server's
   host resource.** The `ilo` plugin (v2.22.0) reported `kind: 'host'` with
