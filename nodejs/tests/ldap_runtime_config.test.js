@@ -50,6 +50,7 @@ describe('ldap_runtime_config', () => {
 		// retry is what makes a peer that is down rejoin on its own rather
 		// than staying dead until a restart.
 		expect(v).toContain('retry="60 +"');
+		expect(v).toContain('tls_reqcert=never');
 	});
 
 	// A value written by syncreplValue must round-trip through the parser, or

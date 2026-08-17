@@ -49,15 +49,18 @@ function replicateToSpokes(reason) {
 // mesh-routing preference turn into "spoke never gets updates."
 function resyncUrls(spoke) {
 	const urls = [];
-	if (spoke.meshIp) {
+	const meshAddr = spoke.meshIp || (spoke.ldapServerId ? `10.${spoke.ldapServerId}.0.2` : null);
+	if (meshAddr) {
 		// The peer site's directory, addressed directly over the routed mesh
 		// (utils/mesh_route.js). This needs a route for 10.0.0.0/8 via the
 		// local gateway; where that route is absent the public-endpoint
 		// fallback below still carries the push, just over the internet.
-		const target = meshServiceTarget(spoke.meshIp);
+		const target = meshServiceTarget(meshAddr);
 		if (target) urls.push(`http://${target.host}:${target.port}/api/site/resync`);
 	}
-	urls.push(String(spoke.endpoint).replace(/\/+$/, '') + '/api/site/resync');
+	if (spoke.endpoint) {
+		urls.push(String(spoke.endpoint).replace(/\/+$/, '') + '/api/site/resync');
+	}
 	return urls;
 }
 

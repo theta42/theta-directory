@@ -4,12 +4,29 @@ const {Auth} = require('../models/auth');
 
 async function auth(req, res, next){
 	try{
-		// API-only token: `Authorization: Bearer sso_<id>_<secret>`.
+		// API-only token: `Authorization: Bearer sso_<id>_<secret>` or `Bearer <join_key>` with `x-forwarded-user`.
 		// Takes precedence over the browser session header so a script can call
 		// the same /api/* routes the UI uses.
 		const authz = req.header('authorization') || '';
 		if(authz.slice(0, 7).toLowerCase() === 'bearer '){
-			const tokenStr = authz.slice(7);
+			const tokenStr = authz.slice(7).trim();
+
+			// Inter-site spoke-forwarded request: `Authorization: Bearer <join_key>` with `X-Forwarded-User: <uid>`
+			const fwdUser = req.header('x-forwarded-user');
+			if (fwdUser) {
+				const { SiteJoinKey } = require('../models/site_join_key');
+				const key = await SiteJoinKey.authenticate(tokenStr).catch(() => null);
+				if (key) {
+					const { User } = require('../models/user');
+					const user = await User.get(fwdUser).catch(() => null);
+					if (user && user.uid) {
+						req.user = user;
+						req.forwardedFromSpoke = req.header('x-forwarded-spoke') || 'spoke';
+						return next();
+					}
+				}
+			}
+
 			if (tokenStr.startsWith('sso_')) {
 				const user = await Auth.checkApiToken(tokenStr);
 				if(user && user.uid){

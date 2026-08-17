@@ -1,6 +1,6 @@
 {
   "name": "t42-theta-directory",
-  "version": "2.22.2",
+  "version": "2.23.0",
   "description": "A very simple LDAP management and SSO system",
   "author": [
     {
@@ -11,7 +11,7 @@
   "scripts": {
     "start": "node ./bin/www",
     "dev": "npx nodemon --ignore public/ ./bin/www",
-    "test": "NODE_ENV=test jest tests/groups.test.js tests/socket_pubsub.test.js tests/subtypes.test.js tests/site_join.test.js tests/site_config.test.js tests/site_replicate.test.js tests/proxy_client.test.js tests/reconciler.test.js tests/nmap_plugin.test.js tests/jump_client.test.js tests/ldap_replication.test.js tests/orm_method_guard.test.js tests/ldap_tunnel.test.js tests/site_promote.test.js tests/mesh_route.test.js tests/ldap_runtime_config.test.js tests/ldap_reconcile.test.js tests/mutex.test.js tests/unique_index_repair.test.js tests/ldif_import.test.js tests/mesh_addressing.test.js tests/mesh_clients.test.js tests/mesh_roster.test.js tests/ilo_plugin.test.js tests/ilo_driver.test.js --forceExit"
+    "test": "NODE_ENV=test jest tests/groups.test.js tests/socket_pubsub.test.js tests/subtypes.test.js tests/site_join.test.js tests/site_config.test.js tests/site_replicate.test.js tests/proxy_client.test.js tests/reconciler.test.js tests/nmap_plugin.test.js tests/jump_client.test.js tests/ldap_replication.test.js tests/orm_method_guard.test.js tests/ldap_tunnel.test.js tests/site_promote.test.js tests/mesh_route.test.js tests/ldap_runtime_config.test.js tests/ldap_reconcile.test.js tests/mutex.test.js tests/unique_index_repair.test.js tests/ldif_import.test.js tests/mesh_addressing.test.js tests/mesh_clients.test.js tests/mesh_roster.test.js tests/ilo_plugin.test.js tests/ilo_driver.test.js tests/spoke_write_proxy.test.js --forceExit"
   },
   "jest": {
     "testEnvironment": "node",
