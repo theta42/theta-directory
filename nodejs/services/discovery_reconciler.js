@@ -31,7 +31,7 @@ class DiscoveryReconciler {
       const locStr = String(location).trim().toLowerCase();
       targetSite = sites.find(s => s.name.toLowerCase() === locStr || s.slug.toLowerCase() === locStr);
       if (!targetSite) {
-        const locSlug = `site-${locStr.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')}`;
+        const locSlug = `site_${locStr.replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '')}`;
         targetSite = await Resource.create({
           id: crypto.randomUUID(),
           kind: 'site',
@@ -50,7 +50,7 @@ class DiscoveryReconciler {
           id: crypto.randomUUID(),
           kind: 'site',
           name: 'Default Site',
-          slug: 'site-default',
+          slug: 'site_default',
           created_on: Math.floor(Date.now() / 1000)
         }).catch(() => null);
       }

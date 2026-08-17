@@ -151,8 +151,8 @@ moduleload      ppolicy
 moduleload      memberof
 moduleload      refint
 moduleload      auditlog
+moduleload      syncprov
 NESTGROUP_MODULE_PLACEHOLDER
-SYNCPROV_MODULE_PLACEHOLDER
 
 # TLS (LDAPS on 636 + StartTLS on 389). Cert/key paths are fixed; the files are
 # generated/mounted above. We accept clients without their own cert (the common
@@ -206,6 +206,12 @@ NESTGROUP_OVERLAY_PLACEHOLDER
 overlay         auditlog
 auditlog        /var/lib/ldap/auditlog.ldif
 
+# syncprov overlay (provides replication provider support for dynamic MMR)
+overlay         syncprov
+syncprov-checkpoint 100 10
+syncprov-sessionlog 100
+
+SERVER_ID_PLACEHOLDER
 REPLICATION_BLOCK_PLACEHOLDER
 
 # Access controls
@@ -270,14 +276,13 @@ fi
 if [[ -n "${LDAP_SERVER_ID:-}" && -n "${LDAP_REPLICATION_HOSTS:-}" ]]; then
     info "Configuring Multi-Master replication (Server ID: ${LDAP_SERVER_ID})"
     sed -i "s|^SERVER_ID_PLACEHOLDER|ServerID ${LDAP_SERVER_ID}|" /etc/openldap/slapd.conf
-    sed -i "s|^SYNCPROV_MODULE_PLACEHOLDER|moduleload      syncprov|" /etc/openldap/slapd.conf
     
     # Generate syncrepl blocks
-    REPL_BLOCK="overlay syncprov\nsyncprov-checkpoint 100 10\nsyncprov-sessionlog 100\n\n"
+    REPL_BLOCK=""
     RID=100
     for HOST in ${LDAP_REPLICATION_HOSTS}; do
         RID=$((RID + 1))
-        REPL_BLOCK="${REPL_BLOCK}syncrepl rid=${RID}\n  provider=${HOST}\n  type=refreshAndPersist\n  retry=\"60 +\"\n  searchbase=\"${LDAP_BASE_DN}\"\n  bindmethod=simple\n  binddn=\"${LDAP_BIND_DN}\"\n  credentials=\"${LDAP_ADMIN_PASS}\"\n\n"
+        REPL_BLOCK="${REPL_BLOCK}syncrepl rid=${RID}\n  provider=${HOST}\n  type=refreshAndPersist\n  retry=\"60 +\"\n  searchbase=\"${LDAP_BASE_DN}\"\n  bindmethod=simple\n  binddn=\"${LDAP_BIND_DN}\"\n  credentials=\"${LDAP_ADMIN_PASS}\"\n  tls_reqcert=never\n\n"
     done
     REPL_BLOCK="${REPL_BLOCK}mirrormode on\n"
     
@@ -286,7 +291,6 @@ if [[ -n "${LDAP_SERVER_ID:-}" && -n "${LDAP_REPLICATION_HOSTS:-}" ]]; then
     mv /etc/openldap/slapd.conf.tmp /etc/openldap/slapd.conf
 else
     sed -i "/^SERVER_ID_PLACEHOLDER/d" /etc/openldap/slapd.conf
-    sed -i "/^SYNCPROV_MODULE_PLACEHOLDER/d" /etc/openldap/slapd.conf
     sed -i "/^REPLICATION_BLOCK_PLACEHOLDER/d" /etc/openldap/slapd.conf
 fi
 

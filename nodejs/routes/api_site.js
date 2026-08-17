@@ -60,6 +60,7 @@ const { MeshSite } = require('../models/mesh_site');
 async function slurpLdif() {
   const baseDn = baseDnFrom(conf);
   const candidates = [
+    ['slapcat', '-F', '/etc/openldap/slapd.d', '-b', baseDn],
     ['slapcat', '-b', baseDn],
     ['slapcat', '-f', '/etc/openldap/slapd.conf', '-b', baseDn]
   ];
@@ -70,6 +71,33 @@ async function slurpLdif() {
     } catch (e) { /* try the next invocation */ }
   }
   throw new Error('slapcat failed: could not dump local LDAP tree');
+}
+
+// exportSharedBaoSecrets dumps shared integration, plugin, and cluster secrets from OpenBao
+async function exportSharedBaoSecrets() {
+  const baoConf = require('@simpleworkjs/bao-conf');
+  const exported = [];
+  const knownPrefixes = ['integrations', 'plugins', 'sso-manager'];
+  for (const prefix of knownPrefixes) {
+    try {
+      const listResp = await baoConf.request('GET', `secret/metadata/${prefix}?list=true`).catch(() => null);
+      if (listResp && listResp.ok) {
+        const body = await listResp.json().catch(() => ({}));
+        const keys = (body.data && body.data.keys) || [];
+        for (const k of keys) {
+          const path = `${prefix}/${k}`;
+          const val = await baoConf.get(path).catch(() => null);
+          if (val) exported.push({ path, data: val });
+        }
+      } else {
+        const val = await baoConf.get(prefix).catch(() => null);
+        if (val && typeof val === 'object' && Object.keys(val).length > 0) {
+          exported.push({ path: prefix, data: val });
+        }
+      }
+    } catch (e) {}
+  }
+  return exported;
 }
 
 // ── Export (MASTER side, Bearer site-join-key; no admin session) ────────────
@@ -83,7 +111,7 @@ router.post('/export', async (req, res, next) => {
     // meshSites: the cluster roster. Without it a spoke has no idea any other
     // site exists, its gateway builds no peers, and the mesh silently only
     // works at whichever site happens to be the master.
-    const [ldif, resources, edges, signingKey, meshSites] = await Promise.all([
+    const [ldif, resources, edges, signingKey, meshSites, agents, baoSecrets] = await Promise.all([
       slurpLdif(),
       Resource.list(),
       ResourceEdge.list(),
@@ -96,7 +124,9 @@ router.post('/export', async (req, res, next) => {
       // Make sure sites that joined but whose gateway has not published yet
       // still appear, so a new site is visible to the rest of the cluster
       // before anyone starts its gateway.
-      meshRoster.syncFromSpokes().then(() => meshRoster.roster()).catch(() => [])
+      meshRoster.syncFromSpokes().then(() => meshRoster.roster()).catch(() => []),
+      Agent.list().catch(() => []),
+      exportSharedBaoSecrets().catch(() => [])
     ]);
 
     await key.update({ use_count: (key.use_count || 0) + 1, last_used_on: Math.floor(Date.now() / 1000) }).catch(() => {});
@@ -109,6 +139,8 @@ router.post('/export', async (req, res, next) => {
       resources: (resources || []).map(r => (r.toJSON ? r.toJSON() : r)),
       edges: (edges || []).map(e => (e.toJSON ? e.toJSON() : e)),
       meshSites: (meshSites || []).map(m => (m.toJSON ? m.toJSON() : m)),
+      agents: (agents || []).map(a => (a.toPublic ? a.toPublic() : (a.toJSON ? a.toJSON() : a))),
+      baoSecrets: baoSecrets || [],
       ...(signingKey ? { signingKey } : {})
     });
   } catch (e) { next(e); }
@@ -150,6 +182,7 @@ router.post('/spokes', async (req, res, next) => {
     if (!endpoint || !/^https?:\/\//.test(endpoint)) {
       return res.status(400).json({ status: 'error', message: 'a valid http(s) endpoint is required' });
     }
+    const cleanEndpoint = String(endpoint).replace(/\/+$/, '');
 
     const now = Math.floor(Date.now() / 1000);
     // Serialized: "pick the lowest free ServerID, then create the row" is a
@@ -159,7 +192,7 @@ router.post('/spokes', async (req, res, next) => {
     // originators apart. (Seen for real: two concurrent registrations, both
     // ldapServerId 2.)
     const spoke = await withLock('site-spoke-register', async () => {
-      let row = (await SiteSpoke.list({ where: { endpoint } }))[0];
+      let row = (await SiteSpoke.list({ where: { endpoint: cleanEndpoint } }))[0];
       const patch = { siteSlug: siteSlug || (row && row.siteSlug) || null, last_seen_on: now, noInbound: !!noInbound, meshIp: meshIp || '', publicHost: publicHost || '' };
       if (row) {
         await row.update(patch);
@@ -167,13 +200,13 @@ router.post('/spokes', async (req, res, next) => {
       }
       return SiteSpoke.create({
         id: crypto.randomUUID(),
-        endpoint,
+        endpoint: cleanEndpoint,
         pushToken: SiteSpoke.generatePushToken(),
         created_on: now,
         ldapServerId: await nextFreeLdapServerId(),
         ...patch
       });
-    }, { label: `spoke registration: ${endpoint}` });
+    }, { label: `spoke registration: ${cleanEndpoint}` });
 
     // Mirror the spoke's gateway identity into the roster.
     //
@@ -188,18 +221,47 @@ router.post('/spokes', async (req, res, next) => {
         const existing = await meshRoster.bySiteId(spoke.ldapServerId);
         const patch = {
           slug: spoke.siteSlug || '',
+          name: spoke.siteSlug || '',
           gatewayPublicKey,
           gatewayEndpoint: gatewayEndpoint || '',
           publishedAt: now,
           lastSeenAt: now
         };
         if (existing) await existing.update(patch);
-        else await MeshSite.create({ id: crypto.randomUUID(), siteId: spoke.ldapServerId, name: spoke.siteSlug || '', ...patch });
+        else await MeshSite.create({ id: crypto.randomUUID(), siteId: spoke.ldapServerId, ...patch });
         // Every other site needs this too, so push it out rather than waiting
         // for the next unrelated catalog change.
         require('../utils/site_replicate').replicateToSpokes('mesh-roster-changed');
       } catch (e) {
         console.warn(`[site] could not record spoke ${spoke.ldapServerId}'s gateway details: ${e.message}`);
+      }
+    }
+
+    // Ensure a kind: 'site' Resource exists in the Master's Directory catalog
+    // so the master and other spokes see this spoke in the Directory tree.
+    if (spoke.siteSlug) {
+      try {
+        const cleanName = spoke.siteSlug.replace(/^site[-_]/i, '');
+        const resourceSlug = `site_${cleanName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').toLowerCase()}`;
+        const existingSite = await Resource.getBySlug(resourceSlug).catch(() => null);
+        if (!existingSite) {
+          await Resource.create({
+            id: crypto.randomUUID(),
+            kind: 'site',
+            name: cleanName || spoke.siteSlug,
+            slug: resourceSlug,
+            metadata: {
+              isCurrentSite: false,
+              isSpoke: true,
+              isProduction: true,
+              endpoint: cleanEndpoint
+            },
+            created_on: now
+          });
+          require('../utils/site_replicate').replicateToSpokes('spoke-site-created');
+        }
+      } catch (err) {
+        console.warn(`[site] could not auto-create site resource for spoke: ${err.message}`);
       }
     }
 
@@ -379,8 +441,9 @@ router.post('/master-changed', async (req, res, next) => {
     // have moved on without this node.
     let resyncNote = 'not attempted';
     try {
-      const imp = await adoptFromMaster({ masterUrl: base, joinKey: newJoinKey });
-      adopted = { created: imp.imp.created, updated: imp.imp.updated, edges: imp.imp.edgeCount };
+      const adoptedResult = await adoptFromMaster({ masterUrl: base, joinKey: newJoinKey });
+      const impData = (adoptedResult && adoptedResult.imp) || adoptedResult || {};
+      adopted = { created: impData.created || 0, updated: impData.updated || 0, edges: impData.edgeCount || 0 };
       resyncNote = 'resynced from the new master';
     } catch (e) {
       resyncNote = 'resync failed: ' + e.message;
@@ -823,12 +886,56 @@ async function adoptFromMaster({ masterUrl, joinKey }) {
     }
   }
 
+  // 4. Adopt enrolled agents from master, so this spoke sees all agents in the cluster.
+  if (Array.isArray(exportData.agents)) {
+    for (const a of exportData.agents) {
+      if (!a || !a.id) continue;
+      try {
+        const existing = await Agent.get(a.id).catch(() => null);
+        const fields = {
+          name: a.name || 'Unnamed Agent',
+          description: a.description || null,
+          tokenPrefix: a.tokenPrefix || null,
+          resourceId: a.resourceId || null,
+          revoked: !!a.revoked,
+          enrolled_by: a.enrolled_by || 'replicated',
+          enrolled_on: a.enrolled_on || null,
+          version: a.version || null,
+          last_seen: a.last_seen || null,
+          last_ip: a.last_ip || null,
+          lastDiscovery: a.lastDiscovery || null,
+          lastTelemetry: a.lastTelemetry || null
+        };
+        if (existing) {
+          await existing.update(fields);
+        } else {
+          await Agent.create({ id: a.id, tokenHash: a.tokenHash || '', ...fields });
+        }
+      } catch (e) {
+        // Best-effort: an individual agent sync failure should not fail adoption
+      }
+    }
+  }
+
+  // 5. Adopt shared OpenBao secrets from master (integrations, plugins, cluster conf)
+  if (Array.isArray(exportData.baoSecrets)) {
+    const baoConf = require('@simpleworkjs/bao-conf');
+    for (const s of exportData.baoSecrets) {
+      if (!s || !s.path || !s.data) continue;
+      try {
+        await baoConf.set(s.path, s.data);
+      } catch (e) {
+        console.warn(`[site] could not adopt OpenBao secret at ${s.path}: ${e.message}`);
+      }
+    }
+  }
+
   return { imp, ldapNote, signingKeyNote, exportData, base };
 }
 
 router.post('/join', async (req, res, next) => {
   try {
-    const { masterUrl, joinKey, selfUrl, noInbound, meshIp, publicHost } = req.body || {};
+    const { masterUrl, joinKey, selfUrl, noInbound, meshIp, publicHost, siteSlug } = req.body || {};
     if (!masterUrl || !joinKey) {
       return res.status(400).json({ status: 'error', message: 'masterUrl and joinKey are required' });
     }
@@ -854,6 +961,10 @@ router.post('/join', async (req, res, next) => {
     }
     const { imp, ldapNote, signingKeyNote, exportData, base } = adopted;
 
+    // Spoke identity: preserve this spoke's own siteSlug (or the one passed
+    // explicitly on join), never overwrite with master's siteSlug.
+    const effectiveSiteSlug = siteSlug || (cfg.siteSlug && cfg.siteSlug !== 'site-default' ? cfg.siteSlug : exportData.siteSlug) || 'site-spoke';
+
     // 3. Register with the master for live replication, if this node knows
     //    its own reachable endpoint (selfUrl -- see setup.env's
     //    CFG_SELF_DIRECTORY_URL). Best-effort: a spoke that can't/won't
@@ -876,7 +987,7 @@ router.post('/join', async (req, res, next) => {
           // join flow could ever trigger it.
           body: JSON.stringify({
             endpoint: selfUrl,
-            siteSlug: exportData.siteSlug || cfg.siteSlug,
+            siteSlug: effectiveSiteSlug,
             ...(noInbound ? { noInbound: true, meshIp, publicHost } : {})
           })
         });
@@ -900,7 +1011,7 @@ router.post('/join', async (req, res, next) => {
     siteConfig.save({
       isMaster: false,
       masterUrl: base,
-      siteSlug: exportData.siteSlug || cfg.siteSlug,
+      siteSlug: effectiveSiteSlug,
       masterJoinKey: joinKey,
       // Remembered so this node can re-register itself later without being
       // told its own address again -- notably when a promotion elsewhere
@@ -916,7 +1027,7 @@ router.post('/join', async (req, res, next) => {
     logAudit('joined', {
       actor: req.user.uid,
       masterUrl: base,
-      siteSlug: exportData.siteSlug,
+      siteSlug: effectiveSiteSlug,
       resourcesCreated: imp.created,
       resourcesUpdated: imp.updated,
       edges: imp.edgeCount,
@@ -928,7 +1039,7 @@ router.post('/join', async (req, res, next) => {
     res.json({
       status: 'ok',
       message: 'Joined master site ' + base,
-      siteSlug: exportData.siteSlug || cfg.siteSlug,
+      siteSlug: effectiveSiteSlug,
       resources: { created: imp.created, updated: imp.updated, edges: imp.edgeCount },
       ldap: { note: ldapNote },
       signingKey: { note: signingKeyNote },

@@ -134,7 +134,7 @@ function providersByRid(syncreplValues) {
 // later. The rid lives in the value itself, where it belongs.
 function syncreplValue({ rid, provider, baseDn, bindDn, cred }) {
 	return `rid=${rid} provider=${provider} type=refreshAndPersist retry="60 +" ` +
-		`searchbase="${baseDn}" bindmethod=simple binddn="${bindDn}" credentials="${cred}"`;
+		`searchbase="${baseDn}" bindmethod=simple binddn="${bindDn}" credentials="${cred}" tls_reqcert=never`;
 }
 
 // Converges the running config on { serverId, peers }.

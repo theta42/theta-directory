@@ -87,6 +87,11 @@ app.use('/docs', require('./routes/docs'));
 // API routes for authentication. 
 app.use('/api/auth',  require('./routes/auth'));
 
+// Spoke write proxy (Pragmatic Hub & Spoke model):
+// Intercepts mutating API requests (POST/PUT/DELETE) on spokes and transparently
+// forwards them to the Master directory. Reads serve locally from edge cache.
+app.use('/api', require('./middleware/spoke_write_proxy'));
+
 // API routes for working with users. All endpoints need to be have valid user.
 app.use('/api/user', middleware.auth, require('./routes/user'));
 

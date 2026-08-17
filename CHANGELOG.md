@@ -1,3 +1,26 @@
+## v2.23.0
+- feat: **Transparent Write-Forwarding (Pragmatic Hub & Spoke Architecture).**
+  - Added `spoke_write_proxy` middleware (`middleware/spoke_write_proxy.js`): Mutating API requests (`POST`, `PUT`, `PATCH`, `DELETE`) hitting a spoke node are transparently reverse-proxied to the Master directory with full user context (`X-Forwarded-User`), client IP (`X-Forwarded-For`), and spoke identity (`X-Forwarded-Spoke`).
+  - Read requests (`GET`, `HEAD`, `OPTIONS`) continue to be served locally from edge cache at sub-millisecond speeds.
+  - Offline Resilience: If the Master is unreachable during a write operation, returns `HTTP 503` indicating read-only offline mode, while local reads/auth continue without interruption.
+  - `middleware/auth.js`: Authenticates incoming inter-site spoke requests with `SiteJoinKey` and runs operations under the forwarded user's permissions and audit context.
+- feat: **OpenBao Shared Secrets Synchronization.**
+  - `POST /api/site/export` now exports cluster-shared integration secrets, plugin configs, and resource secrets from OpenBao (`secret/integrations/*`, `secret/plugins/*`, `secret/conf/*`, `secret/resources/*`).
+  - `adoptFromMaster` adopts and deep-merges these secrets into the spoke's local OpenBao vault via `@simpleworkjs/bao-conf`, establishing complete disaster recovery parity.
+- feat: **Enrolled Agent Fleet Replication.**
+  - `POST /api/site/export` includes enrolled `Agent` catalog records, and `adoptFromMaster` adopts them into the local `Agent` table so all cluster nodes share a unified view of all connected agents.
+- fix: **Spoke Site Identity & Master Directory Auto-Provisioning.**
+  - `POST /api/site/join` now preserves the spoke's own unique `siteSlug` rather than overwriting it with the master's slug.
+  - `POST /api/site/spokes` updates both `name` and `slug` on `MeshSite` and auto-provisions a `Resource` of `kind: 'site'` in the master's catalog, fanning out replication so all nodes display the multi-site tree.
+- fix: **OpenLDAP Multi-Master Replication (MMR) & TLS Handshake.**
+  - `docker-entrypoint.sh` always loads `moduleload syncprov` and configures `overlay syncprov` on mdb database to allow dynamic runtime replication.
+  - Added `tls_reqcert=never` to `utils/ldap_runtime_config.js` (`syncreplValue`) and container entrypoint configs so OpenLDAP syncrepl accepts cluster self-signed TLS certificates.
+  - `slurpLdif()` prioritizes `slapcat -F /etc/openldap/slapd.d` to dump live `cn=config` state.
+- fix: **Promotion & Mesh Routing Fixes.**
+  - Fixed `imp.imp` undefined reference TypeError in `POST /api/site/master-changed`.
+  - `utils/site_replicate.js:resyncUrls` resolves mesh endpoints (`10.<ldapServerId>.0.2`) from `spoke.ldapServerId` in addition to `spoke.meshIp`.
+  - Aligned discovery site resource slugs to `site_<name>`.
+
 ## v2.22.2
 - feat: **interactive notification controls and live toast popups.** Adopted `@simpleworkjs/frontend` 0.4.2 with live in-app toast alerts (`toast: true`) for foreground real-time notifications, rich FontAwesome model category icons with semantic badge coloring, and interactive dropdown controls (*Mark all read*, *Clear list*).
 
