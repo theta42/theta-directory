@@ -211,7 +211,6 @@ overlay         syncprov
 syncprov-checkpoint 100 10
 syncprov-sessionlog 100
 
-SERVER_ID_PLACEHOLDER
 REPLICATION_BLOCK_PLACEHOLDER
 
 # Access controls
@@ -272,10 +271,16 @@ else
     sed -i "/^NESTGROUP_OVERLAY_PLACEHOLDER$/d" /etc/openldap/slapd.conf
 fi
 
+# ── Server ID (Global) ──
+if [[ -n "${LDAP_SERVER_ID:-}" ]]; then
+    sed -i "s|^SERVER_ID_PLACEHOLDER$|ServerID ${LDAP_SERVER_ID}|g" /etc/openldap/slapd.conf
+else
+    sed -i "/^SERVER_ID_PLACEHOLDER$/d" /etc/openldap/slapd.conf
+fi
+
 # ── Multi-Master Replication Configuration ──
-if [[ -n "${LDAP_SERVER_ID:-}" && -n "${LDAP_REPLICATION_HOSTS:-}" ]]; then
-    info "Configuring Multi-Master replication (Server ID: ${LDAP_SERVER_ID})"
-    sed -i "s|^SERVER_ID_PLACEHOLDER|ServerID ${LDAP_SERVER_ID}|" /etc/openldap/slapd.conf
+if [[ -n "${LDAP_REPLICATION_HOSTS:-}" ]]; then
+    info "Configuring Multi-Master replication peers"
     
     # Generate syncrepl blocks
     REPL_BLOCK=""
@@ -290,7 +295,6 @@ if [[ -n "${LDAP_SERVER_ID:-}" && -n "${LDAP_REPLICATION_HOSTS:-}" ]]; then
     awk -v repl="$(printf '%b' "$REPL_BLOCK")" '{gsub(/REPLICATION_BLOCK_PLACEHOLDER/, repl)}1' /etc/openldap/slapd.conf > /etc/openldap/slapd.conf.tmp
     mv /etc/openldap/slapd.conf.tmp /etc/openldap/slapd.conf
 else
-    sed -i "/^SERVER_ID_PLACEHOLDER/d" /etc/openldap/slapd.conf
     sed -i "/^REPLICATION_BLOCK_PLACEHOLDER/d" /etc/openldap/slapd.conf
 fi
 
@@ -306,7 +310,7 @@ fi
 # So the seed file is converted to the cn=config backend and slapd runs from
 # that, which makes olcServerID/olcSyncrepl modifiable at RUNTIME over
 # ldapmodify -- no restart, no downtime, no operator. utils/ldap_runtime_config.js
-# in the app does exactly that whenever the cluster changes.
+# in the app does practical runtime changes whenever the cluster changes.
 #
 # The conversion is redone from slapd.conf on every boot, deliberately: it
 # keeps upgrades working (a new release's schema/overlay changes land the
@@ -347,7 +351,8 @@ mkdir -p "$CONFIG_DIR"
 # So run the real conversion and check that cn=config.ldif actually landed.
 slaptest -f /etc/openldap/slapd.conf -F "$CONFIG_DIR" >> /var/lib/ldap/slapd.log 2>&1 || true
 if [[ ! -f "$CONFIG_DIR/cn=config.ldif" ]]; then
-    error "slaptest could not convert slapd.conf to $CONFIG_DIR — see /var/lib/ldap/slapd.log"
+    error "slaptest could not convert slapd.conf to $CONFIG_DIR — slapd.log:"
+    cat /var/lib/ldap/slapd.log >&2 || true
     exit 1
 fi
 
@@ -376,7 +381,8 @@ for i in $(seq 1 30); do
 done
 
 if ! kill -0 "$SLAPD_PID" 2>/dev/null; then
-    error "OpenLDAP failed to start"
+    error "OpenLDAP failed to start — slapd.log:"
+    cat /var/lib/ldap/slapd.log >&2 || true
     exit 1
 fi
 
