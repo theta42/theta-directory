@@ -1,3 +1,7 @@
+## v2.23.2
+- fix: **OpenLDAP startup failure on replication configuration (`SERVER_ID_PLACEHOLDER`).** Removed a duplicate `SERVER_ID_PLACEHOLDER` inside the `database mdb` block of `slapd.conf` that remained unreplaced when `LDAP_SERVER_ID` was configured, causing `slaptest` conversion to fail during container entrypoint.
+- fix: **expose `slapd.log` on startup / conversion failures in container logs.** If `slaptest` conversion or `slapd` fails to start during container initialization, the full `/var/lib/ldap/slapd.log` is now printed directly to stderr instead of failing silently.
+
 ## v2.23.1
 - fix: **spoke write proxy resolves local caller identity (`auth-token` / Bearer PAT) before forwarding to master.** `spoke_write_proxy` runs before route-level `middleware.auth`, so requests with an `auth-token` session header previously had no `req.user` attached at proxy time and were forwarded without `X-Forwarded-User`, causing the Master to reject them with `401 Unauthorized` (e.g. on `POST /api/user/accept-tos`, `PUT /api/user/:uid`, and `PUT /api/user/password` during onboarding). The proxy now checks the local session/API token on the spoke and populates `X-Forwarded-User`.
 - fix: **support pushToken in addition to joinKey for inter-site authentication.** `middleware/auth.js` now verifies incoming spoke proxy requests against both `SiteJoinKey` and `SiteSpoke`'s `pushToken`.
