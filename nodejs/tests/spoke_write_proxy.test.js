@@ -118,6 +118,49 @@ describe('spoke_write_proxy middleware', () => {
     expect(JSON.parse(sentBody.toString())).toEqual({ status: 'ok', proxied: true });
   });
 
+  test('resolves user from auth-token header when req.user is not yet populated', async () => {
+    jest.spyOn(siteConfig, 'get').mockReturnValue({
+      isMaster: false,
+      masterUrl: 'https://master.example.com',
+      masterJoinKey: 'stj_test_join_key',
+      siteSlug: 'site-branch'
+    });
+
+    const { Auth } = require('../models/auth');
+    jest.spyOn(Auth, 'checkToken').mockResolvedValue({ uid: 'bob' });
+
+    const req = {
+      method: 'POST',
+      path: '/api/user/accept-tos',
+      originalUrl: '/api/user/accept-tos',
+      headers: {
+        'auth-token': 'token-123'
+      },
+      body: {}
+    };
+
+    let sentStatus = null;
+    let sentBody = null;
+    const sentHeaders = {};
+    const res = {
+      status(s) { sentStatus = s; return this; },
+      setHeader(k, v) { sentHeaders[k] = v; },
+      send(b) { sentBody = b; }
+    };
+    const next = jest.fn();
+
+    await spokeWriteProxy(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(mockFetchCalls.length).toBe(1);
+    const call = mockFetchCalls[0];
+    expect(call.url).toBe('https://master.example.com/api/user/accept-tos');
+    expect(call.opts.method).toBe('POST');
+    expect(call.opts.headers['authorization']).toBe('Bearer stj_test_join_key');
+    expect(call.opts.headers['x-forwarded-user']).toBe('bob');
+    expect(sentStatus).toBe(200);
+  });
+
   test('returns 503 when Master is unreachable', async () => {
     jest.spyOn(siteConfig, 'get').mockReturnValue({
       isMaster: false,
