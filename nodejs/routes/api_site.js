@@ -36,6 +36,7 @@ const { withLock } = require('../utils/mutex');
 const { reconcileSoon } = require('../utils/ldap_reconcile');
 const User = require('../models/user');
 const { Agent } = require('../models/agent');
+const { UserVerification } = require('../models/verification');
 const siteConfig = require('../utils/site_config');
 const {
   importDirectory, ldapAddArgs, baseDnFrom, siteIsFresh,
@@ -111,7 +112,7 @@ router.post('/export', async (req, res, next) => {
     // meshSites: the cluster roster. Without it a spoke has no idea any other
     // site exists, its gateway builds no peers, and the mesh silently only
     // works at whichever site happens to be the master.
-    const [ldif, resources, edges, signingKey, meshSites, agents, baoSecrets] = await Promise.all([
+    const [ldif, resources, edges, signingKey, meshSites, agents, baoSecrets, userVerifications] = await Promise.all([
       slurpLdif(),
       Resource.list(),
       ResourceEdge.list(),
@@ -126,7 +127,8 @@ router.post('/export', async (req, res, next) => {
       // before anyone starts its gateway.
       meshRoster.syncFromSpokes().then(() => meshRoster.roster()).catch(() => []),
       Agent.list().catch(() => []),
-      exportSharedBaoSecrets().catch(() => [])
+      exportSharedBaoSecrets().catch(() => []),
+      UserVerification.listDetail().catch(() => [])
     ]);
 
     await key.update({ use_count: (key.use_count || 0) + 1, last_used_on: Math.floor(Date.now() / 1000) }).catch(() => {});
@@ -141,6 +143,7 @@ router.post('/export', async (req, res, next) => {
       meshSites: (meshSites || []).map(m => (m.toJSON ? m.toJSON() : m)),
       agents: (agents || []).map(a => (a.toPublic ? a.toPublic() : (a.toJSON ? a.toJSON() : a))),
       baoSecrets: baoSecrets || [],
+      userVerifications: userVerifications || [],
       ...(signingKey ? { signingKey } : {})
     });
   } catch (e) { next(e); }
@@ -927,6 +930,19 @@ async function adoptFromMaster({ masterUrl, joinKey }) {
       } catch (e) {
         console.warn(`[site] could not adopt OpenBao secret at ${s.path}: ${e.message}`);
       }
+    }
+  }
+
+  // 6. Adopt user verification records from master (TOS acceptance, verified status)
+  if (Array.isArray(exportData.userVerifications)) {
+    for (const uv of exportData.userVerifications) {
+      if (!uv || !uv.uid) continue;
+      try {
+        const existing = await UserVerification.getOrCreate(uv.uid).catch(() => null);
+        if (existing) {
+          await existing.update(uv);
+        }
+      } catch (e) {}
     }
   }
 

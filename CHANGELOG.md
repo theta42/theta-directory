@@ -1,3 +1,8 @@
+## v2.23.1
+- fix: **spoke write proxy resolves local caller identity (`auth-token` / Bearer PAT) before forwarding to master.** `spoke_write_proxy` runs before route-level `middleware.auth`, so requests with an `auth-token` session header previously had no `req.user` attached at proxy time and were forwarded without `X-Forwarded-User`, causing the Master to reject them with `401 Unauthorized` (e.g. on `POST /api/user/accept-tos`, `PUT /api/user/:uid`, and `PUT /api/user/password` during onboarding). The proxy now checks the local session/API token on the spoke and populates `X-Forwarded-User`.
+- fix: **support pushToken in addition to joinKey for inter-site authentication.** `middleware/auth.js` now verifies incoming spoke proxy requests against both `SiteJoinKey` and `SiteSpoke`'s `pushToken`.
+- feat: **replicate `UserVerification` state.** `POST /api/site/export` and `adoptFromMaster` now include `UserVerification` records so TOS acceptance, verification status, and onboarding states stay synchronized cluster-wide.
+
 ## v2.23.0
 - feat: **Transparent Write-Forwarding (Pragmatic Hub & Spoke Architecture).**
   - Added `spoke_write_proxy` middleware (`middleware/spoke_write_proxy.js`): Mutating API requests (`POST`, `PUT`, `PATCH`, `DELETE`) hitting a spoke node are transparently reverse-proxied to the Master directory with full user context (`X-Forwarded-User`), client IP (`X-Forwarded-For`), and spoke identity (`X-Forwarded-Spoke`).

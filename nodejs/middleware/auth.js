@@ -11,12 +11,14 @@ async function auth(req, res, next){
 		if(authz.slice(0, 7).toLowerCase() === 'bearer '){
 			const tokenStr = authz.slice(7).trim();
 
-			// Inter-site spoke-forwarded request: `Authorization: Bearer <join_key>` with `X-Forwarded-User: <uid>`
+			// Inter-site spoke-forwarded request: `Authorization: Bearer <join_key_or_push_token>` with `X-Forwarded-User: <uid>`
 			const fwdUser = req.header('x-forwarded-user');
 			if (fwdUser) {
 				const { SiteJoinKey } = require('../models/site_join_key');
-				const key = await SiteJoinKey.authenticate(tokenStr).catch(() => null);
-				if (key) {
+				const { SiteSpoke } = require('../models/site_spoke');
+				const isJoinKey = await SiteJoinKey.authenticate(tokenStr).catch(() => null);
+				const isPushToken = !isJoinKey && await SiteSpoke.list({ where: { pushToken: tokenStr } }).then(l => l && l[0]).catch(() => null);
+				if (isJoinKey || isPushToken) {
 					const { User } = require('../models/user');
 					const user = await User.get(fwdUser).catch(() => null);
 					if (user && user.uid) {

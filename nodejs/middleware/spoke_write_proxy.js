@@ -59,14 +59,33 @@ async function spokeWriteProxy(req, res, next) {
   delete forwardHeaders['transfer-encoding'];
   delete forwardHeaders['connection'];
 
-  // Ensure authorization header is set with master join key if not already provided
-  if (!forwardHeaders['authorization'] && cfg.masterJoinKey) {
+  // Resolve user on the spoke if not already populated (since this middleware runs before router-level auth)
+  let user = req.user;
+  if (!user) {
+    const { Auth } = require('../models/auth');
+    const authz = req.headers['authorization'] || '';
+    if (authz.slice(0, 7).toLowerCase() === 'bearer ') {
+      const tokenStr = authz.slice(7).trim();
+      if (tokenStr.startsWith('sso_')) {
+        try { user = await Auth.checkApiToken(tokenStr); } catch (e) {}
+      }
+    }
+    if (!user) {
+      const authTok = req.headers['auth-token'];
+      if (authTok) {
+        try { user = await Auth.checkToken({ token: authTok }); } catch (e) {}
+      }
+    }
+  }
+
+  // Ensure authorization header is set with master join key so Master validates this spoke
+  if (cfg.masterJoinKey) {
     forwardHeaders['authorization'] = `Bearer ${cfg.masterJoinKey}`;
   }
 
-  // Forward user context
-  if (req.user && req.user.uid) {
-    forwardHeaders['x-forwarded-user'] = req.user.uid;
+  // Forward user context to the master
+  if (user && user.uid) {
+    forwardHeaders['x-forwarded-user'] = user.uid;
   }
   forwardHeaders['x-forwarded-for'] = req.ip || req.headers['x-forwarded-for'] || '';
   forwardHeaders['x-forwarded-proto'] = req.protocol || 'http';
