@@ -43,6 +43,30 @@ function ldapHostFor(endpoint) {
 	}
 }
 
+// The syncrepl provider URL for a REGISTERED SPOKE.
+//
+// A no-inbound spoke (MULTI_SITE_SPEC.md §5.2) has no public IP by definition,
+// so `ldaps://<its public hostname>:636` -- what deriving from the HTTP
+// endpoint gives -- is a host nothing outside its LAN can dial. That is exactly
+// the site the relay machinery exists for, and yet its MMR peer entry was the
+// one guaranteed never to connect: syncrepl on every other node sat retrying a
+// dead address forever, and the spoke's LDAP tree silently stopped converging.
+//
+// So a spoke that reported a mesh IP is dialled over the tunnel instead, the
+// same preference utils/site_replicate.js already applies to resync pushes and
+// for the same reason (the WireGuard tunnel is the only path that exists).
+// Everything else is unchanged.
+function ldapHostForSpoke(spoke) {
+	if (!spoke) return null;
+	if (spoke.noInbound) {
+		const { meshServiceTarget } = require('./mesh_route');
+		const meshAddr = spoke.meshIp || (spoke.ldapServerId ? `10.${spoke.ldapServerId}.0.2` : null);
+		const target = meshAddr ? meshServiceTarget(meshAddr) : null;
+		if (target) return `ldaps://${target.host}:636`;
+	}
+	return ldapHostFor(spoke.endpoint);
+}
+
 const SLAPD_CONF_PATH = process.env.SLAPD_CONF_PATH || '/etc/openldap/slapd.conf';
 
 // The ServerID this node's OpenLDAP is ACTUALLY running with right now, read
@@ -159,6 +183,6 @@ function replicationDrift({ advertisedServerId, advertisedPeers, state }) {
 }
 
 module.exports = {
-	MAX_LDAP_SERVER_ID, nextFreeLdapServerId, ldapHostFor,
+	MAX_LDAP_SERVER_ID, nextFreeLdapServerId, ldapHostFor, ldapHostForSpoke,
 	currentSlapdServerId, currentSlapdPeers, currentReplicationState, replicationDrift
 };

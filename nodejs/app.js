@@ -88,8 +88,16 @@ app.use('/docs', require('./routes/docs'));
 app.use('/api/auth',  require('./routes/auth'));
 
 // Spoke write proxy (Pragmatic Hub & Spoke model):
-// Intercepts mutating API requests (POST/PUT/DELETE) on spokes and transparently
-// forwards them to the Master directory. Reads serve locally from edge cache.
+// On a spoke, forwards the mutating API requests whose state the master owns
+// AND replicates back (LDAP identity, the Resource catalog, the agent fleet) to
+// the master, with this spoke's push token and the calling user's identity.
+// Everything else -- this site's own lifecycle, mesh, agent-ops and SSSD auth
+// paths -- runs locally, as does every read. See the middleware for why that is
+// an allowlist rather than a deny-list.
+//
+// NOTE: this is mounted on '/api', so Express strips that prefix before the
+// middleware sees req.path. The middleware matches on req.originalUrl for
+// exactly that reason; do not "simplify" it back to req.path.
 app.use('/api', require('./middleware/spoke_write_proxy'));
 
 // API routes for working with users. All endpoints need to be have valid user.

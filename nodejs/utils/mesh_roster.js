@@ -28,16 +28,28 @@ const now = () => Math.floor(Date.now() / 1000);
 /**
  * This node's own site id.
  *
- * Read from the running slapd config, which is where the join flow writes the
- * id the master handed out -- rather than from a second copy in site.json that
- * could drift from the ServerID actually in use. The master falls back to 1,
- * its reserved id, so a single-site deployment that has never replicated still
- * has a usable mesh identity.
+ * Order matters:
+ *
+ *  1. What the master ASSIGNED this node (persisted at registration, and
+ *     re-persisted every time replication config is applied).
+ *  2. The ServerID in the slapd.conf seed.
+ *  3. 1, the master's reserved id, so a single-site deployment that has never
+ *     replicated still has a usable mesh identity.
+ *
+ * This used to read the seed FIRST. The seed only carries whatever
+ * LDAP_SERVER_ID happened to be in the container environment at boot, and a
+ * spoke does not get that value into its environment until setup.sh has been
+ * re-run after the join -- while slapd's live cn=config was already converged
+ * on the assigned id by utils/ldap_reconcile.js. So between joining and the
+ * next setup.sh run, a freshly-joined spoke published its gateway under the
+ * wrong site id (usually 1, the master's).
  */
 function localSiteId() {
+	const cfg = siteConfig.get();
+	if (cfg.ldapServerId) return Number(cfg.ldapServerId);
 	const fromSlapd = currentSlapdServerId();
 	if (fromSlapd) return fromSlapd;
-	return siteConfig.get().isMaster ? 1 : null;
+	return cfg.isMaster ? 1 : null;
 }
 
 /** The roster, lowest site id first. */

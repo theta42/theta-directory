@@ -41,6 +41,16 @@ function scalarEdge(e) {
 // stamp, and only stamped rows are eligible for removal.
 const REPLICATED_FROM = '__replicatedFrom';
 
+// Sticky counterpart of the above: this row existed on THIS site before
+// replication ever touched it, so the master's row of the same slug is a
+// different object that merely shares a name. Set once, on the first import
+// that sees an unstamped local row, and never cleared -- after that first pass
+// the row would otherwise be indistinguishable from an adopted one.
+//
+// A row carrying it keeps its own metadata (local wins) and is never eligible
+// for the deletion pass.
+const LOCALLY_OWNED = '__locallyOwned';
+
 // edgeKey identifies an edge by what it MEANS (which two resources, which
 // relation) rather than by its row id. The master's edge ids are useless as
 // local identity once resource ids are remapped below, and reconciling on the
@@ -87,6 +97,27 @@ function edgeKey(parentId, childId, relation) {
 //     pointed at ids that don't exist locally. Edge endpoints are remapped
 //     master-id -> slug -> local-id, and an edge whose endpoints can't be
 //     resolved locally is skipped rather than written as a dangling row.
+//
+//  4. It no longer lets the master's metadata overwrite a LOCALLY-OWNED row of
+//     the same slug. Every site's bootstrap seeds the same fixed service slugs
+//     (`sso-manager`, `proxy`, `openldap`, `openresty`, `jump-host`) plus its
+//     own `site_<name>`, so a slug match across two sites is routinely not the
+//     same object at all. A blind upsert-by-slug therefore rewrote the spoke's
+//     own `sso-manager` service with the MASTER's address, and rewrote the
+//     spoke's own site row's `isCurrentSite: true` to false -- after which the
+//     spoke's UI called the master's site "here" and filed new resources under
+//     it. Such a row is still adopted (the catalog stays shaped the same
+//     everywhere), but LOCAL METADATA WINS and the row is never deletable --
+//     the same "operator-set values always win" rule bootstrap.js's own
+//     ensure() applies. See LOCALLY_OWNED.
+//
+//  5. Edge removal is scoped to edges between resources the MASTER KNOWS ABOUT.
+//     It used to delete every local edge the master's export did not contain,
+//     with no provenance check at all -- so every resync tore down the spoke's
+//     own site -> host -> service graph and anything its plugins had discovered
+//     locally. The resources survived (those ARE stamp-guarded); their
+//     parentage did not, which is what made a spoke's directory tree
+//     progressively empty out.
 async function importDirectory({ Resource, ResourceEdge, exportData }) {
   const resources = (exportData && exportData.resources) || [];
   const edges = (exportData && exportData.edges) || [];
@@ -103,6 +134,7 @@ async function importDirectory({ Resource, ResourceEdge, exportData }) {
   // translated into local ids below.
   const masterIdToSlug = new Map();
   const desiredSlugs = new Set();
+  const locallyOwnedSlugs = [];
   const origin = (exportData && exportData.siteSlug) || 'master';
   let created = 0;
   let updated = 0;
@@ -111,10 +143,45 @@ async function importDirectory({ Resource, ResourceEdge, exportData }) {
     if (!s.slug) continue;
     if (s.id) masterIdToSlug.set(s.id, s.slug);
     desiredSlugs.add(s.slug);
+    const local = bySlug.get(s.slug);
+    const localMeta = (local && local.metadata) || {};
+
+    // Was this row here before replication ever touched it? Every site's
+    // bootstrap seeds the SAME fixed service slugs (`sso-manager`, `proxy`,
+    // `openldap`, `openresty`, `jump-host`) and its own `site_<name>`, so a
+    // slug match across sites is routinely NOT the same object. The marker is
+    // sticky because the answer has to survive the very first import: after
+    // that pass the row would otherwise look replicated and lose the
+    // distinction (note 4).
+    const locallyOwned = local
+      ? (localMeta[LOCALLY_OWNED] === true || !localMeta[REPLICATED_FROM])
+      : false;
+
+    if (locallyOwned) {
+      locallyOwnedSlugs.push(s.slug);
+      // Adopt the master's row, but LOCAL METADATA WINS -- the same rule
+      // bootstrap.js's own ensure() uses for a resource that already exists
+      // ("operator-set values always win"). Without it, replication rewrote
+      // this site's own `sso-manager` service with the MASTER's address, and
+      // rewrote this site's own site row's `isCurrentSite: true` to false, so
+      // the spoke's UI started calling the master's site "here" and new
+      // resources were filed under it.
+      //
+      // No REPLICATED_FROM stamp: a locally-owned row must never become
+      // eligible for the deletion pass below.
+      const { id, ...patch } = s;
+      patch.metadata = { ...(s.metadata || {}), ...localMeta, [LOCALLY_OWNED]: true };
+      delete patch.metadata[REPLICATED_FROM];
+      try {
+        await local.update(patch);
+        updated++;
+      } catch (e) { /* row raced or is locally pinned; next resync retries */ }
+      continue;
+    }
+
     // Provenance stamp — see the removal pass below for why this is needed
     // before anything on a spoke can safely be deleted.
     s.metadata = { ...(s.metadata || {}), [REPLICATED_FROM]: origin };
-    const local = bySlug.get(s.slug);
     if (local) {
       // Never repoint an existing row's primary key: local rows may already
       // be referenced (ResourceGroup, local edges). The slug is the identity
@@ -136,10 +203,12 @@ async function importDirectory({ Resource, ResourceEdge, exportData }) {
   // Refresh the slug -> local id map from what is actually on disk now (a
   // create() may have assigned its own id rather than honoring s.id).
   const localIdBySlug = new Map();
+  let rowsNow = [];
   try {
-    const now = await Resource.list();
-    (now || []).forEach(r => { localIdBySlug.set(r.slug, r.id); });
+    rowsNow = (await Resource.list()) || [];
+    rowsNow.forEach(r => { localIdBySlug.set(r.slug, r.id); });
   } catch (e) {
+    rowsNow = [...bySlug.values()];
     for (const [slug, row] of bySlug) localIdBySlug.set(slug, row && row.id);
   }
 
@@ -148,6 +217,26 @@ async function importDirectory({ Resource, ResourceEdge, exportData }) {
     if (slug && localIdBySlug.has(slug)) return localIdBySlug.get(slug);
     return null;
   };
+
+  // Local ids for resources the MASTER GOVERNS, which is what scopes edge
+  // removal (note 5). Two kinds qualify:
+  //
+  //   * it is in this export -- the master has it right now;
+  //   * it was replicated here previously and is NOT in this export -- the
+  //     master deleted it, and the deletion pass below is about to remove it,
+  //     so its edges have to go with it rather than dangle.
+  //
+  // Everything else -- the spoke's own host, its own site row, anything its
+  // plugins discovered locally -- keeps its parentage no matter what the
+  // master's export does or doesn't contain.
+  const masterGovernedIds = new Set();
+  for (const row of rowsNow) {
+    if (!row) continue;
+    const meta = row.metadata || {};
+    const governed = desiredSlugs.has(row.slug)
+      || (!!meta[REPLICATED_FROM] && meta[LOCALLY_OWNED] !== true);
+    if (governed) masterGovernedIds.add(row.id);
+  }
 
   // Desired edge set, in local id space.
   const desired = new Map();
@@ -183,12 +272,16 @@ async function importDirectory({ Resource, ResourceEdge, exportData }) {
     } catch (err) { /* raced; next resync converges */ }
   }
 
-  // Then removals: anything the master no longer has. This is the half that
-  // never ran at all before, so spokes accumulated edges the master had
-  // already deleted.
+  // Then removals: edges the master no longer has, among the resources the
+  // master OWNS. The both-endpoints-replicated guard is what keeps a spoke's
+  // own graph intact -- without it this pass deleted every local edge missing
+  // from the master's export, i.e. the spoke's entire locally-bootstrapped and
+  // locally-discovered topology, on every single resync (note 5).
   let edgesRemoved = 0;
+  let edgesKeptLocal = 0;
   for (const e of existingEdges) {
     if (desired.has(edgeKey(e.parentId, e.childId, e.relation))) continue;
+    if (!masterGovernedIds.has(e.parentId) || !masterGovernedIds.has(e.childId)) { edgesKeptLocal++; continue; }
     try { await e.delete(); edgesRemoved++; } catch (err) { /* ignore */ }
   }
 
@@ -211,7 +304,10 @@ async function importDirectory({ Resource, ResourceEdge, exportData }) {
     try { await row.delete(); resourcesRemoved++; } catch (err) { /* ignore */ }
   }
 
-  return { created, updated, resourcesRemoved, edgeCount, edgesRemoved, edgesSkipped: skipped };
+  return {
+    created, updated, resourcesRemoved, edgeCount, edgesRemoved,
+    edgesSkipped: skipped, edgesKeptLocal, locallyOwned: locallyOwnedSlugs
+  };
 }
 
 // Operational attributes: slapd maintains these itself and rejects any
@@ -335,7 +431,7 @@ async function siteIsFresh({ User, Agent }) {
 }
 
 module.exports = {
-  scalarResource, scalarEdge, edgeKey, REPLICATED_FROM, importDirectory,
+  scalarResource, scalarEdge, edgeKey, REPLICATED_FROM, LOCALLY_OWNED, importDirectory,
   stripOperationalAttrs, OPERATIONAL_ATTRS, summarizeLdapAddResult,
   ldapAddArgs, baseDnFrom, siteIsFresh
 };
