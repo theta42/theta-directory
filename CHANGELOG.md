@@ -1,3 +1,7 @@
+## v2.23.3
+- fix: **synchronous verification state sync on spoke write proxy return.** When proxied mutating user requests (`/api/user/accept-tos`, `/api/user/password`, `/api/user/:uid`) complete successfully, the Spoke's local `UserVerification` table is now immediately updated and `User.clearCache()` is flushed, ensuring the next local `GET /api/user/me` reads the updated onboarding state instantly without race conditions.
+- fix: **onboarding UI display and state reload.** Fixed hidden container display on `/onboarding` and added immediate `app.auth.loadUser(true)` cache invalidation upon completion of onboarding steps, preventing redirect loops.
+
 ## v2.23.2
 - fix: **OpenLDAP startup failure on replication configuration (`SERVER_ID_PLACEHOLDER`).** Removed a duplicate `SERVER_ID_PLACEHOLDER` inside the `database mdb` block of `slapd.conf` that remained unreplaced when `LDAP_SERVER_ID` was configured, causing `slaptest` conversion to fail during container entrypoint.
 - fix: **expose `slapd.log` on startup / conversion failures in container logs.** If `slaptest` conversion or `slapd` fails to start during container initialization, the full `/var/lib/ldap/slapd.log` is now printed directly to stderr instead of failing silently.

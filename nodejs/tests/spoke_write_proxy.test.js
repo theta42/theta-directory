@@ -12,6 +12,7 @@ describe('spoke_write_proxy middleware', () => {
     mockFetchCalls = [];
     mockFetchImpl = async () => ({
       status: 200,
+      ok: true,
       headers: new Map([['content-type', 'application/json']]),
       arrayBuffer: async () => Buffer.from(JSON.stringify({ status: 'ok', proxied: true }))
     });
@@ -159,6 +160,53 @@ describe('spoke_write_proxy middleware', () => {
     expect(call.opts.headers['authorization']).toBe('Bearer stj_test_join_key');
     expect(call.opts.headers['x-forwarded-user']).toBe('bob');
     expect(sentStatus).toBe(200);
+  });
+
+  test('synchronously updates local UserVerification and clears User cache on accept-tos success', async () => {
+    jest.spyOn(siteConfig, 'get').mockReturnValue({
+      isMaster: false,
+      masterUrl: 'https://master.example.com',
+      masterJoinKey: 'stj_test_join_key',
+      siteSlug: 'site-branch'
+    });
+
+    const { Auth } = require('../models/auth');
+    jest.spyOn(Auth, 'checkToken').mockResolvedValue({ uid: 'alice' });
+
+    const { UserVerification } = require('../models/verification');
+    const markTosAcceptedSpy = jest.fn().mockResolvedValue(true);
+    jest.spyOn(UserVerification, 'getOrCreate').mockResolvedValue({
+      markTosAccepted: markTosAcceptedSpy
+    });
+
+    const { User } = require('../models/user');
+    const clearCacheSpy = jest.spyOn(User, 'clearCache').mockImplementation(() => {});
+
+    const req = {
+      method: 'POST',
+      path: '/user/accept-tos',
+      originalUrl: '/api/user/accept-tos',
+      headers: {
+        'auth-token': 'token-456'
+      },
+      body: {}
+    };
+
+    let sentStatus = null;
+    let sentBody = null;
+    const res = {
+      status(s) { sentStatus = s; return this; },
+      setHeader() {},
+      send(b) { sentBody = b; }
+    };
+    const next = jest.fn();
+
+    await spokeWriteProxy(req, res, next);
+
+    expect(sentStatus).toBe(200);
+    expect(UserVerification.getOrCreate).toHaveBeenCalledWith('alice');
+    expect(markTosAcceptedSpy).toHaveBeenCalled();
+    expect(clearCacheSpy).toHaveBeenCalled();
   });
 
   test('returns 503 when Master is unreachable', async () => {
