@@ -6,9 +6,9 @@
 	var currentUser;
 
 	async function loadOnboarding() {
-		currentUser = await app.auth.asyncUser;
+		currentUser = await app.auth.loadUser(true);
 
-		var needs = currentUser.onboardingNeeds || [];
+		var needs = (currentUser && currentUser.onboardingNeeds) || [];
 
 		if (!needs.length) {
 			location.replace('/');
@@ -24,15 +24,20 @@
 		if (needs.includes('password')) {
 			document.getElementById('section-password').style.display = '';
 		}
+		var container = document.getElementById('onboarding-container');
+		if (container) container.style.display = '';
 	}
 
-	function checkAllDone() {
+	async function checkAllDone() {
 		var sections = document.querySelectorAll('.onboarding-section');
 		var anyVisible = false;
 		sections.forEach(function(el) {
 			if (el.style.display !== 'none') anyVisible = true;
 		});
-		if (!anyVisible) location.replace('/');
+		if (!anyVisible) {
+			await app.auth.loadUser(true);
+			location.replace('/');
+		}
 	}
 
 	async function acceptTos() {
@@ -48,6 +53,7 @@
 			});
 			if (!resp.ok) throw new Error('Failed');
 			document.getElementById('section-tos').style.display = 'none';
+			await app.auth.loadUser(true);
 			checkAllDone();
 		} catch(e) {
 			app.messages.toast('Could not save TOS acceptance. Please try again.', 'danger');
@@ -71,6 +77,7 @@
 			});
 			if (!resp.ok) throw new Error('Failed');
 			document.getElementById('section-dob').style.display = 'none';
+			await app.auth.loadUser(true);
 			checkAllDone();
 		} catch(e) {
 			app.messages.toast('Could not save date of birth. Please try again.', 'danger');
@@ -99,6 +106,7 @@
 			});
 			if (!resp.ok) throw new Error('Failed');
 			document.getElementById('section-password').style.display = 'none';
+			await app.auth.loadUser(true);
 			checkAllDone();
 		} catch(e) {
 			app.messages.toast('Could not change password. Please try again.', 'danger');
@@ -110,7 +118,7 @@
 	});
 </script>
 
-<div class="row justify-content-center" style="display:none">
+<div id="onboarding-container" class="row justify-content-center" style="display:none">
 	<div class="col-md-8">
 
 		<div class="card shadow-lg mb-4 mt-2">

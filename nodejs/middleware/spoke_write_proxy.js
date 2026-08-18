@@ -122,6 +122,33 @@ async function spokeWriteProxy(req, res, next) {
     }
 
     const data = await resp.arrayBuffer();
+
+    if (resp.ok) {
+      try {
+        const userMod = require('../models/user');
+        const UserModel = userMod.User || userMod;
+        if (UserModel && typeof UserModel.clearCache === 'function') UserModel.clearCache();
+      } catch (e) {}
+
+      if (user && user.uid) {
+        const path = req.path || '';
+        const orig = req.originalUrl || '';
+        if (path === '/user/accept-tos' || orig.includes('/user/accept-tos')) {
+          try {
+            const { UserVerification } = require('../models/verification');
+            const verif = await UserVerification.getOrCreate(user.uid);
+            await verif.markTosAccepted();
+          } catch (e) {}
+        } else if (path === '/user/password' || orig.includes('/user/password')) {
+          try {
+            const { UserVerification } = require('../models/verification');
+            const verif = await UserVerification.getOrCreate(user.uid);
+            await verif.update({ password_must_change: false });
+          } catch (e) {}
+        }
+      }
+    }
+
     res.send(Buffer.from(data));
   } catch (err) {
     clearTimeout(timer);
