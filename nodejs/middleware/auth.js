@@ -4,26 +4,43 @@ const {Auth} = require('../models/auth');
 
 async function auth(req, res, next){
 	try{
-		// API-only token: `Authorization: Bearer sso_<id>_<secret>` or `Bearer <join_key>` with `x-forwarded-user`.
-		// Takes precedence over the browser session header so a script can call
-		// the same /api/* routes the UI uses.
+		// API-only token: `Authorization: Bearer sso_<id>_<secret>`, or a spoke's
+		// own `Bearer <push_token>` with `x-forwarded-user`. Takes precedence
+		// over the browser session header so a script can call the same /api/*
+		// routes the UI uses.
 		const authz = req.header('authorization') || '';
 		if(authz.slice(0, 7).toLowerCase() === 'bearer '){
 			const tokenStr = authz.slice(7).trim();
 
-			// Inter-site spoke-forwarded request: `Authorization: Bearer <join_key_or_push_token>` with `X-Forwarded-User: <uid>`
+			// Inter-site spoke-forwarded write (middleware/spoke_write_proxy.js):
+			// `Authorization: Bearer <SiteSpoke.pushToken>` + `X-Forwarded-User: <uid>`.
+			//
+			// ONLY a push token is accepted here, deliberately. This used to also
+			// accept a site JOIN key, which made it a cluster-wide impersonation
+			// credential: a join key is minted for operators, pasted into every
+			// spoke's spoke.env, and printed in setup output, and it bought
+			// nothing more than a directory export — so anyone holding one could
+			// assert `X-Forwarded-User: <any uid>` and act as that user on the
+			// master, god_admin included. A push token is per-spoke, minted by
+			// the master, and never leaves that spoke's /config/site.json.
+			//
+			// The spoke is identified by the token, never by the header: when the
+			// caller also sends X-Forwarded-Spoke it must agree with the row the
+			// token resolved to, so one spoke cannot masquerade as another in the
+			// audit trail.
 			const fwdUser = req.header('x-forwarded-user');
 			if (fwdUser) {
-				const { SiteJoinKey } = require('../models/site_join_key');
 				const { SiteSpoke } = require('../models/site_spoke');
-				const isJoinKey = await SiteJoinKey.authenticate(tokenStr).catch(() => null);
-				const isPushToken = !isJoinKey && await SiteSpoke.list({ where: { pushToken: tokenStr } }).then(l => l && l[0]).catch(() => null);
-				if (isJoinKey || isPushToken) {
+				const spoke = await SiteSpoke.list({ where: { pushToken: tokenStr } })
+					.then(l => l && l[0]).catch(() => null);
+				const claimedSlug = req.header('x-forwarded-spoke');
+				const slugMatches = !claimedSlug || !spoke || !spoke.siteSlug || claimedSlug === spoke.siteSlug;
+				if (spoke && slugMatches) {
 					const { User } = require('../models/user');
 					const user = await User.get(fwdUser).catch(() => null);
 					if (user && user.uid) {
 						req.user = user;
-						req.forwardedFromSpoke = req.header('x-forwarded-spoke') || 'spoke';
+						req.forwardedFromSpoke = spoke.siteSlug || 'spoke';
 						return next();
 					}
 				}

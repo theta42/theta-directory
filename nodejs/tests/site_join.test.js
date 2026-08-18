@@ -1,6 +1,9 @@
 'use strict';
 
-const { scalarResource, scalarEdge, importDirectory, ldapAddArgs, baseDnFrom, siteIsFresh } = require('../utils/site_join');
+const {
+  scalarResource, scalarEdge, importDirectory, ldapAddArgs, baseDnFrom, siteIsFresh,
+  REPLICATED_FROM, LOCALLY_OWNED
+} = require('../utils/site_join');
 
 // In-memory model stubs so importDirectory can be exercised without a DB.
 //
@@ -93,8 +96,11 @@ test('importDirectory updates existing resources by slug (master is authoritativ
 
 test('importDirectory removes edges the master no longer has and adds the new ones', async () => {
   const s = makeStore();
-  await s.Resource.create({ id: 'r1', kind: 'site', name: 'S', slug: 'site_s', metadata: {} });
-  await s.Resource.create({ id: 'r2', kind: 'host', name: 'old', slug: 'host_old', metadata: {} });
+  // Both endpoints are rows a PREVIOUS import replicated here (the stamp), so
+  // the master governs the edge between them. host_old has since been deleted
+  // upstream, which is why it is absent from the export below.
+  await s.Resource.create({ id: 'r1', kind: 'site', name: 'S', slug: 'site_s', metadata: { [REPLICATED_FROM]: 'site-hq' } });
+  await s.Resource.create({ id: 'r2', kind: 'host', name: 'old', slug: 'host_old', metadata: { [REPLICATED_FROM]: 'site-hq' } });
   await s.ResourceEdge.create({ id: 'stale', parentId: 'r1', childId: 'r2', relation: 'contains' });
 
   const exportData = {
@@ -117,8 +123,8 @@ test('importDirectory removes edges the master no longer has and adds the new on
 // partway must never leave the spoke with FEWER edges than it should have.
 test('importDirectory adds every desired edge before removing any stale one', async () => {
   const s = makeStore();
-  await s.Resource.create({ id: 'r1', kind: 'site', name: 'S', slug: 'site_s', metadata: {} });
-  await s.Resource.create({ id: 'r2', kind: 'host', name: 'keep', slug: 'host_keep', metadata: {} });
+  await s.Resource.create({ id: 'r1', kind: 'site', name: 'S', slug: 'site_s', metadata: { [REPLICATED_FROM]: 'site-hq' } });
+  await s.Resource.create({ id: 'r2', kind: 'host', name: 'keep', slug: 'host_keep', metadata: { [REPLICATED_FROM]: 'site-hq' } });
   await s.ResourceEdge.create({ id: 'stale', parentId: 'r1', childId: 'r2', relation: 'contains' });
 
   const order = [];
@@ -205,6 +211,121 @@ test('importDirectory converges: a second identical import changes nothing', asy
   expect(s.ResourceEdge.rows.length).toBe(1);
   expect(s.ResourceEdge.rows[0]).toBe(first); // same row object — never deleted/recreated
   expect(second.edgesRemoved).toBe(0);
+});
+
+// ── Locally-owned rows (see LOCALLY_OWNED in utils/site_join.js) ─────────────
+//
+// Every site's bootstrap seeds the SAME fixed service slugs, and the master
+// auto-creates a site row for each spoke under the slug that spoke's own
+// bootstrap already used. Upserting those by slug rewrote a spoke's own
+// records with the master's.
+
+test('importDirectory keeps a locally-owned row\'s own metadata when the master shares its slug', async () => {
+  const s = makeStore();
+  await s.Resource.create({
+    id: 'local-sso', kind: 'service', name: 'SSO Manager', slug: 'sso-manager',
+    metadata: { address: 'https://sso.branch.example.com', port: 3001 }
+  });
+
+  const exportData = {
+    siteSlug: 'site-hq',
+    resources: [{
+      id: 'master-sso', kind: 'service', name: 'SSO Manager', slug: 'sso-manager',
+      metadata: { address: 'https://sso.hq.example.com', port: 3001, icon: 'mdi:shield-account' }
+    }],
+    edges: []
+  };
+
+  await importDirectory({ Resource: s.Resource, ResourceEdge: s.ResourceEdge, exportData });
+
+  const row = s.Resource.rows.find(r => r.slug === 'sso-manager');
+  // This site's own address survives...
+  expect(row.metadata.address).toBe('https://sso.branch.example.com');
+  // ...a key only the master had is still adopted...
+  expect(row.metadata.icon).toBe('mdi:shield-account');
+  // ...and the row is marked so the NEXT import still knows it is ours.
+  expect(row.metadata[LOCALLY_OWNED]).toBe(true);
+  expect(row.metadata[REPLICATED_FROM]).toBeUndefined();
+});
+
+test('importDirectory never clears isCurrentSite on this site\'s own site row', async () => {
+  const s = makeStore();
+  await s.Resource.create({
+    id: 'local-site', kind: 'site', name: 'Branch', slug: 'site_branch',
+    metadata: { isCurrentSite: true }
+  });
+
+  const exportData = {
+    siteSlug: 'site-hq',
+    resources: [
+      // What the master's POST /api/site/spokes auto-creates for this spoke.
+      { id: 'm-branch', kind: 'site', name: 'branch', slug: 'site_branch', metadata: { isCurrentSite: false, isSpoke: true } },
+      { id: 'm-hq', kind: 'site', name: 'HQ', slug: 'site_hq', metadata: { isCurrentSite: true } }
+    ],
+    edges: []
+  };
+
+  await importDirectory({ Resource: s.Resource, ResourceEdge: s.ResourceEdge, exportData });
+  await importDirectory({ Resource: s.Resource, ResourceEdge: s.ResourceEdge, exportData });
+
+  const mine = s.Resource.rows.find(r => r.slug === 'site_branch');
+  expect(mine.metadata.isCurrentSite).toBe(true);
+  expect(mine.metadata.isSpoke).toBe(true); // still adopts what only the master knew
+});
+
+test('importDirectory does not delete a locally-owned row the master dropped', async () => {
+  const s = makeStore();
+  await s.Resource.create({ id: 'local-sso', kind: 'service', name: 'SSO', slug: 'sso-manager', metadata: {} });
+
+  // First import: the master has it too, so the row is marked locally-owned.
+  await importDirectory({
+    Resource: s.Resource, ResourceEdge: s.ResourceEdge,
+    exportData: { siteSlug: 'site-hq', resources: [{ id: 'm', kind: 'service', name: 'SSO', slug: 'sso-manager', metadata: {} }], edges: [] }
+  });
+  // Second import: the master no longer has it. Ours must survive.
+  const res = await importDirectory({
+    Resource: s.Resource, ResourceEdge: s.ResourceEdge,
+    exportData: { siteSlug: 'site-hq', resources: [], edges: [] }
+  });
+
+  expect(s.Resource.rows.find(r => r.slug === 'sso-manager')).toBeTruthy();
+  expect(res.resourcesRemoved).toBe(0);
+});
+
+// The bug that quietly emptied a spoke's directory tree: the removal pass had
+// no provenance check, so every resync deleted every local edge the master's
+// export did not contain.
+test('importDirectory keeps edges the master has no say over', async () => {
+  const s = makeStore();
+  await s.Resource.create({ id: 'my-site', kind: 'site', name: 'Branch', slug: 'site_branch', metadata: { isCurrentSite: true } });
+  await s.Resource.create({ id: 'my-host', kind: 'host', name: 'branchbox', slug: 'host_branchbox', metadata: {} });
+  await s.Resource.create({ id: 'my-sso', kind: 'service', name: 'SSO', slug: 'sso-manager', metadata: {} });
+  // This site's own tree: site -> host -> service.
+  await s.ResourceEdge.create({ id: 'e-a', parentId: 'my-site', childId: 'my-host', relation: 'contains' });
+  await s.ResourceEdge.create({ id: 'e-b', parentId: 'my-host', childId: 'my-sso', relation: 'hosts' });
+
+  // The master's export knows nothing about this site's host, and parents its
+  // OWN sso-manager under its OWN host.
+  const exportData = {
+    siteSlug: 'site-hq',
+    resources: [
+      { id: 'm-site', kind: 'site', name: 'HQ', slug: 'site_hq', metadata: {} },
+      { id: 'm-host', kind: 'host', name: 'hqbox', slug: 'host_hqbox', metadata: {} },
+      { id: 'm-sso', kind: 'service', name: 'SSO', slug: 'sso-manager', metadata: {} }
+    ],
+    edges: [
+      { id: 'me1', parentId: 'm-site', childId: 'm-host', relation: 'contains' },
+      { id: 'me2', parentId: 'm-host', childId: 'm-sso', relation: 'hosts' }
+    ]
+  };
+
+  const res = await importDirectory({ Resource: s.Resource, ResourceEdge: s.ResourceEdge, exportData });
+
+  const pairs = s.ResourceEdge.rows.map(e => `${e.parentId}->${e.childId}`);
+  expect(pairs).toContain('my-site->my-host');
+  expect(pairs).toContain('my-host->my-sso');
+  expect(res.edgesRemoved).toBe(0);
+  expect(res.edgesKeptLocal).toBeGreaterThan(0);
 });
 
 test('scalarResource strips relation fields but keeps metadata', () => {

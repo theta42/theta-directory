@@ -94,6 +94,25 @@ class Agent extends Model {
 		lastTelemetry: { type: 'json', default: {} }
 	};
 
+	// The shape the multi-site export carries (routes/api_site.js).
+	//
+	// Unlike toPublic() this KEEPS tokenHash, and it has to: every site runs the
+	// same directory (MULTI_SITE_SPEC.md §2), so an agent must be able to
+	// authenticate against whichever node it reaches. Replicating agent rows
+	// with the hash stripped -- which is what shipping toPublic() over the wire
+	// did -- gave every spoke a fleet list it could look at and not one agent it
+	// could actually authenticate, so agents at a spoke site could never open a
+	// WebSocket, call /api/v1/ldap for SSSD, or fetch node secrets there.
+	//
+	// It is a SHA-256 hash, not a token: it cannot be replayed as a credential,
+	// and the export that carries it already carries the whole LDAP tree
+	// (password hashes included) and the cluster's Ed25519 signing key, behind
+	// the same one-time join-key gate.
+	toReplica() {
+		const data = this.toJSON ? this.toJSON() : { ...this };
+		return data;
+	}
+
 	// The shape the admin API returns. Never includes tokenHash.
 	toPublic(liveState) {
 		const data = this.toJSON ? this.toJSON() : { ...this };

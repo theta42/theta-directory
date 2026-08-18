@@ -52,7 +52,7 @@ function logAudit(action, details) {
   console.log(JSON.stringify({ timestamp: new Date().toISOString(), component: 'site', action, ...details }));
 }
 
-const { nextFreeLdapServerId, ldapHostFor } = require('../utils/ldap_replication');
+const { nextFreeLdapServerId, ldapHostFor, ldapHostForSpoke } = require('../utils/ldap_replication');
 const meshRoster = require('../utils/mesh_roster');
 const { MeshSite } = require('../models/mesh_site');
 
@@ -74,31 +74,75 @@ async function slurpLdif() {
   throw new Error('slapcat failed: could not dump local LDAP tree');
 }
 
-// exportSharedBaoSecrets dumps shared integration, plugin, and cluster secrets from OpenBao
+// exportSharedBaoSecrets dumps the OpenBao paths that are genuinely CLUSTER-wide
+// (MULTI_SITE_SPEC.md §2.1: `secret/integrations/*`, `secret/plugins/*`).
+//
+// `sso-manager` used to be in this list, and must never be: `secret/sso-manager/conf`
+// is a full mirror of that node's own /config/sso-secrets.js -- its LDAP bind
+// password, jwtSecret, SMTP credentials, bootstrap admin, and stack hostnames.
+// Copying it to a spoke meant @simpleworkjs/bao-conf deep-merged the MASTER's
+// config over the spoke's at its next boot, so the spoke's app then tried to
+// bind to its OWN slapd with the master's password. Every site generates its
+// own local secrets on purpose (§4); per-deployment secret replication is
+// explicitly still an open item, not something to fall into by wildcarding a
+// prefix.
+//
+// Nothing named `conf` directly under an app prefix is ever exported, as a
+// second belt: `plugins/<id>/conf` is per-instance plugin config (shared by
+// design), `<app>/conf` is a node's own identity (never shared).
+const SHARED_BAO_PREFIXES = ['integrations', 'plugins'];
+
+async function listBaoKeys(baoConf, prefix) {
+  const resp = await baoConf.request('GET', `secret/metadata/${prefix}?list=true`).catch(() => null);
+  if (!resp || !resp.ok) return null;
+  const body = await resp.json().catch(() => ({}));
+  return (body.data && body.data.keys) || [];
+}
+
 async function exportSharedBaoSecrets() {
   const baoConf = require('@simpleworkjs/bao-conf');
   const exported = [];
-  const knownPrefixes = ['integrations', 'plugins', 'sso-manager'];
-  for (const prefix of knownPrefixes) {
-    try {
-      const listResp = await baoConf.request('GET', `secret/metadata/${prefix}?list=true`).catch(() => null);
-      if (listResp && listResp.ok) {
-        const body = await listResp.json().catch(() => ({}));
-        const keys = (body.data && body.data.keys) || [];
-        for (const k of keys) {
-          const path = `${prefix}/${k}`;
-          const val = await baoConf.get(path).catch(() => null);
-          if (val) exported.push({ path, data: val });
-        }
-      } else {
-        const val = await baoConf.get(prefix).catch(() => null);
+
+  // Depth-first, because plugin secrets live one level down at
+  // `plugins/<id>/conf`. Listing only the top level returned directory markers
+  // ("<id>/"), and reading those as if they were leaves always failed -- so
+  // plugin secrets were silently never replicated at all.
+  async function walk(prefix, depth) {
+    if (depth > 3) return;
+    const keys = await listBaoKeys(baoConf, prefix);
+    if (keys === null) {
+      // Not a directory: read it as a leaf.
+      const val = await baoConf.get(prefix).catch(() => null);
+      if (val && typeof val === 'object' && Object.keys(val).length > 0) {
+        exported.push({ path: prefix, data: val });
+      }
+      return;
+    }
+    for (const key of keys) {
+      const child = `${prefix}/${String(key).replace(/\/+$/, '')}`;
+      if (String(key).endsWith('/')) await walk(child, depth + 1);
+      else {
+        const val = await baoConf.get(child).catch(() => null);
         if (val && typeof val === 'object' && Object.keys(val).length > 0) {
-          exported.push({ path: prefix, data: val });
+          exported.push({ path: child, data: val });
         }
       }
-    } catch (e) {}
+    }
+  }
+
+  for (const prefix of SHARED_BAO_PREFIXES) {
+    try { await walk(prefix, 0); } catch (e) { /* best-effort, per prefix */ }
   }
   return exported;
+}
+
+// Guard applied on the RECEIVING side too, so a spoke running this release is
+// protected even when its master is still running one that over-exports.
+function isShareableBaoPath(path) {
+  const p = String(path || '').replace(/^\/+/, '');
+  if (!SHARED_BAO_PREFIXES.some((prefix) => p === prefix || p.startsWith(prefix + '/'))) return false;
+  // `<prefix>/conf` would be an app's own identity, never cluster state.
+  return !/^[^/]+\/conf$/.test(p);
 }
 
 // ── Export (MASTER side, Bearer site-join-key; no admin session) ────────────
@@ -141,7 +185,9 @@ router.post('/export', async (req, res, next) => {
       resources: (resources || []).map(r => (r.toJSON ? r.toJSON() : r)),
       edges: (edges || []).map(e => (e.toJSON ? e.toJSON() : e)),
       meshSites: (meshSites || []).map(m => (m.toJSON ? m.toJSON() : m)),
-      agents: (agents || []).map(a => (a.toPublic ? a.toPublic() : (a.toJSON ? a.toJSON() : a))),
+      // toReplica(), not toPublic(): the fleet has to arrive with tokenHash or
+      // no agent can authenticate against a spoke. See models/agent.js.
+      agents: (agents || []).map(a => (a.toReplica ? a.toReplica() : (a.toJSON ? a.toJSON() : a))),
       baoSecrets: baoSecrets || [],
       userVerifications: userVerifications || [],
       ...(signingKey ? { signingKey } : {})
@@ -196,7 +242,18 @@ router.post('/spokes', async (req, res, next) => {
     // ldapServerId 2.)
     const spoke = await withLock('site-spoke-register', async () => {
       let row = (await SiteSpoke.list({ where: { endpoint: cleanEndpoint } }))[0];
-      const patch = { siteSlug: siteSlug || (row && row.siteSlug) || null, last_seen_on: now, noInbound: !!noInbound, meshIp: meshIp || '', publicHost: publicHost || '' };
+      // Only fields the caller ACTUALLY sent are written.
+      //
+      // This used to assign noInbound/meshIp/publicHost unconditionally, so
+      // every caller that legitimately omits them -- the gateway's roster
+      // push-up (utils/mesh_roster.js), /demote, /master-changed, /reregister --
+      // silently blanked a CGNAT spoke's relay configuration on the master and
+      // downgraded it to "has inbound access". The relay route then stopped
+      // being refreshed and the spoke's only public path went stale.
+      const patch = { siteSlug: siteSlug || (row && row.siteSlug) || null, last_seen_on: now };
+      if (noInbound !== undefined) patch.noInbound = !!noInbound;
+      if (meshIp !== undefined) patch.meshIp = meshIp || '';
+      if (publicHost !== undefined) patch.publicHost = publicHost || '';
       if (row) {
         await row.update(patch);
         return row;
@@ -207,6 +264,7 @@ router.post('/spokes', async (req, res, next) => {
         pushToken: SiteSpoke.generatePushToken(),
         created_on: now,
         ldapServerId: await nextFreeLdapServerId(),
+        noInbound: false, meshIp: '', publicHost: '',
         ...patch
       });
     }, { label: `spoke registration: ${cleanEndpoint}` });
@@ -244,8 +302,15 @@ router.post('/spokes', async (req, res, next) => {
     // so the master and other spokes see this spoke in the Directory tree.
     if (spoke.siteSlug) {
       try {
+        // Must match the slug the SPOKE'S OWN bootstrap seeds for itself
+        // (theta-suite bootstrap/bootstrap.js: `site_${slugify(CFG_SITE_NAME)}`,
+        // where slugify collapses runs of non-alphanumerics to a DASH). This
+        // used to collapse them to an underscore instead, so a two-word site
+        // name produced `site_staten_island` here and `site_staten-island`
+        // there: every multi-word site ended up listed TWICE in the directory
+        // tree, once per convention, with neither row knowing about the other.
         const cleanName = spoke.siteSlug.replace(/^site[-_]/i, '');
-        const resourceSlug = `site_${cleanName.replace(/[^a-z0-9]+/gi, '_').replace(/^_+|_+$/g, '').toLowerCase()}`;
+        const resourceSlug = `site_${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`;
         const existingSite = await Resource.getBySlug(resourceSlug).catch(() => null);
         if (!existingSite) {
           await Resource.create({
@@ -271,8 +336,15 @@ router.post('/spokes', async (req, res, next) => {
     // No-inbound relay automation: best-effort, never blocks registration.
     // See utils/proxy_client.js for why this reuses theta-proxy's existing
     // API token system rather than a new credential type.
+    //
+    // Read off the ROW, not the request body: a caller that omits these fields
+    // is no longer asserting "this spoke is inbound" (see the patch above), so
+    // a gateway roster push must still refresh the relay route rather than
+    // reporting it as not applicable.
     let relayNote = 'not applicable (spoke has inbound access)';
-    if (noInbound) {
+    if (spoke.noInbound) {
+      const meshIp = spoke.meshIp;
+      const publicHost = spoke.publicHost;
       if (meshIp && publicHost) {
         const proxyClient = require('../utils/proxy_client');
         // The relay points at the spoke's DIRECTORY over the routed mesh
@@ -298,8 +370,17 @@ router.post('/spokes', async (req, res, next) => {
     // A new (or moved) spoke changes THIS node's peer list.
     reconcileSoon('spoke-registered');
 
-    logAudit('spoke_registered', { endpoint, siteSlug: spoke.siteSlug, noInbound: !!noInbound, relayNote });
-    res.json({ status: 'ok', pushToken: spoke.pushToken, relay: { note: relayNote } });
+    logAudit('spoke_registered', { endpoint, siteSlug: spoke.siteSlug, noInbound: !!spoke.noInbound, relayNote });
+    // ldapServerId rides back so the spoke can persist its own site id without
+    // a second round trip. utils/mesh_roster.js needs it to know which roster
+    // row is its own, and reading it out of the slapd.conf SEED (which is what
+    // it used to do) is wrong between a join and the next container restart.
+    res.json({
+      status: 'ok',
+      pushToken: spoke.pushToken,
+      ldapServerId: spoke.ldapServerId || null,
+      relay: { note: relayNote }
+    });
   } catch (e) { next(e); }
 });
 
@@ -336,7 +417,7 @@ router.get('/ldap-peers', async (req, res, next) => {
     const peers = [{ ldapServerId: 1, ldapHost: masterHost }];
     for (const s of spokes) {
       if (s.endpoint === callerEndpoint || !s.ldapServerId) continue;
-      const host = ldapHostFor(s.endpoint);
+      const host = ldapHostForSpoke(s);
       if (host) peers.push({ ldapServerId: s.ldapServerId, ldapHost: host });
     }
 
@@ -425,11 +506,23 @@ router.post('/master-changed', async (req, res, next) => {
         const regResp = await fetch(base + '/api/site/spokes', {
           method: 'POST',
           headers: { Authorization: 'Bearer ' + newJoinKey, 'Content-Type': 'application/json' },
-          body: JSON.stringify({ endpoint: selfUrl, siteSlug: cfg.siteSlug })
+          // Relay posture rides along: the new master has to rebuild this
+          // site's relay route on its own theta-proxy, and it has no other way
+          // to learn a CGNAT spoke's mesh IP and public hostname.
+          body: JSON.stringify({
+            endpoint: selfUrl,
+            siteSlug: cfg.siteSlug,
+            noInbound: !!cfg.noInbound,
+            ...(cfg.meshIp ? { meshIp: cfg.meshIp } : {}),
+            ...(cfg.publicHost ? { publicHost: cfg.publicHost } : {})
+          })
         });
         if (regResp.ok) {
           const regBody = await regResp.json();
-          if (regBody.pushToken) siteConfig.save({ replicationPushToken: regBody.pushToken });
+          siteConfig.save({
+            ...(regBody.pushToken ? { replicationPushToken: regBody.pushToken } : {}),
+            ...(regBody.ldapServerId ? { ldapServerId: regBody.ldapServerId } : {})
+          });
           registrationNote = 'registered with the new master';
         } else {
           registrationNote = 'registration failed: HTTP ' + regResp.status;
@@ -515,7 +608,11 @@ router.post('/demote', async (req, res, next) => {
         });
         if (regResp.ok) {
           const regBody = await regResp.json();
-          if (regBody.pushToken) siteConfig.save({ replicationPushToken: regBody.pushToken });
+          siteConfig.save({
+            selfUrl,
+            ...(regBody.pushToken ? { replicationPushToken: regBody.pushToken } : {}),
+            ...(regBody.ldapServerId ? { ldapServerId: regBody.ldapServerId } : {})
+          });
           registrationNote = 'registered as a spoke of the new master';
         } else {
           registrationNote = 'registration failed: HTTP ' + regResp.status;
@@ -740,10 +837,38 @@ router.post('/reregister', async (req, res, next) => {
     if (!cfg.masterUrl || !cfg.masterJoinKey) {
       return res.status(409).json({ status: 'error', message: 'no master credentials on file -- this node has not joined a site' });
     }
-    const selfUrl = (req.body && req.body.selfUrl) || cfg.selfUrl;
+    // The endpoint ALREADY on file wins. The master's spoke registry is keyed
+    // on this exact string, so re-registering under a different one does not
+    // move the row -- it creates a second one, with a second LDAP ServerID and
+    // a second push token, for one site. The admin UI passes
+    // window.location.origin, which is whatever host the operator happened to
+    // browse to (an IP and port during setup, the public name later), so
+    // trusting the caller here forked the registry on a mis-click. Pass
+    // `replaceEndpoint: true` to deliberately move a site that really has
+    // changed address.
+    const requestedSelfUrl = (req.body && req.body.selfUrl) || '';
+    const replaceEndpoint = !!(req.body && req.body.replaceEndpoint);
+    const selfUrl = (!replaceEndpoint && cfg.selfUrl) ? cfg.selfUrl : (requestedSelfUrl || cfg.selfUrl);
     if (!selfUrl) {
       return res.status(400).json({ status: 'error', message: 'this node does not know its own reachable URL; pass selfUrl' });
     }
+    if (requestedSelfUrl && requestedSelfUrl !== selfUrl) {
+      console.warn(`[site] reregister: keeping the registered endpoint ${selfUrl} rather than ${requestedSelfUrl} `
+        + '(pass replaceEndpoint: true to move it)');
+    }
+
+    // The relay posture can be refreshed here rather than only at join time.
+    // theta-suite's bootstrap/site-relay-register.js drives this once the
+    // gateway-to-gateway mesh peering (a manual, out-of-band step) is done and
+    // this site finally has a mesh IP -- which is always AFTER its join. It
+    // used to POST the master's /api/site/spokes directly, which meant the
+    // push token the master handed back was thrown away, and any disagreement
+    // between the URL it registered and the one the join used created a SECOND
+    // registry row with a second LDAP ServerID for one site.
+    const b = req.body || {};
+    const noInbound = b.noInbound !== undefined ? !!b.noInbound : !!cfg.noInbound;
+    const meshIp = b.meshIp !== undefined ? b.meshIp : cfg.meshIp;
+    const publicHost = b.publicHost !== undefined ? b.publicHost : cfg.publicHost;
 
     const base = String(cfg.masterUrl).replace(/\/+$/, '');
     const resp = await fetch(base + '/api/site/spokes', {
@@ -752,7 +877,9 @@ router.post('/reregister', async (req, res, next) => {
       body: JSON.stringify({
         endpoint: selfUrl,
         siteSlug: cfg.siteSlug,
-        ...(cfg.noInbound ? { noInbound: true, meshIp: cfg.meshIp, publicHost: cfg.publicHost } : {})
+        noInbound,
+        ...(meshIp ? { meshIp } : {}),
+        ...(publicHost ? { publicHost } : {})
       })
     });
     if (!resp.ok) {
@@ -760,15 +887,23 @@ router.post('/reregister', async (req, res, next) => {
       return res.status(502).json({ status: 'error', message: `master rejected the registration: HTTP ${resp.status} ${text}` });
     }
     const body = await resp.json();
-    siteConfig.save({ selfUrl, ...(body.pushToken ? { replicationPushToken: body.pushToken } : {}) });
+    siteConfig.save({
+      selfUrl,
+      noInbound,
+      ...(meshIp ? { meshIp } : {}),
+      ...(publicHost ? { publicHost } : {}),
+      ...(body.pushToken ? { replicationPushToken: body.pushToken } : {}),
+      ...(body.ldapServerId ? { ldapServerId: body.ldapServerId } : {})
+    });
 
     reconcileSoon('reregistered');
 
-    logAudit('reregistered', { actor: req.user.uid, masterUrl: base, selfUrl });
+    logAudit('reregistered', { actor: req.user.uid, masterUrl: base, selfUrl, noInbound });
     res.json({
       status: 'ok',
       message: 'Re-registered with ' + base,
       live: !!body.pushToken,
+      ldapServerId: body.ldapServerId || null,
       relay: body.relay || null
     });
   } catch (e) { next(e); }
@@ -896,6 +1031,13 @@ async function adoptFromMaster({ masterUrl, joinKey }) {
       try {
         const existing = await Agent.get(a.id).catch(() => null);
         const fields = {
+          // Carried when the master sent it (see models/agent.js toReplica).
+          // Without the hash a replicated agent row can be listed but never
+          // authenticated, so agents at this site could not connect here at
+          // all. Omitted rather than blanked when a master on an older release
+          // still exports toPublic(), so an upgrade never destroys a hash this
+          // node already had.
+          ...(a.tokenHash ? { tokenHash: a.tokenHash } : {}),
           name: a.name || 'Unnamed Agent',
           description: a.description || null,
           tokenPrefix: a.tokenPrefix || null,
@@ -911,9 +1053,12 @@ async function adoptFromMaster({ masterUrl, joinKey }) {
         };
         if (existing) {
           await existing.update(fields);
-        } else {
-          await Agent.create({ id: a.id, tokenHash: a.tokenHash || '', ...fields });
+        } else if (a.tokenHash) {
+          await Agent.create({ id: a.id, ...fields });
         }
+        // No hash and no local row: skip. Creating a row with an empty
+        // tokenHash produced an agent that could never authenticate and, worse,
+        // looked enrolled in the UI.
       } catch (e) {
         // Best-effort: an individual agent sync failure should not fail adoption
       }
@@ -925,6 +1070,14 @@ async function adoptFromMaster({ masterUrl, joinKey }) {
     const baoConf = require('@simpleworkjs/bao-conf');
     for (const s of exportData.baoSecrets) {
       if (!s || !s.path || !s.data) continue;
+      // Re-checked on this side too, so a spoke on this release is safe even
+      // when its master still runs one that exports `sso-manager/conf` -- which
+      // would otherwise land the MASTER's LDAP bind password and jwtSecret in
+      // this node's own config at its next boot.
+      if (!isShareableBaoPath(s.path)) {
+        console.warn(`[site] refused to adopt OpenBao path ${s.path}: not cluster-shared state`);
+        continue;
+      }
       try {
         await baoConf.set(s.path, s.data);
       } catch (e) {
@@ -988,6 +1141,7 @@ router.post('/join', async (req, res, next) => {
     //    resync pushes (falls back to being exactly today's one-time
     //    snapshot for that spoke, not a hard failure).
     let replicationPushToken = null;
+    let assignedServerId = null;
     let replicationNote = 'not registered (no selfUrl given)';
     let relayNote = noInbound ? 'not attempted (registration did not run)' : 'not applicable (this spoke has inbound access)';
     if (selfUrl) {
@@ -1010,6 +1164,7 @@ router.post('/join', async (req, res, next) => {
         if (regResp.ok) {
           const regBody = await regResp.json();
           replicationPushToken = regBody.pushToken;
+          assignedServerId = regBody.ldapServerId || null;
           replicationNote = 'registered for live replication';
           if (regBody.relay) relayNote = regBody.relay.note;
         } else {
@@ -1033,7 +1188,18 @@ router.post('/join', async (req, res, next) => {
       // told its own address again -- notably when a promotion elsewhere
       // re-points it at a new master (POST /master-changed).
       ...(selfUrl ? { selfUrl } : {}),
-      ...(replicationPushToken ? { replicationPushToken } : {})
+      ...(replicationPushToken ? { replicationPushToken } : {}),
+      // The relay posture has to survive here too. POST /reregister rebuilds a
+      // registration from this file, and it used to read cfg.noInbound --
+      // which nothing ever wrote, so a re-register silently told the master
+      // this CGNAT site had inbound access and dropped its relay route.
+      noInbound: !!noInbound,
+      ...(meshIp ? { meshIp } : {}),
+      ...(publicHost ? { publicHost } : {}),
+      // This node's cluster site id (== its OpenLDAP ServerID), as assigned by
+      // the master. utils/mesh_roster.js reads it to know which roster row is
+      // its own.
+      ...(assignedServerId ? { ldapServerId: assignedServerId } : {})
     });
 
     // Now that this node knows its master and its own endpoint, pull the

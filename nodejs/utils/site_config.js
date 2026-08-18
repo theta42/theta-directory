@@ -29,24 +29,47 @@ function envDefaults() {
 }
 
 let current = null;
+let loadedMtimeMs = 0;
 
 function load() {
   const env = envDefaults();
   const file = configFile();
   try {
     if (fs.existsSync(file)) {
+      loadedMtimeMs = fs.statSync(file).mtimeMs;
       const saved = JSON.parse(fs.readFileSync(file, 'utf8'));
       return { ...env, ...saved };
     }
   } catch (e) {
     console.error('[site] could not read ' + file + ': ' + e.message);
   }
+  loadedMtimeMs = 0;
   return env;
+}
+
+// True when site.json changed underneath us.
+//
+// This file is not written only by this process: theta-suite's
+// bootstrap/site-join.js runs as a separate `docker compose exec` and writes it
+// directly on its already-joined / already-has-users paths. With a
+// write-once-then-cache-forever read, the running app kept serving `isMaster:
+// true` after such a run -- so it behaved as a master (accepting local
+// directory writes, refusing resync pushes) until someone restarted the
+// container. Cheap to check: one stat, and only on the boundary where it
+// matters.
+function fileChanged() {
+  try {
+    const st = fs.statSync(configFile());
+    return st.mtimeMs !== loadedMtimeMs;
+  } catch (e) {
+    // Gone (or never existed): only a change if we had loaded one before.
+    return loadedMtimeMs !== 0;
+  }
 }
 
 // get returns the current site config.
 function get() {
-  if (!current) current = load();
+  if (!current || fileChanged()) current = load();
   return { ...current };
 }
 
@@ -57,11 +80,12 @@ function save(patch) {
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, JSON.stringify(current, null, 2) + '\n');
+    loadedMtimeMs = fs.statSync(file).mtimeMs;
   } catch (e) {
     console.error('[site] could not write ' + file + ': ' + e.message);
     throw e;
   }
-  return get();
+  return { ...current };
 }
 
 module.exports = { get, save, configFile };

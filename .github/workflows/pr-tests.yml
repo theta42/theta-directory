@@ -142,17 +142,50 @@ jobs:
           app_oauth__jwtSecret: ci-test-jwt-secret-do-not-use-in-production
         run: npm test
 
+  multisite-e2e:
+    name: Multi-Site E2E
+    runs-on: ubuntu-latest
+    # The jest suite constructs its own inputs, which is exactly how the
+    # hub-and-spoke write proxy shipped broken for two days and five patch
+    # releases: its tests fed the middleware a request shape Express never
+    # produces, so they stayed green while live replication, the WireGuard
+    # roster and SSSD auth at every spoke were all dead. This job drives the
+    # real HTTP API across three real containers (master + two spokes) --
+    # join, live replication, LDAP tree adoption, runtime replication config,
+    # spoke registry operations, promotion and demotion. It is the only thing
+    # in CI that can catch that class at all.
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run the multi-site e2e
+        run: docker compose -f docker-compose.multisite-e2e.yml up --build --abort-on-container-exit --exit-code-from client
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.multisite-e2e.yml logs --no-color
+
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.multisite-e2e.yml down -v
+
   test-summary:
     name: Test Summary
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, multisite-e2e]
     if: always()
 
     steps:
       - name: Check test results
         run: |
           if [ "${{ needs.test.result }}" != "success" ]; then
-            echo "Tests failed. PR cannot be merged."
+            echo "Unit tests failed. PR cannot be merged."
+            exit 1
+          fi
+          if [ "${{ needs.multisite-e2e.result }}" != "success" ]; then
+            echo "Multi-site e2e failed. PR cannot be merged."
             exit 1
           fi
           echo "All tests passed successfully!"

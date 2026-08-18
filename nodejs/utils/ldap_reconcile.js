@@ -26,7 +26,7 @@
 
 const siteConfig = require('./site_config');
 const { applyReplicationConfig } = require('./ldap_runtime_config');
-const { ldapHostFor } = require('./ldap_replication');
+const { ldapHostForSpoke } = require('./ldap_replication');
 
 // Belt and braces for the cases no event covers: a peer's endpoint changed
 // while this node was unreachable, or a master-side write happened during a
@@ -51,7 +51,7 @@ async function desiredConfig() {
 		const spokes = (await SiteSpoke.list().catch(() => [])) || [];
 		const peers = spokes
 			.filter((s) => s.ldapServerId)
-			.map((s) => ({ ldapServerId: s.ldapServerId, ldapHost: ldapHostFor(s.endpoint) }))
+			.map((s) => ({ ldapServerId: s.ldapServerId, ldapHost: ldapHostForSpoke(s) }))
 			.filter((p) => p.ldapHost);
 		return { serverId: 1, peers };
 	}
@@ -84,6 +84,14 @@ async function onePass(reason) {
 	try {
 		const desired = await desiredConfig();
 		if (!desired) return { applied: false, note: 'no cluster view available yet' };
+
+		// Persist the id the cluster says this node has, so everything that
+		// needs "which site am I" (utils/mesh_roster.js in particular) reads one
+		// authoritative value instead of the boot-time slapd.conf seed, which
+		// lags a join by a whole setup.sh run.
+		if (desired.serverId && siteConfig.get().ldapServerId !== desired.serverId) {
+			try { siteConfig.save({ ldapServerId: desired.serverId }); } catch (e) { /* non-fatal */ }
+		}
 
 		const result = await applyReplicationConfig(desired);
 		if (result.changed) {

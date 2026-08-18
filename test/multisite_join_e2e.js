@@ -311,13 +311,33 @@ homeDirectory: /home/${replicatedUid}
   const found = Array.isArray(adopted) && adopted.some(r => r.slug === 'host_e2e_prejoin');
   if (!found) fail(`spoke did not adopt master's pre-join resource; got slugs=${JSON.stringify((adopted || []).map(r => r.slug))}`);
 
-  step('Verifying spoke is now read-only (write attempt must 403)');
-  const writeAttempt = await api(SPOKE_URL, '/api/directory-admin/resources', {
+  // Transparent write-forwarding (MULTI_SITE_SPEC.md §2.1). This step used to
+  // assert a 403, which was correct before hub-and-spoke: a spoke rejected
+  // directory writes outright. Since then a spoke FORWARDS them to the master,
+  // so 403 is the wrong expectation -- and asserting it would have gone on
+  // passing for the entirely wrong reason, because the middleware that does
+  // the forwarding was itself broken (its path rules never matched) and the
+  // local read-only gate answered instead.
+  //
+  // So this asserts the property the design actually promises, which is
+  // stronger: the write SUCCEEDS at the spoke, and it lands on the MASTER --
+  // single write authority, with the spoke's copy arriving by replication.
+  step('Verifying a directory write on the spoke is forwarded to the master and committed there');
+  const forwardedWrite = await api(SPOKE_URL, '/api/directory-admin/resources', {
     method: 'POST',
     token: spokeToken,
-    body: { name: 'Should Be Rejected', slug: 'host_e2e_should_reject', kind: 'host' }
+    body: { name: 'E2E Forwarded Host', slug: 'host_e2e_forwarded', kind: 'host', parentSlug: 'site_e2e' }
   });
-  if (writeAttempt.status !== 403) fail(`expected 403 writing to spoke post-join, got ${writeAttempt.status} ${JSON.stringify(writeAttempt.body)}`);
+  if (forwardedWrite.status !== 200) {
+    fail(`expected a spoke directory write to be forwarded and accepted, got ${forwardedWrite.status} ${JSON.stringify(forwardedWrite.body)}`);
+  }
+  {
+    const onMaster = await api(MASTER_URL, '/api/directory-admin/resources', { token: masterToken });
+    const slugs = (onMaster.body.results || onMaster.body.resources || onMaster.body || []).map((x) => x.slug);
+    if (!slugs.includes('host_e2e_forwarded')) {
+      fail(`a write made at the spoke did not reach the master -- it was committed locally instead. master slugs=${JSON.stringify(slugs)}`);
+    }
+  }
 
   step('Creating a resource on master AFTER join, to verify LIVE replication (not just the one-time join snapshot)');
   const postJoinRes = await api(MASTER_URL, '/api/directory-admin/resources', {
@@ -593,13 +613,26 @@ homeDirectory: /home/${replicatedUid}
     fail(`old master's masterUrl should now point at the new master, got ${JSON.stringify(oldMasterCfg.config.masterUrl)}`);
   }
 
-  step('Verifying the (now-demoted) old master rejects writes, and the new master accepts them');
+  // Same correction as the post-join write above: a demoted node is a spoke,
+  // and a spoke forwards rather than refuses. What must be true is that its
+  // write goes UPSTREAM to the node that is now master, not into its own
+  // catalog -- which is exactly what a promotion has to guarantee.
+  step('Verifying a write on the demoted old master is forwarded to the NEW master');
   const oldMasterWrite = await api(MASTER_URL, '/api/directory-admin/resources', {
     method: 'POST',
     token: masterToken,
-    body: { name: 'Should Be Rejected Post-Demotion', slug: 'host_e2e_should_reject_2', kind: 'host' }
+    body: { name: 'E2E Post-Demotion Host', slug: 'host_e2e_post_demotion', kind: 'host', parentSlug: 'site_e2e' }
   });
-  if (oldMasterWrite.status !== 403) fail(`expected 403 writing to the demoted old master, got ${oldMasterWrite.status} ${JSON.stringify(oldMasterWrite.body)}`);
+  if (oldMasterWrite.status !== 200) {
+    fail(`expected the demoted node to forward its write to the new master, got ${oldMasterWrite.status} ${JSON.stringify(oldMasterWrite.body)}`);
+  }
+  {
+    const onNewMaster = await api(SPOKE_URL, '/api/directory-admin/resources', { token: spokeToken });
+    const slugs = (onNewMaster.body.results || onNewMaster.body.resources || onNewMaster.body || []).map((x) => x.slug);
+    if (!slugs.includes('host_e2e_post_demotion')) {
+      fail(`the demoted node's write did not reach the new master. new-master slugs=${JSON.stringify(slugs)}`);
+    }
+  }
 
   const newMasterWrite = await api(SPOKE_URL, '/api/directory-admin/resources', {
     method: 'POST',

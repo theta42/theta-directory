@@ -981,7 +981,7 @@ const siteConfig = require('../utils/site_config');
 const { siteIsFresh } = require('../utils/site_join');
 const { Agent } = require('../models/agent');
 const { SiteSpoke } = require('../models/site_spoke');
-const { ldapHostFor, currentSlapdServerId, currentReplicationState, replicationDrift } = require('../utils/ldap_replication');
+const { ldapHostForSpoke, currentSlapdServerId, currentReplicationState, replicationDrift } = require('../utils/ldap_replication');
 const { adoptInheritedSpokes } = require('../utils/site_promote');
 const { reconcileSoon } = require('../utils/ldap_reconcile');
 
@@ -1054,7 +1054,7 @@ router.get('/site-status', async (req, res, next) => {
     if (cfg.isMaster) {
       const advertisedPeers = allSpokes
         .filter(s => s.ldapServerId)
-        .map(s => ({ ldapServerId: s.ldapServerId, ldapHost: ldapHostFor(s.endpoint) }))
+        .map(s => ({ ldapServerId: s.ldapServerId, ldapHost: ldapHostForSpoke(s) }))
         .filter(p => p.ldapHost);
       const liveState = await currentReplicationState();
       ldap = {
@@ -1145,7 +1145,7 @@ router.get('/ldap-replication-config', async (req, res, next) => {
     const peers = [];
     for (const s of spokes) {
       if (!s.ldapServerId) continue;
-      const host = ldapHostFor(s.endpoint);
+      const host = ldapHostForSpoke(s);
       if (host) peers.push({ ldapServerId: s.ldapServerId, ldapHost: host });
     }
     res.json({ status: 'ok', ldapServerId: 1, peers });

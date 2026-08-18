@@ -49,7 +49,15 @@ function replicateToSpokes(reason) {
 // mesh-routing preference turn into "spoke never gets updates."
 function resyncUrls(spoke) {
 	const urls = [];
-	const meshAddr = spoke.meshIp || (spoke.ldapServerId ? `10.${spoke.ldapServerId}.0.2` : null);
+	// Only dial the mesh when this spoke actually reported a mesh address, or
+	// when it has no inbound path at all and the tunnel is therefore the only
+	// route to it. Deriving `10.<serverId>.0.2` for EVERY spoke meant a normal
+	// inbound spoke -- one with no mesh at all -- had every push spend the full
+	// 8s timeout on a dead address before falling back to the endpoint that was
+	// going to work all along, which is what made the operator's "Sync now"
+	// (which awaits) look hung.
+	const meshAddr = spoke.meshIp
+		|| ((spoke.noInbound && spoke.ldapServerId) ? `10.${spoke.ldapServerId}.0.2` : null);
 	if (meshAddr) {
 		// The peer site's directory, addressed directly over the routed mesh
 		// (utils/mesh_route.js). This needs a route for 10.0.0.0/8 via the
