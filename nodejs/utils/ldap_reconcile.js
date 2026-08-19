@@ -89,7 +89,25 @@ async function onePass(reason) {
 		// needs "which site am I" (utils/mesh_roster.js in particular) reads one
 		// authoritative value instead of the boot-time slapd.conf seed, which
 		// lags a join by a whole setup.sh run.
-		if (desired.serverId && siteConfig.get().ldapServerId !== desired.serverId) {
+		//
+		// NEVER for a node that has no persisted role yet. A fresh install
+		// defaults to isMaster:true, so this branch would compute serverId 1 and
+		// CREATE /config/site.json at boot on a node that has never joined
+		// anything -- and theta-suite's setup.sh reads the presence of that file
+		// as "this node is already a spoke" and skips the join step entirely.
+		// Net effect, shipped in v2.24.0: a spoke brought up from spoke.env
+		// silently came up as a second master. (setup.sh's guard is being made
+		// role-aware too; both halves were wrong, and either one alone would
+		// still have broken it.)
+		//
+		// Nothing is lost by skipping it: 1 is the master's reserved id, which
+		// mesh_roster.localSiteId() already falls back to for a master. A master
+		// that DOES have an id on file (a promoted former spoke, still carrying
+		// its old id) is still corrected, because that write cannot create the
+		// file -- it already exists.
+		const cfgNow = siteConfig.get();
+		const mayPersist = !cfgNow.isMaster || cfgNow.ldapServerId !== undefined;
+		if (mayPersist && desired.serverId && cfgNow.ldapServerId !== desired.serverId) {
 			try { siteConfig.save({ ldapServerId: desired.serverId }); } catch (e) { /* non-fatal */ }
 		}
 
