@@ -59,6 +59,35 @@ function expectShape(label, res, key) {
   return undefined;
 }
 
+// A read that immediately follows a replication-config change, retried for a
+// bounded window.
+//
+// Authorization on these routes resolves group membership LIVE from the local
+// slapd, and a join has just done two things to it: imported the master's
+// whole tree, and switched on syncrepl + mirrormode. While that initial
+// refresh runs, the admin's group entry is being rewritten underneath the
+// lookup, so an admin request can transiently come back 403 "admin only"
+// before settling. Seen for real: the same commit failed one CI run here and
+// passed another.
+//
+// This is NOT covering for a broken assertion -- what is being asserted is
+// that the spoke persisted isMaster:false, and a brief authorization blip
+// during the initial refresh is expected behaviour of the system under test,
+// not a property this step is about. A hard failure still happens if the
+// window expires.
+async function apiEventually(label, url, path, opts, key, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  let res;
+  for (;;) {
+    res = await api(url, path, opts);
+    if (res.status === 200 && res.body && res.body[key] !== undefined) return res.body[key];
+    const retriable = res.status === 403 || res.status >= 500;
+    if (!retriable || Date.now() >= deadline) break;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return expectShape(label, res, key);
+}
+
 async function waitForHealthy(url, label) {
   for (let i = 0; i < 60; i++) {
     try {
@@ -276,8 +305,9 @@ homeDirectory: /home/${replicatedUid}
   }
 
   step('Verifying spoke persisted isMaster:false + masterUrl after join');
-  const spokeCfgRes = await api(SPOKE_URL, '/api/site/config', { token: spokeToken });
-  const spokeCfgBody = expectShape('spoke /api/site/config after join', spokeCfgRes, 'config');
+  const spokeCfgBody = await apiEventually(
+    'spoke /api/site/config after join', SPOKE_URL, '/api/site/config', { token: spokeToken }, 'config'
+  );
   if (spokeCfgBody) {
     if (spokeCfgBody.isMaster !== false) fail(`spoke should be isMaster:false after join, got ${JSON.stringify(spokeCfgBody)}`);
     if (!spokeCfgBody.masterUrl) fail('spoke should have masterUrl set after join');
