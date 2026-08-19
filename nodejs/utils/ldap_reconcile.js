@@ -24,6 +24,7 @@
 // spoke that can't reach its master keeps replicating with whatever it has,
 // which is strictly better than tearing config down.
 
+const fs = require('fs');
 const siteConfig = require('./site_config');
 const { applyReplicationConfig } = require('./ldap_runtime_config');
 const { ldapHostForSpoke } = require('./ldap_replication');
@@ -106,7 +107,12 @@ async function onePass(reason) {
 		// its old id) is still corrected, because that write cannot create the
 		// file -- it already exists.
 		const cfgNow = siteConfig.get();
-		const mayPersist = !cfgNow.isMaster || cfgNow.ldapServerId !== undefined;
+		// Only persist the assigned id when this node has already made a role
+		// decision (site.json exists). A fresh install defaults to isMaster:true
+		// and would otherwise create site.json at boot, which made setup.sh
+		// treat the node as already joined and skip the actual join step.
+		const siteFileExists = fs.existsSync(siteConfig.configFile());
+		const mayPersist = !cfgNow.isMaster || (siteFileExists && cfgNow.ldapServerId !== undefined);
 		if (mayPersist && desired.serverId && cfgNow.ldapServerId !== desired.serverId) {
 			try { siteConfig.save({ ldapServerId: desired.serverId }); } catch (e) { /* non-fatal */ }
 		}

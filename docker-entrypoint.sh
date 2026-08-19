@@ -122,10 +122,12 @@ chmod 600 "$LDAP_CERT_DIR/ldap.key" 2>/dev/null || true
 chmod 644 "$LDAP_CERT_DIR/ldap.crt" 2>/dev/null || true
 
 # ── Generate slapd.conf ─────────────────────────────────────────────────────
-# We use slapd.conf (static config) rather than cn=config so the whole directory
-# is configured from a single generated file. slapd is started with -f below so
-# it actually reads this file (the original entrypoint omitted -f, so slapd
-# ignored it entirely).
+# We use slapd.conf as a SEED that is converted to the cn=config backend at
+# every boot. Schema, overlays, ACLs and TLS come from here. Replication config
+# (ServerID, syncrepl peers, mirrormode) is applied live after boot by
+# utils/ldap_reconcile.js from the cluster's current view, so a new spoke
+# joining or a promotion does not require a restart. The seed still accepts the
+# static LDAP_SERVER_ID/LDAP_REPLICATION_HOSTS for air-gapped/offline boots.
 
 cat > /etc/openldap/slapd.conf << SLAPDEOF
 include         /etc/openldap/schema/core.schema
@@ -211,6 +213,10 @@ overlay         syncprov
 syncprov-checkpoint 100 10
 syncprov-sessionlog 100
 
+# Placeholder for syncrepl peers. When LDAP_REPLICATION_HOSTS is set it is
+# expanded here; otherwise this line is removed and the cn=config backend is
+# seeded without syncrepl. In either case utils/ldap_reconcile.js converges
+# the live olcSyncrepl values from the cluster view once the app is up.
 REPLICATION_BLOCK_PLACEHOLDER
 
 # Access controls
@@ -272,6 +278,17 @@ else
 fi
 
 # ── Server ID (Global) ──
+# Prefer the site id the directory already assigned this node, persisted in
+# /config/site.json. That is the authoritative value after a join/promotion;
+# the environment variable only seeds the first fresh install. If neither is
+# set, omit ServerID so slapd defaults, and the live reconciler will set it once
+# the cluster view is available.
+SITE_CONFIG_FILE="${SITE_CONFIG_FILE:-/config/site.json}"
+if [[ -f "$SITE_CONFIG_FILE" ]]; then
+    PERSISTED_SERVER_ID=$(node -e "try{const fs=require('fs');const j=JSON.parse(fs.readFileSync(process.argv[1],'utf8'));console.log(j.ldapServerId||'')}" "$SITE_CONFIG_FILE" 2>/dev/null || true)
+fi
+LDAP_SERVER_ID="${PERSISTED_SERVER_ID:-${LDAP_SERVER_ID:-}}"
+
 if [[ -n "${LDAP_SERVER_ID:-}" ]]; then
     sed -i "s|^SERVER_ID_PLACEHOLDER$|ServerID ${LDAP_SERVER_ID}|g" /etc/openldap/slapd.conf
 else
@@ -279,9 +296,15 @@ else
 fi
 
 # ── Multi-Master Replication Configuration ──
+# The seed file now carries a single placeholder syncrepl block (rid=999) so
+# the cn=config backend is created with the attribute present. The app then
+# converges the live olcSyncrepl values at boot via utils/ldap_reconcile.js,
+# using the cluster's current view. Static peer lists from LDAP_REPLICATION_HOSTS
+# are still honoured for offline/air-gapped boots where the app cannot reach the
+# master, but they are no longer the authoritative source.
 if [[ -n "${LDAP_REPLICATION_HOSTS:-}" ]]; then
-    info "Configuring Multi-Master replication peers"
-    
+    info "Seeding Multi-Master replication peers from ldap-replication.env"
+
     # Generate syncrepl blocks
     REPL_BLOCK=""
     RID=100
@@ -290,7 +313,7 @@ if [[ -n "${LDAP_REPLICATION_HOSTS:-}" ]]; then
         REPL_BLOCK="${REPL_BLOCK}syncrepl rid=${RID}\n  provider=${HOST}\n  type=refreshAndPersist\n  retry=\"60 +\"\n  searchbase=\"${LDAP_BASE_DN}\"\n  bindmethod=simple\n  binddn=\"${LDAP_BIND_DN}\"\n  credentials=\"${LDAP_ADMIN_PASS}\"\n  tls_reqcert=never\n\n"
     done
     REPL_BLOCK="${REPL_BLOCK}mirrormode on\n"
-    
+
     # Replace placeholder (awk is safer for multiline replacements than sed)
     awk -v repl="$(printf '%b' "$REPL_BLOCK")" '{gsub(/REPLICATION_BLOCK_PLACEHOLDER/, repl)}1' /etc/openldap/slapd.conf > /etc/openldap/slapd.conf.tmp
     mv /etc/openldap/slapd.conf.tmp /etc/openldap/slapd.conf

@@ -21,9 +21,12 @@ const PATH = 'integrations/theta-proxy'; // baoConf adds the secret/data prefix
 const REQUEST_TIMEOUT_MS = 10000;
 
 let cachedToken = null;
+let tokenLoadTime = 0;
+const TOKEN_MAX_AGE_MS = Number(process.env.PROXY_TOKEN_CACHE_MAX_AGE_MS || 5 * 60 * 1000);
 
 async function loadToken() {
-	if (cachedToken) return cachedToken;
+	const now = Date.now();
+	if (cachedToken && (now - tokenLoadTime) < TOKEN_MAX_AGE_MS) return cachedToken;
 	let stored;
 	try {
 		stored = await baoConf.get(PATH);
@@ -33,7 +36,13 @@ async function loadToken() {
 	}
 	if (!stored || !stored.token) return null;
 	cachedToken = stored.token;
+	tokenLoadTime = now;
 	return cachedToken;
+}
+
+function invalidateToken() {
+	cachedToken = null;
+	tokenLoadTime = 0;
 }
 
 function proxyBaseUrl() {
@@ -85,12 +94,14 @@ async function ensureRelayRoute({ host, ip, targetPort }) {
 			const put = await fetch(base.replace(/\/+$/, '') + '/api/host/' + encodeURIComponent(host), {
 				method: 'PUT', headers, body: JSON.stringify({ ip, targetPort }), signal: controller.signal
 			});
+			if (put.status === 401) { invalidateToken(); return { note: 'update failed: HTTP 401 (proxy API token rejected -- mint/store a fresh one)' }; }
 			return put.ok ? { note: 'updated' } : { note: `update failed: HTTP ${put.status}` };
 		}
 
 		const create = await fetch(base.replace(/\/+$/, '') + '/api/host', {
 			method: 'POST', headers, body: JSON.stringify({ host, ip, targetPort }), signal: controller.signal
 		});
+		if (create.status === 401) { invalidateToken(); return { note: 'create failed: HTTP 401 (proxy API token rejected -- mint/store a fresh one)' }; }
 		return create.ok ? { note: 'created' } : { note: `create failed: HTTP ${create.status}` };
 	} catch (err) {
 		return { note: `failed: ${err.message}` };

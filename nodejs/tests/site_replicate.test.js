@@ -10,6 +10,20 @@ function makeSpokeMock() {
   };
 }
 
+// The real SiteSpoke instances have an instance update() method. The previous
+// mock used plain objects, so the production code path that updates
+// last_seen_on on a successful resync was silently swallowed by the .catch()
+// and never exercised. Give each mock spoke a spy update().
+function spokeWithUpdate(spoke) {
+  const updates = [];
+  const withUpdate = {
+    ...spoke,
+    update: jest.fn(async (patch) => { updates.push(patch); Object.assign(withUpdate, patch); return withUpdate; }),
+    _updates: updates
+  };
+  return withUpdate;
+}
+
 let mockFetchCalls = [];
 let mockFetchImpl = async () => ({ ok: true, status: 200 });
 // Shared so a test that re-requires the module (to pick up a different
@@ -42,10 +56,9 @@ describe('site_replicate', () => {
   });
 
   test('pushes to every known spoke concurrently with its own pushToken', async () => {
-    SiteSpoke._seed([
-      { endpoint: 'https://spoke-a.example.com', pushToken: 'token-a' },
-      { endpoint: 'https://spoke-b.example.com', pushToken: 'token-b' }
-    ]);
+    const spokeA = spokeWithUpdate({ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a' });
+    const spokeB = spokeWithUpdate({ endpoint: 'https://spoke-b.example.com', pushToken: 'token-b' });
+    SiteSpoke._seed([spokeA, spokeB]);
 
     await siteReplicate.replicateToSpokes('catalog-changed');
     await new Promise((r) => setImmediate(r));
@@ -57,6 +70,10 @@ describe('site_replicate', () => {
     const [, optsA] = mockFetchCalls.find((c) => c[0].includes('spoke-a'));
     expect(optsA.headers.Authorization).toBe('Bearer token-a');
     expect(JSON.parse(optsA.body).reason).toBe('catalog-changed');
+
+    // A successful push updates last_seen_on on the spoke record.
+    expect(spokeA.update).toHaveBeenCalledWith(expect.objectContaining({ last_seen_on: expect.any(Number) }));
+    expect(spokeB.update).toHaveBeenCalledWith(expect.objectContaining({ last_seen_on: expect.any(Number) }));
   });
 
   // The mesh path now addresses the peer site's DIRECTORY directly
@@ -70,7 +87,7 @@ describe('site_replicate', () => {
     global.fetch = trackedFetch;
 
     SiteSpoke._seed([
-      { endpoint: 'https://spoke-a.example.com:8443', pushToken: 'token-a', meshIp: '172.24.0.5' }
+      spokeWithUpdate({ endpoint: 'https://spoke-a.example.com:8443', pushToken: 'token-a', meshIp: '172.24.0.5' })
     ]);
 
     await siteReplicate.replicateToSpokes('catalog-changed');
@@ -89,9 +106,8 @@ describe('site_replicate', () => {
     SiteSpoke = require('../models/site_spoke').SiteSpoke;
     global.fetch = trackedFetch;
 
-    SiteSpoke._seed([
-      { endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', meshIp: '172.24.0.5' }
-    ]);
+    const spokeA = spokeWithUpdate({ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', meshIp: '172.24.0.5' });
+    SiteSpoke._seed([spokeA]);
     // A deployment whose containers have no route for 10.0.0.0/8 via the
     // gateway must still replicate -- just over the internet, not the tunnel.
     mockFetchImpl = async (url) => {
@@ -117,7 +133,7 @@ describe('site_replicate', () => {
     SiteSpoke = require('../models/site_spoke').SiteSpoke;
     global.fetch = trackedFetch;
 
-    SiteSpoke._seed([{ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', meshIp: '172.24.5.1' }]);
+    SiteSpoke._seed([spokeWithUpdate({ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', meshIp: '172.24.5.1' })]);
 
     await siteReplicate.replicateToSpokes('catalog-changed');
     await new Promise((r) => setImmediate(r));
@@ -127,7 +143,7 @@ describe('site_replicate', () => {
   });
 
   test('a spoke with no meshIp only ever tries the public endpoint', async () => {
-    SiteSpoke._seed([{ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a' }]);
+    SiteSpoke._seed([spokeWithUpdate({ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a' })]);
 
     await siteReplicate.replicateToSpokes('catalog-changed');
     await new Promise((r) => setImmediate(r));
@@ -143,9 +159,10 @@ describe('site_replicate', () => {
   });
 
   test('one spoke failing does not prevent delivery to another', async () => {
+    const live = spokeWithUpdate({ endpoint: 'https://live-spoke.example.com', pushToken: 'token-live' });
     SiteSpoke._seed([
-      { endpoint: 'https://dead-spoke.example.com', pushToken: 'token-dead' },
-      { endpoint: 'https://live-spoke.example.com', pushToken: 'token-live' }
+      spokeWithUpdate({ endpoint: 'https://dead-spoke.example.com', pushToken: 'token-dead' }),
+      live
     ]);
     mockFetchImpl = async (url) => {
       if (url.includes('dead-spoke')) throw new Error('connection refused');
@@ -155,10 +172,12 @@ describe('site_replicate', () => {
     await expect(siteReplicate.replicateToSpokes('event')).resolves.toBeUndefined();
     await new Promise((r) => setImmediate(r));
     expect(mockFetchCalls.length).toBe(2);
+    // Only the successful spoke gets last_seen_on updated.
+    expect(live.update).toHaveBeenCalledWith(expect.objectContaining({ last_seen_on: expect.any(Number) }));
   });
 
   test('a non-2xx response from a spoke does not throw out of replicateToSpokes', async () => {
-    SiteSpoke._seed([{ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a' }]);
+    SiteSpoke._seed([spokeWithUpdate({ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a' })]);
     mockFetchImpl = async () => ({ ok: false, status: 500 });
     await expect(siteReplicate.replicateToSpokes('event')).resolves.toBeUndefined();
   });

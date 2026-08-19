@@ -410,21 +410,44 @@ function baseDnFrom(conf) {
 }
 
 // siteIsFresh reports whether this deployment may join a master site
-// (MULTI_SITE_SPEC.md): no users beyond the bootstrap admin and no enrolled
-// agents. The bootstrap always seeds a handful of default resources (site →
-// host → sso/proxy services), so resources are NOT the signal — the operator's
-// rule is "no users". A directory with real users must never be merged into a
-// master's; that is the destructive case this guard prevents.
-async function siteIsFresh({ User, Agent }) {
-  const agents = (Agent && Agent.list ? await Agent.list().catch(() => []) : []);
-  if (agents && agents.length > 0) return false;
+// (MULTI_SITE_SPEC.md): no users beyond the bootstrap admin and no other
+// operator-created or runtime state that is not part of the master export.
+// The bootstrap always seeds a handful of default resources (site → host →
+// sso/proxy services), so resources are NOT the signal — the operator's rule is
+// "no real state". A directory with real users, enrolled agents, OAuth clients,
+// mesh clients, access requests, or plugin instances must never be merged into
+// a master's; that is the destructive case this guard prevents.
+async function anyRows(model) {
+  if (!model || typeof model.list !== 'function') return false;
+  try {
+    const rows = await model.list();
+    return Array.isArray(rows) && rows.length > 0;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function siteIsFresh({ User, Agent, OAuthClient, MeshClient, AccessRequest, PluginInstance }) {
+  // Any enrolled agent means this node already has fleet state that would be
+  // orphaned or overwritten by the master export.
+  if (await anyRows(Agent)) return false;
+  // Mesh clients are local-only runtime state.
+  if (await anyRows(MeshClient)) return false;
+  // Access requests are local-only approval workflow state.
+  if (await anyRows(AccessRequest)) return false;
+  // Plugin instances carry local operator configuration.
+  if (await anyRows(PluginInstance)) return false;
+  // OAuth clients created locally would not be known to the master and may
+  // collide with master-created clients.
+  if (await anyRows(OAuthClient)) return false;
+
   if (User && typeof User.listDetail === 'function') {
     try {
       const users = await User.listDetail();
       const real = (users || []).filter(u => !u.isServiceAccount);
       return real.length <= 1; // at most the bootstrap admin
     } catch (e) {
-      // LDAP unreachable — fall back to the agent-only check.
+      // LDAP unreachable — fall back to the checks above.
     }
   }
   return true;
