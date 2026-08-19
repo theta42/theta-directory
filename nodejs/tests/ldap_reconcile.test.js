@@ -33,7 +33,8 @@ jest.mock('../models/site_spoke', () => ({
 }));
 
 jest.mock('../utils/site_config', () => ({
-	get: () => ({ isMaster: true, siteSlug: 'site_main' })
+	get: () => ({ isMaster: true, siteSlug: 'site_main' }),
+	configFile: () => '/tmp/ldap-reconcile-test-site.json'
 }));
 
 const { reconcileReplication } = require('../utils/ldap_reconcile');

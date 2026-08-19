@@ -95,4 +95,49 @@ describe('proxy_client', () => {
     const result = await proxyClient.ensureRelayRoute({ host: 'sso-a.example.com', ip: '172.24.5.1', targetPort: 3001 });
     expect(result.note).toMatch(/failed: connection refused/);
   });
+
+  test('refreshes a stale cached token from OpenBao', async () => {
+    jest.useFakeTimers();
+    process.env.PROXY_INTERNAL_URL = 'https://proxy.internal';
+    mockBaoStore.set('integrations/theta-proxy', { token: 'prx_initial' });
+    mockFetchImpl = async () => ({ ok: true, status: 404 });
+
+    await proxyClient.ensureRelayRoute({ host: 'sso-a.example.com', ip: '172.24.5.1', targetPort: 3001 });
+    expect(calls[0][1].headers.Authorization).toBe('Bearer prx_initial');
+
+    // Replace the token in OpenBao and advance time past the cache max age.
+    mockBaoStore.set('integrations/theta-proxy', { token: 'prx_rotated' });
+    jest.advanceTimersByTime(6 * 60 * 1000);
+
+    await proxyClient.ensureRelayRoute({ host: 'sso-b.example.com', ip: '172.24.5.2', targetPort: 3001 });
+    const lastCall = calls[calls.length - 1];
+    expect(lastCall[1].headers.Authorization).toBe('Bearer prx_rotated');
+    jest.useRealTimers();
+  });
+
+  test('invalidates the token cache on HTTP 401', async () => {
+    process.env.PROXY_INTERNAL_URL = 'https://proxy.internal';
+    mockBaoStore.set('integrations/theta-proxy', { token: 'prx_revoked' });
+    mockFetchImpl = async (url, opts) => {
+      if (!opts.method) return { ok: true, status: 404 };
+      if (opts.method === 'POST') return { ok: false, status: 401 };
+      throw new Error('unexpected method ' + opts.method);
+    };
+
+    const result = await proxyClient.ensureRelayRoute({ host: 'sso-a.example.com', ip: '172.24.5.1', targetPort: 3001 });
+    expect(result.note).toMatch(/HTTP 401/);
+
+    // A subsequent call with a fresh token stored in OpenBao must use it,
+    // proving the 401 path cleared the cache.
+    mockBaoStore.set('integrations/theta-proxy', { token: 'prx_fresh' });
+    mockFetchImpl = async (url, opts) => {
+      if (!opts.method) return { ok: true, status: 404 };
+      if (opts.method === 'POST') return { ok: true, status: 200 };
+      throw new Error('unexpected method ' + opts.method);
+    };
+    const result2 = await proxyClient.ensureRelayRoute({ host: 'sso-a.example.com', ip: '172.24.5.1', targetPort: 3001 });
+    expect(result2.note).toBe('created');
+    const postCalls = calls.filter((c) => c[1].method === 'POST');
+    expect(postCalls[postCalls.length - 1][1].headers.Authorization).toBe('Bearer prx_fresh');
+  });
 });

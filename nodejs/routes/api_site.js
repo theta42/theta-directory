@@ -1113,12 +1113,17 @@ router.post('/join', async (req, res, next) => {
     if (!cfg.isMaster) {
       return res.status(400).json({ status: 'error', message: 'this node is already a spoke (re-join is not supported)' });
     }
-    // Only a fresh install may join — a directory with real users must not be
-    // merged into a master's (that is the destructive case).
-    if (!(await siteIsFresh({ User, Agent }))) {
+    // Only a fresh install may join — a directory with real users/agents or
+    // other operator/runtime state must not be merged into a master's (that is
+    // the destructive case).
+    const { OAuthClient } = require('../models/oauth_client');
+    const { MeshClient } = require('../models/mesh_client');
+    const { AccessRequest } = require('../models/access_request');
+    const { PluginInstance } = require('../models/plugin_instance');
+    if (!(await siteIsFresh({ User, Agent, OAuthClient, MeshClient, AccessRequest, PluginInstance }))) {
       return res.status(409).json({
         status: 'error',
-        message: 'This directory already has users/agents. Only a fresh install may join a site (re-provision the host to adopt a master directory).'
+        message: 'This directory already has users, agents, OAuth clients, mesh clients, access requests, or plugin instances. Only a fresh install may join a site (re-provision the host to adopt a master directory).'
       });
     }
 

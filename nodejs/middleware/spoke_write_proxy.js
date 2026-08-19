@@ -272,6 +272,7 @@ async function spokeWriteProxy(req, res, next) {
   if (resp.ok) await refreshLocalDerivedState(req, user);
 
   res.status(resp.status);
+  res.setHeader('x-theta-forwarded-spoke', cfg.siteSlug || 'spoke');
   copyResponseHeaders(resp, res);
   return res.send(data);
 }

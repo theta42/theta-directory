@@ -86,6 +86,9 @@ async function pingOne(spoke, reason) {
 				signal: controller.signal
 			});
 			if (!resp.ok) throw new Error('status ' + resp.status);
+			// Record that this spoke was reached successfully, so the UI's
+			// "last seen" column isn't only updated by manual "Sync now" clicks.
+			await spoke.update({ last_seen_on: Math.floor(Date.now() / 1000) }).catch(() => {});
 			return; // success -- don't try the next (fallback) URL
 		} catch (err) {
 			lastErr = err;
