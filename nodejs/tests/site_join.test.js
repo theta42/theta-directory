@@ -572,3 +572,39 @@ test('siteIsFresh ignores service accounts', async () => {
   const Agent = { list: async () => [] };
   expect(await siteIsFresh({ User, Agent })).toBe(true);
 });
+
+// The bootstrap seeds the stack's own OAuth clients (theta-proxy, theta-jump)
+// and the docker-local discovery plugin on EVERY fresh install. These must not
+// trip the fresh-install guard, or a brand new bootstrapped spoke could never
+// join a master.
+test('siteIsFresh is true with only bootstrap-seeded OAuth clients', async () => {
+  const User = { listDetail: async () => [{ uid: 'admin', isServiceAccount: false }] };
+  const Agent = { list: async () => [] };
+  const OAuthClient = { list: async () => [{ name: 'theta-proxy' }, { name: 'theta-jump' }] };
+  const PluginInstance = { list: async () => [] };
+  expect(await siteIsFresh({ User, Agent, OAuthClient, PluginInstance })).toBe(true);
+});
+
+test('siteIsFresh is false with an operator-created OAuth client', async () => {
+  const User = { listDetail: async () => [{ uid: 'admin', isServiceAccount: false }] };
+  const Agent = { list: async () => [] };
+  const OAuthClient = { list: async () => [{ name: 'theta-proxy' }, { name: 'my-app' }] };
+  const PluginInstance = { list: async () => [] };
+  expect(await siteIsFresh({ User, Agent, OAuthClient, PluginInstance })).toBe(false);
+});
+
+test('siteIsFresh is true with only the bootstrap-seeded docker-local plugin', async () => {
+  const User = { listDetail: async () => [{ uid: 'admin', isServiceAccount: false }] };
+  const Agent = { list: async () => [] };
+  const OAuthClient = { list: async () => [] };
+  const PluginInstance = { list: async () => [{ slug: 'docker-local' }] };
+  expect(await siteIsFresh({ User, Agent, OAuthClient, PluginInstance })).toBe(true);
+});
+
+test('siteIsFresh is false with an operator-created plugin instance', async () => {
+  const User = { listDetail: async () => [{ uid: 'admin', isServiceAccount: false }] };
+  const Agent = { list: async () => [] };
+  const OAuthClient = { list: async () => [] };
+  const PluginInstance = { list: async () => [{ slug: 'docker-local' }, { slug: 'proxmox-lab' }] };
+  expect(await siteIsFresh({ User, Agent, OAuthClient, PluginInstance })).toBe(false);
+});
