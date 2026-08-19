@@ -427,6 +427,30 @@ async function anyRows(model) {
   }
 }
 
+// The bootstrap seeds a fixed, well-known set of defaults on every fresh
+// install (see theta-suite bootstrap/bootstrap.js): the stack's own OAuth
+// clients (theta-proxy, theta-jump) and the local Docker discovery plugin
+// (docker-local). These are present on EVERY install, so they must not count
+// as operator-created state for the fresh-install guard — otherwise a brand
+// new bootstrapped spoke can never join a master.
+const BOOTSTRAP_OAUTH_CLIENTS = new Set(['theta-proxy', 'theta-jump']);
+const BOOTSTRAP_PLUGIN_SLUGS = new Set(['docker-local']);
+
+// Returns true when the model holds any operator-created row for the given
+// kind — i.e. at least one row that is not a bootstrap seed. OAuth clients are
+// identified by name (the public toJSON exposes `name`), plugins by slug.
+async function hasNonBootstrapRows(model, kind) {
+  if (!model || typeof model.list !== 'function') return false;
+  try {
+    const rows = await model.list();
+    if (!Array.isArray(rows) || !rows.length) return false;
+    const seeds = kind === 'plugin' ? BOOTSTRAP_PLUGIN_SLUGS : BOOTSTRAP_OAUTH_CLIENTS;
+    return rows.some(r => !seeds.has((r && (r.name || r.slug)) || ''));
+  } catch (e) {
+    return false;
+  }
+}
+
 async function siteIsFresh({ User, Agent, OAuthClient, MeshClient, AccessRequest, PluginInstance }) {
   // Any enrolled agent means this node already has fleet state that would be
   // orphaned or overwritten by the master export.
@@ -435,11 +459,14 @@ async function siteIsFresh({ User, Agent, OAuthClient, MeshClient, AccessRequest
   if (await anyRows(MeshClient)) return false;
   // Access requests are local-only approval workflow state.
   if (await anyRows(AccessRequest)) return false;
-  // Plugin instances carry local operator configuration.
-  if (await anyRows(PluginInstance)) return false;
-  // OAuth clients created locally would not be known to the master and may
-  // collide with master-created clients.
-  if (await anyRows(OAuthClient)) return false;
+  // Plugin instances carry local operator configuration. The bootstrap-seeded
+  // docker-local discovery plugin is present on every install and is not
+  // operator state.
+  if (await hasNonBootstrapRows(PluginInstance, 'plugin')) return false;
+  // OAuth clients created here would not be known to the master and may
+  // collide with master-created clients. The bootstrap-seeded theta-proxy /
+  // theta-jump clients are present on every install and are not operator state.
+  if (await hasNonBootstrapRows(OAuthClient, 'oauth')) return false;
 
   if (User && typeof User.listDetail === 'function') {
     try {
