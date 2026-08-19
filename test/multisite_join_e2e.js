@@ -47,6 +47,18 @@ function step(msg) {
   console.log('--- ' + msg);
 }
 
+// Dereferencing `body.config` (or any other expected key) straight off a
+// response turns every non-200 into `TypeError: Cannot read properties of
+// undefined`, which says nothing about what actually came back. That happened
+// for real: a CI failure at the post-join status check reported only the
+// TypeError, with no status, no body, and no matching line in the server's own
+// log to correlate against. Fail with the evidence instead.
+function expectShape(label, res, key) {
+  if (res && res.status === 200 && res.body && res.body[key] !== undefined) return res.body[key];
+  fail(`${label}: expected HTTP 200 with a '${key}' field, got HTTP ${res && res.status} ${JSON.stringify(res && res.body)}`);
+  return undefined;
+}
+
 async function waitForHealthy(url, label) {
   for (let i = 0; i < 60; i++) {
     try {
@@ -264,9 +276,12 @@ homeDirectory: /home/${replicatedUid}
   }
 
   step('Verifying spoke persisted isMaster:false + masterUrl after join');
-  const { body: spokeCfg } = await api(SPOKE_URL, '/api/site/config', { token: spokeToken });
-  if (spokeCfg.config.isMaster !== false) fail(`spoke should be isMaster:false after join, got ${JSON.stringify(spokeCfg.config)}`);
-  if (!spokeCfg.config.masterUrl) fail('spoke should have masterUrl set after join');
+  const spokeCfgRes = await api(SPOKE_URL, '/api/site/config', { token: spokeToken });
+  const spokeCfgBody = expectShape('spoke /api/site/config after join', spokeCfgRes, 'config');
+  if (spokeCfgBody) {
+    if (spokeCfgBody.isMaster !== false) fail(`spoke should be isMaster:false after join, got ${JSON.stringify(spokeCfgBody)}`);
+    if (!spokeCfgBody.masterUrl) fail('spoke should have masterUrl set after join');
+  }
 
   step('Verifying the master computed its own LDAP replication config (ServerID 1 + the new spoke as a peer)');
   const { body: masterLdapCfg } = await api(MASTER_URL, '/api/directory-admin/ldap-replication-config', { token: masterToken });
