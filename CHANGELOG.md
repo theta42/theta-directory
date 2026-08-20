@@ -1,3 +1,6 @@
+## v2.24.4
+- meta: **`package.json` version now matches the release tag.** It had lagged behind since v2.24.2 (still reported `2.24.1`), so the running app's build info (`utils/build_info.js`, surfaced in the UI/API) under-reported the deployed version. Now `2.24.4`, matching the `v2.24.4` tag.
+
 ## v2.24.3
 - fix: **a brand new bootstrapped spoke can join a master again.** The v2.24.2 fresh-install guard (`siteIsFresh`) rejected a directory holding *any* OAuth client or plugin instance, but the bootstrap seeds the stack's own `theta-proxy` / `theta-jump` OAuth clients and a `docker-local` discovery plugin on every install. A fresh spoke therefore always failed with "This directory already has users, agents, OAuth clients, mesh clients, access requests, or plugin instances". The guard now ignores those well-known bootstrap seeds and only refuses to join when operator-created OAuth clients or plugin instances are present. Other runtime state (agents, mesh clients, access requests) is still rejected as before.
 - test: `tests/site_join.test.js` now asserts `siteIsFresh` treats only the bootstrap-seeded clients/plugin as fresh and rejects an operator-created client or plugin.
