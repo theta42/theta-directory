@@ -33,11 +33,21 @@ in `/etc/openldap/slapd.conf`.
 **If you're using `theta-suite`'s `setup.sh`, you don't set these by hand.**
 The master assigns each spoke a unique `LDAP_SERVER_ID` at join time (the
 same way it assigns a WireGuard mesh index), and `LDAP_REPLICATION_HOSTS` is
-derived automatically from every site's already-known HTTPS endpoint
-(`ldaps://<same-host>:636`) -- see `GET /api/site/ldap-peers` (spoke) and
+derived automatically from every site's **mesh address** -- see
+`GET /api/site/ldap-peers` (spoke) and
 `GET /api/directory-admin/ldap-replication-config` (master), and
 `theta-suite`'s `bootstrap/site-ldap-register.js`, which re-checks on every
 `setup.sh` run since the peer list changes as new spokes join.
+
+### Replication rides the WireGuard mesh
+
+LDAP replication is **never exposed to the public internet**. Every site is a
+mesh node (each is a potential exit), so each site's directory is dialled at
+its mesh address over **plain LDAP** (`ldap://10.<siteId>.0.2:389`) -- the
+WireGuard tunnel is already encrypted end-to-end, so there is no need for TLS
+on top of it, and LDAPS with a certificate bound to a hostname does not work
+over a bare mesh IP anyway. The same mesh preference applies to the live
+resync push (`utils/site_replicate.js`).
 
 Setting the two env vars directly still works (e.g. a non-`theta-suite`
 deployment) -- example using three manually-configured nodes:
@@ -45,19 +55,19 @@ deployment) -- example using three manually-configured nodes:
 **Site 1**
 ```env
 LDAP_SERVER_ID=1
-LDAP_REPLICATION_HOSTS="ldaps://sso.site2.com:636 ldaps://sso.site3.com:636"
+LDAP_REPLICATION_HOSTS="ldap://10.2.0.2:389 ldap://10.3.0.2:389"
 ```
 
 **Site 2**
 ```env
 LDAP_SERVER_ID=2
-LDAP_REPLICATION_HOSTS="ldaps://sso.site1.com:636 ldaps://sso.site3.com:636"
+LDAP_REPLICATION_HOSTS="ldap://10.1.0.2:389 ldap://10.3.0.2:389"
 ```
 
 **Site 3**
 ```env
 LDAP_SERVER_ID=3
-LDAP_REPLICATION_HOSTS="ldaps://sso.site1.com:636 ldaps://sso.site2.com:636"
+LDAP_REPLICATION_HOSTS="ldap://10.1.0.2:389 ldap://10.2.0.2:389"
 ```
 
 **A known limitation of the automatic path**: the *master's* own

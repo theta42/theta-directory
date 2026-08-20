@@ -1,11 +1,24 @@
 require('./setup');
 const { SiteSpoke } = require('../models/site_spoke');
-const { nextFreeLdapServerId, ldapHostFor } = require('../utils/ldap_replication');
+const { nextFreeLdapServerId, ldapMeshHost, ldapHostFor, ldapHostForSpoke } = require('../utils/ldap_replication');
 
 describe('ldap_replication', () => {
   beforeEach(async () => {
     const all = await SiteSpoke.list();
     for (const s of all) await s.delete();
+  });
+
+  describe('ldapMeshHost', () => {
+    test('a site directory is dialled at its mesh address over plain LDAP', () => {
+      expect(ldapMeshHost(1)).toBe('ldap://10.1.0.2:389');
+      expect(ldapMeshHost(5)).toBe('ldap://10.5.0.2:389');
+    });
+
+    test('rejects a missing or invalid site id', () => {
+      expect(ldapMeshHost(null)).toBeNull();
+      expect(ldapMeshHost(0)).toBeNull();
+      expect(ldapMeshHost('x')).toBeNull();
+    });
   });
 
   describe('ldapHostFor', () => {
@@ -18,6 +31,22 @@ describe('ldap_replication', () => {
     test('returns null for an unparseable endpoint', () => {
       expect(ldapHostFor('not-a-url')).toBeNull();
       expect(ldapHostFor('')).toBeNull();
+    });
+  });
+
+  describe('ldapHostForSpoke', () => {
+    test('prefers the mesh address over plain LDAP for any spoke with a ServerID', () => {
+      expect(ldapHostForSpoke({ ldapServerId: 2, endpoint: 'https://spoke.example.com' }))
+        .toBe('ldap://10.2.0.2:389');
+    });
+
+    test('falls back to the public endpoint when the spoke has no ServerID yet', () => {
+      expect(ldapHostForSpoke({ endpoint: 'https://spoke.example.com' }))
+        .toBe('ldaps://spoke.example.com:636');
+    });
+
+    test('returns null for a null spoke', () => {
+      expect(ldapHostForSpoke(null)).toBeNull();
     });
   });
 

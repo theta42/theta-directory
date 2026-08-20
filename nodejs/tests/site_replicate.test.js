@@ -76,10 +76,12 @@ describe('site_replicate', () => {
     expect(spokeB.update).toHaveBeenCalledWith(expect.objectContaining({ last_seen_on: expect.any(Number) }));
   });
 
-  // The mesh path now addresses the peer site's DIRECTORY directly
+  // The mesh path addresses the peer site's DIRECTORY directly
   // (10.<siteId>.0.2:3001). The gateway is a real router, so there is no
   // relay port and no local-gateway hop to derive (utils/mesh_route.js).
-  test('prefers the peer directory over the mesh when the spoke reported a mesh IP', async () => {
+  // Every site is a mesh node, so a spoke with a ServerID is dialled over the
+  // tunnel by default -- no meshIp field required.
+  test('prefers the peer directory over the mesh for any spoke with a ServerID', async () => {
     jest.resetModules();
     jest.doMock('../models/site_spoke', () => ({ SiteSpoke: makeSpokeMock() }));
     siteReplicate = require('../utils/site_replicate');
@@ -87,7 +89,7 @@ describe('site_replicate', () => {
     global.fetch = trackedFetch;
 
     SiteSpoke._seed([
-      spokeWithUpdate({ endpoint: 'https://spoke-a.example.com:8443', pushToken: 'token-a', meshIp: '172.24.0.5' })
+      spokeWithUpdate({ endpoint: 'https://spoke-a.example.com:8443', pushToken: 'token-a', ldapServerId: 5 })
     ]);
 
     await siteReplicate.replicateToSpokes('catalog-changed');
@@ -95,8 +97,6 @@ describe('site_replicate', () => {
 
     expect(mockFetchCalls.length).toBe(1);
     expect(mockFetchCalls[0][0]).toBe('http://10.5.0.2:3001/api/site/resync');
-    // The gateway address identifies the site; it is never itself a service.
-    expect(mockFetchCalls[0][0]).not.toContain('172.24.0.5');
   });
 
   test('falls back to the public endpoint if the mesh attempt fails', async () => {
@@ -106,7 +106,7 @@ describe('site_replicate', () => {
     SiteSpoke = require('../models/site_spoke').SiteSpoke;
     global.fetch = trackedFetch;
 
-    const spokeA = spokeWithUpdate({ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', meshIp: '172.24.0.5' });
+    const spokeA = spokeWithUpdate({ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', ldapServerId: 5 });
     SiteSpoke._seed([spokeA]);
     // A deployment whose containers have no route for 10.0.0.0/8 via the
     // gateway must still replicate -- just over the internet, not the tunnel.
@@ -123,26 +123,7 @@ describe('site_replicate', () => {
     expect(mockFetchCalls[1][0]).toBe('https://spoke-a.example.com/api/site/resync');
   });
 
-  // An address in the RETIRED scheme (site index in the third octet) is not a
-  // mesh address any more. It must fall through to the public endpoint rather
-  // than resolve to some other site's directory.
-  test('an address in the retired scheme falls straight through to the endpoint', async () => {
-    jest.resetModules();
-    jest.doMock('../models/site_spoke', () => ({ SiteSpoke: makeSpokeMock() }));
-    siteReplicate = require('../utils/site_replicate');
-    SiteSpoke = require('../models/site_spoke').SiteSpoke;
-    global.fetch = trackedFetch;
-
-    SiteSpoke._seed([spokeWithUpdate({ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', meshIp: '172.24.5.1' })]);
-
-    await siteReplicate.replicateToSpokes('catalog-changed');
-    await new Promise((r) => setImmediate(r));
-
-    expect(mockFetchCalls.length).toBe(1);
-    expect(mockFetchCalls[0][0]).toBe('https://spoke-a.example.com/api/site/resync');
-  });
-
-  test('a spoke with no meshIp only ever tries the public endpoint', async () => {
+  test('a spoke with no ServerID yet only ever tries the public endpoint', async () => {
     SiteSpoke._seed([spokeWithUpdate({ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a' })]);
 
     await siteReplicate.replicateToSpokes('catalog-changed');
