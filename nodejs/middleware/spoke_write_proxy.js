@@ -54,6 +54,7 @@
  */
 
 const siteConfig = require('../utils/site_config');
+const { fetchWithAuthRedirect } = require('../utils/fetch_with_auth_redirect');
 
 // Writes the master owns AND replicates back to this node.
 //
@@ -264,25 +265,19 @@ async function spokeWriteProxy(req, res, next) {
     body = req.body;
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FORWARD_TIMEOUT_MS);
-
   let resp;
   try {
-    resp = await fetch(masterUrl + (req.originalUrl || req.url), {
+    resp = await fetchWithAuthRedirect(masterUrl + (req.originalUrl || req.url), {
       method: req.method,
       headers: forwardHeaders,
-      body,
-      signal: controller.signal
-    });
+      body
+    }, { timeoutMs: FORWARD_TIMEOUT_MS });
   } catch (err) {
     return res.status(503).json({
       status: 'error',
       message: `Master directory at ${masterUrl} is unreachable for write operations (${err.message}). `
         + 'This site is in read-only offline mode; reads, SSSD auth and DNS are unaffected.'
     });
-  } finally {
-    clearTimeout(timer);
   }
 
   const data = Buffer.from(await resp.arrayBuffer());

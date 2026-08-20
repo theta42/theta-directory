@@ -105,7 +105,7 @@ router.put('/:id', async function(req, res, next) {
 router.delete('/:id', async function(req, res, next) {
 	try {
 		const token = await getOwned(req, req.params.id);
-		await token.remove();
+		await token.delete();
 
 		return res.json({
 			id: req.params.id,

@@ -22,6 +22,7 @@ const { SiteSpoke } = require('../models/site_spoke');
 const siteConfig = require('./site_config');
 const { currentSlapdServerId } = require('./ldap_replication');
 const { MAX_SITE_ID, SHADOW_DEFAULTS } = require('./mesh_addressing');
+const { fetchWithAuthRedirect } = require('./fetch_with_auth_redirect');
 
 const now = () => Math.floor(Date.now() / 1000);
 
@@ -157,10 +158,8 @@ async function pushSelfToMaster(site) {
 	}
 	if (!site.gatewayPublicKey) return { pushed: false, reason: 'nothing published yet' };
 
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), 10000);
 	try {
-		const resp = await fetch(String(cfg.masterUrl).replace(/\/+$/, '') + '/api/site/spokes', {
+		const resp = await fetchWithAuthRedirect(String(cfg.masterUrl).replace(/\/+$/, '') + '/api/site/spokes', {
 			method: 'POST',
 			headers: { Authorization: 'Bearer ' + cfg.masterJoinKey, 'Content-Type': 'application/json' },
 			body: JSON.stringify({
@@ -168,9 +167,8 @@ async function pushSelfToMaster(site) {
 				siteSlug: site.slug || cfg.siteSlug,
 				gatewayPublicKey: site.gatewayPublicKey,
 				gatewayEndpoint: site.gatewayEndpoint || ''
-			}),
-			signal: controller.signal
-		});
+			})
+		}, { timeoutMs: 10000 });
 		if (!resp.ok) {
 			console.warn(`[mesh] master rejected this site's gateway details: HTTP ${resp.status}`);
 			return { pushed: false, reason: `HTTP ${resp.status}` };
@@ -179,8 +177,6 @@ async function pushSelfToMaster(site) {
 	} catch (err) {
 		console.warn(`[mesh] could not send this site's gateway details to the master: ${err.message}`);
 		return { pushed: false, reason: err.message };
-	} finally {
-		clearTimeout(timer);
 	}
 }
 

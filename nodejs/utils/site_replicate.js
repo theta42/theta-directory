@@ -17,6 +17,7 @@
 
 const { SiteSpoke } = require('../models/site_spoke');
 const { meshServiceTarget } = require('./mesh_route');
+const { fetchWithAuthRedirect } = require('./fetch_with_auth_redirect');
 
 const RESYNC_TIMEOUT_MS = 8000;
 
@@ -58,7 +59,16 @@ function resyncUrls(spoke) {
 		if (target) urls.push(`http://${target.host}:${target.port}/api/site/resync`);
 	}
 	if (spoke.endpoint) {
-		urls.push(String(spoke.endpoint).replace(/\/+$/, '') + '/api/site/resync');
+		const base = String(spoke.endpoint).replace(/\/+$/, '');
+		// Prefer HTTPS directly when the registry says http://. The proxy in
+		// front of every spoke redirects HTTP to HTTPS with 301, but over
+		// hairpin NAT (both sites behind the same public IP) the 301 target
+		// can route to the wrong backend and the push token is rejected. Using
+		// HTTPS first routes by SNI/Host and avoids the redirect round-trip.
+		if (base.startsWith('http://')) {
+			urls.push(base.replace(/^http:\/\//, 'https://') + '/api/site/resync');
+		}
+		urls.push(base + '/api/site/resync');
 	}
 	return urls;
 }
@@ -67,15 +77,14 @@ async function pingOne(spoke, reason) {
 	const urls = resyncUrls(spoke);
 	let lastErr;
 	for (const url of urls) {
-		const controller = new AbortController();
-		const timer = setTimeout(() => controller.abort(), RESYNC_TIMEOUT_MS);
+		const body = JSON.stringify({ reason: reason || 'catalog-changed' });
+		const init = {
+			method: 'POST',
+			headers: { Authorization: 'Bearer ' + spoke.pushToken, 'Content-Type': 'application/json' },
+			body
+		};
 		try {
-			const resp = await fetch(url, {
-				method: 'POST',
-				headers: { Authorization: 'Bearer ' + spoke.pushToken, 'Content-Type': 'application/json' },
-				body: JSON.stringify({ reason: reason || 'catalog-changed' }),
-				signal: controller.signal
-			});
+			const resp = await fetchWithAuthRedirect(url, init, { timeoutMs: RESYNC_TIMEOUT_MS });
 			if (!resp.ok) throw new Error('status ' + resp.status);
 			// Record that this spoke was reached successfully, so the UI's
 			// "last seen" column isn't only updated by manual "Sync now" clicks.
@@ -83,8 +92,6 @@ async function pingOne(spoke, reason) {
 			return; // success -- don't try the next (fallback) URL
 		} catch (err) {
 			lastErr = err;
-		} finally {
-			clearTimeout(timer);
 		}
 	}
 	throw lastErr;

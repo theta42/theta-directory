@@ -163,6 +163,56 @@ describe('site_replicate', () => {
     await expect(siteReplicate.replicateToSpokes('event')).resolves.toBeUndefined();
   });
 
+  test('tries https first for an http registry endpoint and follows same-host 301 redirect preserving POST body and Authorization', async () => {
+    const spokeA = spokeWithUpdate({ endpoint: 'http://spoke-a.example.com', pushToken: 'token-a' });
+    SiteSpoke._seed([spokeA]);
+
+    let redirected = false;
+    mockFetchImpl = async (url, init) => {
+      if (url === 'https://spoke-a.example.com/api/site/resync') {
+        return {
+          status: 301,
+          ok: false,
+          headers: new Map([['location', 'https://spoke-a.example.com/api/site/resync/retry']]),
+          get(name) { return this.headers.get(name.toLowerCase()); }
+        };
+      }
+      if (url === 'https://spoke-a.example.com/api/site/resync/retry') {
+        redirected = true;
+        expect(init.method).toBe('POST');
+        expect(init.headers.Authorization).toBe('Bearer token-a');
+        expect(JSON.parse(init.body).reason).toBe('catalog-changed');
+        return { ok: true, status: 200 };
+      }
+      throw new Error('unexpected url: ' + url);
+    };
+
+    await siteReplicate.replicateToSpokes('catalog-changed');
+    await new Promise((r) => setImmediate(r));
+
+    expect(redirected).toBe(true);
+    expect(spokeA.update).toHaveBeenCalledWith(expect.objectContaining({ last_seen_on: expect.any(Number) }));
+  });
+
+  test('refuses cross-host redirects to avoid leaking the push token', async () => {
+    SiteSpoke._seed([spokeWithUpdate({ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a' })]);
+
+    mockFetchImpl = async (url) => {
+      if (url === 'https://spoke-a.example.com/api/site/resync') {
+        return {
+          status: 301,
+          ok: false,
+          headers: new Map([['location', 'https://evil.example.com/api/site/resync']]),
+          get(name) { return this.headers.get(name.toLowerCase()); }
+        };
+      }
+      return { ok: true, status: 200 };
+    };
+
+    await expect(siteReplicate.pushResync(spokeWithUpdate({ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a' }), 'event'))
+      .rejects.toThrow('cross-host redirect');
+  });
+
   test('SiteSpoke.list() throwing does not propagate to the caller', async () => {
     SiteSpoke.list = jest.fn(async () => { throw new Error('db unavailable'); });
     await expect(siteReplicate.replicateToSpokes('event')).resolves.toBeUndefined();

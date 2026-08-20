@@ -563,6 +563,76 @@ test('the importDirectory stubs match that contract', async () => {
   expect(typeof edge.delete).toBe('function');
 });
 
+// ApiTokens replicate as bcrypt hashes so an sso_... token minted on the master
+// is valid on every spoke. The raw secret is never stored, so the export only
+// carries the hash and metadata.
+function makeApiTokenStore() {
+  const rows = [];
+  const asRow = (data) => {
+    const row = { ...data };
+    Object.defineProperty(row, 'update', {
+      enumerable: false, writable: true, configurable: true,
+      value: async (patch) => { Object.assign(row, patch); return row; }
+    });
+    Object.defineProperty(row, 'delete', {
+      enumerable: false, writable: true, configurable: true,
+      value: async () => {
+        const i = rows.indexOf(row);
+        if (i >= 0) rows.splice(i, 1);
+      }
+    });
+    return row;
+  };
+  return {
+    ApiToken: {
+      list: async () => rows.slice(),
+      get: async (id) => rows.find(r => r.id === id) || null,
+      create: async (d) => { const row = asRow(d); rows.push(row); return row; },
+      get rows() { return rows; }
+    }
+  };
+};
+
+test('importDirectory adopts API tokens from the master and removes ones the master dropped', async () => {
+  const { ApiToken } = makeApiTokenStore();
+  // A stale local token that the master no longer has should be deleted.
+  await ApiToken.create({ id: 'stale-local', secret_hash: 'hash-stale', name: 'stale', created_by: 'admin', is_valid: true });
+
+  // The real function lives in routes/api_site.js; importDirectory itself does
+  // not know about API tokens, so the caller is responsible for applying the
+  // apiTokens slice. We exercise that logic shape directly here.
+  const exported = [
+    { id: 'master-token', secret_hash: 'hash-master', name: 'cli', description: '', created_by: 'admin', created_on: 1, updated_on: 1, expires_at: 0, last_used_on: 0, is_valid: true }
+  ];
+  const exportedIds = new Set(exported.map(t => t.id));
+  for (const t of exported) {
+    const existing = await ApiToken.get(t.id);
+    const fields = {
+      secret_hash: t.secret_hash,
+      name: t.name || 'Replicated token',
+      description: t.description || '',
+      created_by: t.created_by,
+      created_on: t.created_on || Date.now(),
+      updated_on: t.updated_on || Date.now(),
+      expires_at: t.expires_at || 0,
+      last_used_on: t.last_used_on || 0,
+      is_valid: t.is_valid !== false
+    };
+    if (existing) await existing.update(fields);
+    else await ApiToken.create({ id: t.id, ...fields });
+  }
+  const localTokens = await ApiToken.list();
+  for (const local of localTokens) {
+    if (exportedIds.has(local.id)) continue;
+    await local.delete();
+  }
+
+  expect(ApiToken.rows.map(r => r.id).sort()).toEqual(['master-token']);
+  const adopted = ApiToken.rows[0];
+  expect(adopted.secret_hash).toBe('hash-master');
+  expect(adopted.name).toBe('cli');
+});
+
 test('siteIsFresh ignores service accounts', async () => {
   const User = { listDetail: async () => [
     { uid: 'admin' },

@@ -12,7 +12,7 @@ require('./verification');
 require('./activity_event');   // notification history (shape only, TTL-bounded)
 require('./activity_seen');    // per-user read watermark
 require('./oauth_code');
-require('./api_token');
+const { ApiToken, migrateFromRedis: migrateApiTokensFromRedis } = require('./api_token');
 
 const { init } = require('@simpleworkjs/orm');
 const socketPubsub = require('../utils/socket_pubsub');
@@ -57,13 +57,21 @@ async function initORM() {
         Resource, ResourceEdge, ResourceGroup, AccessRequest, Webhook, PluginInstance,
         SharedSecret, SharedSecretGrant, VaultAppToken, Agent, AgentJoinKey, SiteJoinKey, SiteSpoke,
         MeshSite, MeshClient, MeshExitGrant,
-        Token, AuthToken, InviteToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken
+        Token, AuthToken, InviteToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken,
+        ApiToken
       ]
     });
     console.log('[initORM] ORM initialized successfully');
     console.log('[initORM] Resource.orm =', !!Resource.orm, 'Token.orm =', !!Token.orm);
     await healSchema();
     await ensureUniqueIndexes();
+    // Migrate PATs from Redis (pre-v2.24.8 store) into the replicated SQLite
+    // catalog. Best-effort and idempotent; safe to leave in place forever.
+    try {
+      await migrateApiTokensFromRedis(Table);
+    } catch (e) {
+      console.warn('[initORM] ApiToken migration failed:', e.message);
+    }
   } catch (err) {
     console.error('[initORM] ORM initialization failed:', err.message);
     throw err;
