@@ -644,9 +644,20 @@ homeDirectory: /home/${replicatedUid}
   }
 
   step('Verifying the demoted old master auto-registered itself as a real spoke of the new master (not orphaned)');
-  const { body: newMasterLdapCfg } = await api(SPOKE_URL, '/api/directory-admin/ldap-replication-config', { token: spokeToken });
-  const oldMasterAsPeer = (newMasterLdapCfg.peers || []).find(p => p.ldapHost === 'ldap://10.1.0.2:389');
-  if (!oldMasterAsPeer || typeof oldMasterAsPeer.ldapServerId !== 'number') {
+  // The demoted old master re-registers asynchronously after promotion, so
+  // poll until it appears as a peer. The new master is site 1 (10.1.0.2 is its
+  // OWN address, never a peer); the demoted old master is assigned a fresh
+  // ServerID, so it appears at its own mesh address -- the point is that it IS
+  // a registered peer with a valid id, not that it keeps its old one.
+  let oldMasterAsPeer = null;
+  for (let i = 0; i < 20; i++) {
+    const { body: newMasterLdapCfg } = await api(SPOKE_URL, '/api/directory-admin/ldap-replication-config', { token: spokeToken });
+    oldMasterAsPeer = (newMasterLdapCfg.peers || []).find(p => p.ldapServerId !== 1 && typeof p.ldapServerId === 'number');
+    if (oldMasterAsPeer) break;
+    await new Promise((res) => setTimeout(res, 500));
+  }
+  if (!oldMasterAsPeer) {
+    const { body: newMasterLdapCfg } = await api(SPOKE_URL, '/api/directory-admin/ldap-replication-config', { token: spokeToken });
     fail(`the demoted old master should appear as a registered peer with an assigned ldapServerId, got ${JSON.stringify(newMasterLdapCfg.peers)}`);
   }
 
