@@ -597,7 +597,10 @@ test('siteIsFresh is true with only the bootstrap-seeded docker-local plugin', a
   const User = { listDetail: async () => [{ uid: 'admin', isServiceAccount: false }] };
   const Agent = { list: async () => [] };
   const OAuthClient = { list: async () => [] };
-  const PluginInstance = { list: async () => [{ slug: 'docker-local' }] };
+  // Serialized plugin rows carry BOTH a human `name` ("Local Docker daemon")
+  // and the discovery-source `slug` ('docker-local'); the guard must key on the
+  // slug, or a fresh install (with the seeded plugin) would still look dirty.
+  const PluginInstance = { list: async () => [{ name: 'Local Docker daemon', slug: 'docker-local' }] };
   expect(await siteIsFresh({ User, Agent, OAuthClient, PluginInstance })).toBe(true);
 });
 

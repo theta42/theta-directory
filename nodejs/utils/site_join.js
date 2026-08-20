@@ -437,15 +437,18 @@ const BOOTSTRAP_OAUTH_CLIENTS = new Set(['theta-proxy', 'theta-jump']);
 const BOOTSTRAP_PLUGIN_SLUGS = new Set(['docker-local']);
 
 // Returns true when the model holds any operator-created row for the given
-// kind — i.e. at least one row that is not a bootstrap seed. OAuth clients are
-// identified by name (the public toJSON exposes `name`), plugins by slug.
+// kind — i.e. at least one row that is not a bootstrap seed. Each kind is keyed
+// on a single stable field: OAuth clients on `name` (their public toJSON
+// exposes `name`), plugin instances on `slug` (the discovery-source handle —
+// their human `name`, e.g. "Local Docker daemon", differs from the seed slug).
 async function hasNonBootstrapRows(model, kind) {
   if (!model || typeof model.list !== 'function') return false;
   try {
     const rows = await model.list();
     if (!Array.isArray(rows) || !rows.length) return false;
     const seeds = kind === 'plugin' ? BOOTSTRAP_PLUGIN_SLUGS : BOOTSTRAP_OAUTH_CLIENTS;
-    return rows.some(r => !seeds.has((r && (r.name || r.slug)) || ''));
+    const key = kind === 'plugin' ? 'slug' : 'name';
+    return rows.some(r => !seeds.has((r && r[key]) || ''));
   } catch (e) {
     return false;
   }

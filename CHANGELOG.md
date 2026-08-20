@@ -1,3 +1,7 @@
+## v2.24.5
+- fix: **a fresh bootstrapped spoke can actually join a master now.** The v2.24.3 fix was incomplete: it matched the seeded `docker-local` plugin against its human `name` ("Local Docker daemon") instead of its discovery `slug` (`docker-local`), so the guard still saw the seeded plugin as operator-created state and refused every fresh join with "This directory already has users, agents, OAuth clients, mesh clients, access requests, or plugin instances". The guard now keys plugin instances on `slug` (and OAuth clients on `name`), so a fresh install with only the bootstrap seeds joins cleanly.
+- test: `tests/site_join.test.js` now feeds the seeded plugin its real serialized shape (both `name` and `slug`) so the regression is caught — it fails against the v2.24.3/v2.24.4 code.
+
 ## v2.24.4
 - meta: **`package.json` version now matches the release tag.** It had lagged behind since v2.24.2 (still reported `2.24.1`), so the running app's build info (`utils/build_info.js`, surfaced in the UI/API) under-reported the deployed version. Now `2.24.4`, matching the `v2.24.4` tag.
 
