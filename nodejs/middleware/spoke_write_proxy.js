@@ -189,6 +189,23 @@ async function refreshLocalDerivedState(req, user) {
       await verif.update({ password_must_change: false });
     }
   } catch (e) { /* the next resync carries it */ }
+
+  // Onboarding date-of-birth edits are forwarded to the master, but the
+  // onboarding page reloads /api/user/me immediately and would otherwise still
+  // see the old value until LDAP syncrepl catches up. Apply the same edit
+  // locally, best-effort, so the next read is correct and the user can proceed.
+  try {
+    if (/^\/api\/user\/[^/]+(\/|$)/.test(path)
+        && ['PUT', 'PATCH'].includes(req.method)
+        && (req.body || {}).dateOfBirth) {
+      const userMod = require('../models/user');
+      const UserModel = userMod.User || userMod;
+      const localUser = await UserModel.get(user.uid);
+      if (localUser && typeof localUser.update === 'function') {
+        await localUser.update({ dateOfBirth: req.body.dateOfBirth });
+      }
+    }
+  } catch (e) { /* non-fatal: syncrepl will converge it */ }
 }
 
 async function spokeWriteProxy(req, res, next) {
