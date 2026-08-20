@@ -228,6 +228,32 @@ describe('spoke_write_proxy middleware', () => {
     expect(clearCacheSpy).toHaveBeenCalled();
   });
 
+  test('applies a forwarded DOB update locally so onboarding can proceed immediately', async () => {
+    jest.spyOn(siteConfig, 'get').mockReturnValue(SPOKE);
+
+    const { User } = require('../models/user');
+    const clearCacheSpy = jest.spyOn(User, 'clearCache').mockImplementation(() => {});
+    const updateSpy = jest.fn().mockResolvedValue({});
+    jest.spyOn(User, 'get').mockResolvedValue({ update: updateSpy });
+
+    const res = makeRes();
+    await spokeWriteProxy(
+      makeReq({
+        method: 'PUT',
+        url: '/api/user/alice',
+        user: { uid: 'alice' },
+        body: { dateOfBirth: '1990-06-15' }
+      }),
+      res,
+      jest.fn()
+    );
+
+    expect(res.statusCode).toBe(200);
+    expect(User.get).toHaveBeenCalledWith('alice');
+    expect(updateSpy).toHaveBeenCalledWith({ dateOfBirth: '1990-06-15' });
+    expect(clearCacheSpy).toHaveBeenCalled();
+  });
+
   test('returns 503 when Master is unreachable', async () => {
     jest.spyOn(siteConfig, 'get').mockReturnValue(SPOKE);
     mockFetchImpl = async () => { throw new Error('Connection refused'); };
