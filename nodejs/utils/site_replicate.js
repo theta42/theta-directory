@@ -38,32 +38,23 @@ function replicateToSpokes(reason) {
 	})();
 }
 
-// Cross-component routing (MULTI_SITE_SPEC.md): if this spoke reported a WG
-// mesh IP when it registered (utils/proxy_client.js's no-inbound relay path
-// populates the same field), prefer sending the resync push over the mesh
-// tunnel instead of the open internet -- plain HTTP is fine here since the
-// WG tunnel itself is already encrypted, same reasoning as the no-inbound
-// relay terminating at the master. Falls back to the spoke's public endpoint
-// if the mesh attempt fails (mesh IP set but that particular tunnel isn't
-// actually up yet, or unreachable for any other reason) -- never let a
-// mesh-routing preference turn into "spoke never gets updates."
+// Cross-component routing (MULTI_SITE_SPEC.md): every site is a mesh node, so
+// the resync push rides the WireGuard tunnel by default -- the peer's directory
+// is dialled at its mesh address (10.<serverId>.0.2) over plain HTTP (the
+// tunnel is already encrypted). This is the same preference
+// utils/ldap_replication.js applies to LDAP replication, and for the same
+// reason: inter-site traffic goes over the mesh, never the open internet.
+//
+// Falls back to the spoke's public endpoint if the mesh attempt fails (the
+// tunnel isn't actually up yet, or unreachable for any other reason) -- never
+// let a mesh-routing preference turn into "spoke never gets updates."
 function resyncUrls(spoke) {
 	const urls = [];
-	// Only dial the mesh when this spoke actually reported a mesh address, or
-	// when it has no inbound path at all and the tunnel is therefore the only
-	// route to it. Deriving `10.<serverId>.0.2` for EVERY spoke meant a normal
-	// inbound spoke -- one with no mesh at all -- had every push spend the full
-	// 8s timeout on a dead address before falling back to the endpoint that was
-	// going to work all along, which is what made the operator's "Sync now"
-	// (which awaits) look hung.
-	const meshAddr = spoke.meshIp
-		|| ((spoke.noInbound && spoke.ldapServerId) ? `10.${spoke.ldapServerId}.0.2` : null);
-	if (meshAddr) {
-		// The peer site's directory, addressed directly over the routed mesh
-		// (utils/mesh_route.js). This needs a route for 10.0.0.0/8 via the
-		// local gateway; where that route is absent the public-endpoint
-		// fallback below still carries the push, just over the internet.
-		const target = meshServiceTarget(meshAddr);
+	// Every registered spoke has a ServerID (assigned at join), which is its
+	// mesh identity. A spoke without one has no mesh address yet and only the
+	// public endpoint is tried.
+	if (spoke.ldapServerId) {
+		const target = meshServiceTarget(`10.${spoke.ldapServerId}.0.2`);
 		if (target) urls.push(`http://${target.host}:${target.port}/api/site/resync`);
 	}
 	if (spoke.endpoint) {

@@ -52,7 +52,7 @@ function logAudit(action, details) {
   console.log(JSON.stringify({ timestamp: new Date().toISOString(), component: 'site', action, ...details }));
 }
 
-const { nextFreeLdapServerId, ldapHostFor, ldapHostForSpoke } = require('../utils/ldap_replication');
+const { nextFreeLdapServerId, ldapMeshHost, ldapHostFor, ldapHostForSpoke } = require('../utils/ldap_replication');
 const meshRoster = require('../utils/mesh_roster');
 const { MeshSite } = require('../models/mesh_site');
 
@@ -407,7 +407,11 @@ router.get('/ldap-peers', async (req, res, next) => {
     }
 
     const cfg = siteConfig.get();
-    const masterHost = ldapHostFor(cfg.masterUrl || req.protocol + '://' + req.get('host'));
+    // The master is site 1, so its directory is dialled at its mesh address
+    // (10.1.0.2) over plain LDAP -- replication rides the WireGuard tunnel,
+    // never the public internet. Fall back to the public endpoint only if the
+    // mesh address cannot be derived (should not happen for a master).
+    const masterHost = ldapMeshHost(1) || ldapHostFor(cfg.masterUrl || req.protocol + '://' + req.get('host'));
     const spokes = await SiteSpoke.list();
     const caller = spokes.find((s) => s.endpoint === callerEndpoint);
     if (!caller || !caller.ldapServerId) {

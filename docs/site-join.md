@@ -261,12 +261,18 @@ replication config is applied live" above.)*
 
 ## Shipped since the above was last stale
 
-- Traffic between sites (`utils/site_replicate.js`'s resync push) prefers the
-  WireGuard mesh over the open internet when a spoke has a mesh IP on file,
-  falling back to the public endpoint on failure. It dials the LOCAL gateway's
-  per-peer forwarding port (`utils/mesh_route.js`), **not** the peer's mesh IP
-  — that address lives inside the peer gateway's network namespace and is not
-  routable from here.
+- Traffic between sites (`utils/site_replicate.js`'s resync push) rides the
+  WireGuard mesh by default: every site is a mesh node, so a spoke with a
+  ServerID is dialled at its mesh address (`10.<siteId>.0.2:3001`) over plain
+  HTTP, falling back to the public endpoint on failure. The gateway is a real
+  router, so the peer's directory is addressed directly — there is no relay
+  port and no local-gateway hop to derive (`utils/mesh_route.js`).
+- OpenLDAP N-way multi-master replication auto-configures on join and rides
+  the mesh too: the master assigns each spoke a unique `LDAP_SERVER_ID` and
+  every site's directory is dialled at its mesh address over plain LDAP
+  (`ldap://10.<siteId>.0.2:389`), never the public internet
+  (`GET /api/site/ldap-peers`, `GET /directory-admin/ldap-replication-config`).
+  See `docs/replication.md`.
 - A no-inbound spoke (no public IP at all) CAN join: `noInbound`/`meshIp`/
   `publicHost` on `POST /api/site/join` drive `utils/proxy_client.js`, which
   auto-creates/updates the relay route on the master's own `theta-proxy`.
@@ -274,8 +280,3 @@ replication config is applied live" above.)*
   (see `theta-suite`'s `spoke.env.example` for the operator-facing side).
   A spoke with zero inbound *and* zero outbound path still can't join --
   the join itself needs to reach the master's API directly.
-- OpenLDAP N-way multi-master replication now auto-configures on join --
-  the master assigns each spoke a unique `LDAP_SERVER_ID` and derives every
-  site's `ldaps://` URL automatically (`GET /api/site/ldap-peers`,
-  `GET /directory-admin/ldap-replication-config`). See
-  `docs/replication.md`.
