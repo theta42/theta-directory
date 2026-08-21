@@ -1,3 +1,8 @@
+## v2.24.11
+- fix: **Agent join key cross-site replication and auto-enrollment across spokes.** Added `toReplica()` method to `AgentJoinKey` to preserve `keyHash` during export. Added `replicateOnFinish` to `POST /api/agent/join-keys`, `POST /join-keys/:id/revoke`, and `DELETE /join-keys/:id` in `routes/api_agent.js`. Added `agentJoinKeys` export and adoption/pruning during resync in `routes/api_site.js`, allowing agents on spokes to authenticate and enroll against master-issued join keys immediately.
+- fix: **Atomic OpenLDAP runtime configuration modifications.** Consolidated database attribute modifications (`olcSyncrepl` and `olcMirrorMode`) in `utils/ldap_runtime_config.js` into a single atomic LDIF modify operation with hyphen separators, preventing `slapd` deadlocks when applying live multi-master syncrepl configuration changes.
+- meta: `package.json` version bumped to `2.24.11`.
+
 ## v2.24.10
 - fix: **Automated OpenLDAP multi-master replication credential adoption on spoke setup.** `POST /api/site/ping` now securely provides `ldapAdminPass` to authenticated join requests, enabling `setup.sh` to configure spokes with matching OpenLDAP root admin bind credentials automatically.
 - fix: **Replication mesh host addresses aligned to gateway interfaces.** `ldapMeshHost(siteId)` now maps to `10.<siteId>.0.1:389` (the gateway's assigned interface address on `wg-mesh`), resolving inter-node OpenLDAP syncrepl replication across the WireGuard mesh.

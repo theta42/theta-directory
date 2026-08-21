@@ -201,6 +201,21 @@ class AgentJoinKey extends Model {
 		delete data.keyHash;
 		return data;
 	}
+
+	toReplica() {
+		return {
+			id: this.id,
+			label: this.label,
+			keyHash: this.keyHash,
+			keyPrefix: this.keyPrefix,
+			revoked: this.revoked,
+			created_by: this.created_by,
+			created_on: this.created_on,
+			expires_on: this.expires_on,
+			use_count: this.use_count,
+			last_used_on: this.last_used_on
+		};
+	}
 }
 
 module.exports = { Agent, AgentJoinKey };

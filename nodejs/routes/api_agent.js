@@ -325,6 +325,7 @@ router.post('/join-keys', async (req, res, next) => {
       expiresInDays: expiresInDays ? Number(expiresInDays) : null
     });
     logAgentAudit('join_key_issued', { actor: req.user.uid, label: key.label, keyPrefix: key.keyPrefix });
+    replicateOnFinish(res, 'agent-join-key-issued');
     // Shown once; only the hash is stored.
     res.json({ status: 'ok', joinKey: key.toPublic(), key: raw });
   } catch (err) { next(err); }
@@ -336,6 +337,7 @@ router.post('/join-keys/:id/revoke', async (req, res, next) => {
     if (!key) return res.status(404).json({ status: 'error', message: 'join key not found' });
     await key.update({ revoked: true });
     logAgentAudit('join_key_revoked', { actor: req.user.uid, label: key.label, keyPrefix: key.keyPrefix });
+    replicateOnFinish(res, 'agent-join-key-revoked');
     // Agents already enrolled keep working -- they hold their own tokens now,
     // which is the whole point of exchanging the join key rather than using it
     // as the long-term credential.
@@ -349,6 +351,7 @@ router.delete('/join-keys/:id', async (req, res, next) => {
     if (!key) return res.status(404).json({ status: 'error', message: 'join key not found' });
     await key.delete();
     logAgentAudit('join_key_deleted', { actor: req.user.uid, label: key.label, keyPrefix: key.keyPrefix });
+    replicateOnFinish(res, 'agent-join-key-deleted');
     res.json({ status: 'ok' });
   } catch (err) { next(err); }
 });
