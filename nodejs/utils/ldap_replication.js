@@ -38,7 +38,7 @@ async function nextFreeLdapServerId() {
 function ldapMeshHost(siteId) {
 	const id = Number(siteId);
 	if (!Number.isInteger(id) || id < 1) return null;
-	return `ldap://10.${id}.0.2:389`;
+	return `ldap://10.${id}.0.1:389`;
 }
 
 // A site's LDAP replication URL, derived from its already-known HTTP(S)

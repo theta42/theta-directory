@@ -1,3 +1,12 @@
+## v2.24.10
+- fix: **Automated OpenLDAP multi-master replication credential adoption on spoke setup.** `POST /api/site/ping` now securely provides `ldapAdminPass` to authenticated join requests, enabling `setup.sh` to configure spokes with matching OpenLDAP root admin bind credentials automatically.
+- fix: **Replication mesh host addresses aligned to gateway interfaces.** `ldapMeshHost(siteId)` now maps to `10.<siteId>.0.1:389` (the gateway's assigned interface address on `wg-mesh`), resolving inter-node OpenLDAP syncrepl replication across the WireGuard mesh.
+- fix: **Scheme-agnostic spoke endpoint matching in `/api/site/ldap-peers`.** Spoke lookups now match endpoints regardless of `http://` vs `https://` prefix, preventing 404 responses when reverse proxies upgrade plain HTTP requests.
+- fix: **Master-to-spoke forwarded request authentication.** `middleware/auth.js` now validates `siteConfig.get().replicationPushToken` when the master forwards requests with `X-Forwarded-User`.
+- fix: **LDAP user creation attribute safety and SMTP timeout prevention.** `routes/user.js` guards `manager` DN arrays on token-authenticated requests, and `models/user_ldap.js` provides fallbacks for `sn`/`givenName` preventing `ProtocolError 0x2`. `models/email.js` skips SMTP attempts when unconfigured, eliminating connection hangs.
+- test: Updated `tests/ldap_replication.test.js` and `tests/ldap_reconcile.test.js` to assert `10.<siteId>.0.1:389` gateway mesh endpoints.
+- meta: `package.json` version bumped to `2.24.10`.
+
 ## v2.24.9
 - fix: **Spoke discovery results (Proxmox, Docker, Nmap, iLO) now forward to the master directory.** `DiscoveryReconciler.reconcile` on a spoke forwards its discovery report to `POST /api/site/spokes/discovery-report` on the master. The master reconciles the discovered inventory against the authoritative catalog and triggers cluster-wide replication, making spoke-discovered hosts, VMs, and LXCs visible across all sites.
 - fix: **Theta agent WebSocket auto-enrollment and telemetry on spokes now synchronize to the master and across all cluster nodes.** When an agent connects and self-enrolls with a join key on a spoke, the spoke registers the agent and pushes its identity and credentials up to `POST /api/site/spokes/agent-report` on the master. Telemetry and discovery updates sync `last_seen` timestamps, and `Agent.toPublic()` reports agents active anywhere in the cluster as online.

@@ -69,8 +69,8 @@ test('a trigger arriving mid-pass is re-run, not dropped', async () => {
 	const lastPeers = mockApplyCalls[mockApplyCalls.length - 1].peers.map((p) => p.ldapHost);
 	// Peers are dialled over the mesh (plain LDAP at the site's mesh address),
 	// not the public endpoint.
-	expect(lastPeers).toContain('ldap://10.2.0.2:389');
-	expect(lastPeers).toContain('ldap://10.3.0.2:389');
+	expect(lastPeers).toContain('ldap://10.2.0.1:389');
+	expect(lastPeers).toContain('ldap://10.3.0.1:389');
 });
 
 test('several triggers during one pass collapse into a single re-run', async () => {

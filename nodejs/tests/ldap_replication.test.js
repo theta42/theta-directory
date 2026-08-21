@@ -10,8 +10,8 @@ describe('ldap_replication', () => {
 
   describe('ldapMeshHost', () => {
     test('a site directory is dialled at its mesh address over plain LDAP', () => {
-      expect(ldapMeshHost(1)).toBe('ldap://10.1.0.2:389');
-      expect(ldapMeshHost(5)).toBe('ldap://10.5.0.2:389');
+      expect(ldapMeshHost(1)).toBe('ldap://10.1.0.1:389');
+      expect(ldapMeshHost(5)).toBe('ldap://10.5.0.1:389');
     });
 
     test('rejects a missing or invalid site id', () => {
@@ -37,7 +37,7 @@ describe('ldap_replication', () => {
   describe('ldapHostForSpoke', () => {
     test('prefers the mesh address over plain LDAP for any spoke with a ServerID', () => {
       expect(ldapHostForSpoke({ ldapServerId: 2, endpoint: 'https://spoke.example.com' }))
-        .toBe('ldap://10.2.0.2:389');
+        .toBe('ldap://10.2.0.1:389');
     });
 
     test('falls back to the public endpoint when the spoke has no ServerID yet', () => {

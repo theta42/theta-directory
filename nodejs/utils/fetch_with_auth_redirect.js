@@ -23,7 +23,7 @@ async function fetchWithAuthRedirect(url, init, options = {}) {
 		const controller = new AbortController();
 		const timer = setTimeout(() => controller.abort(), timeoutMs);
 		try {
-			const resp = await fetch(currentUrl, { ...currentInit, signal: controller.signal });
+			const resp = await fetch(currentUrl, { ...currentInit, redirect: 'manual', signal: controller.signal });
 			if (!REDIRECT_CODES.has(resp.status)) return resp;
 
 			const location = resp.headers.get('location') || resp.headers.get('Location');

@@ -129,11 +129,10 @@ async function addPosixAccount(client, data, opts = {}){
 	const safeCn = escapeLDAPDNValue(data.cn);
 	const entry = {
 		cn: data.cn,
-		sn: data.sn,
+		sn: data.sn || data.last_name || data.name || data.uid,
 		uid: data.uid,
 		uidNumber: data.uidNumber,
 		gidNumber: data.gidNumber,
-		givenName: data.givenName,
 		loginShell: data.loginShell,
 		homeDirectory: data.homeDirectory,
 		description: data.description || ' ',
@@ -146,6 +145,10 @@ async function addPosixAccount(client, data, opts = {}){
 		sudoUser: data.sudoUser || data.uid,
 		objectclass: ['inetOrgPerson', 'sudoRole', 'ldapPublicKey', 'posixAccount', 'top', 'theta42Person'],
 	};
+
+	if (data.givenName || data.first_name) {
+		entry.givenName = data.givenName || data.first_name;
+	}
 
 	// mail is optional in the inetOrgPerson schema, but ldapts/slapd reject an
 	// attribute given an explicit undefined value ("no values for attribute

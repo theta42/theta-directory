@@ -320,9 +320,9 @@ homeDirectory: /home/${replicatedUid}
   if (masterLdapCfg.ldapServerId !== 1) fail(`master's own ldapServerId should be 1, got ${JSON.stringify(masterLdapCfg)}`);
   // Replication rides the WireGuard mesh: a peer's directory is dialled at its
   // mesh address over plain LDAP, never the public endpoint.
-  const spokePeer = (masterLdapCfg.peers || []).find(p => p.ldapHost === 'ldap://10.2.0.2:389');
+  const spokePeer = (masterLdapCfg.peers || []).find(p => p.ldapHost === 'ldap://10.2.0.1:389');
   if (!spokePeer || typeof spokePeer.ldapServerId !== 'number') {
-    fail(`master's peer list should include the spoke at ldap://10.2.0.2:389 with an assigned ldapServerId, got ${JSON.stringify(masterLdapCfg.peers)}`);
+    fail(`master's peer list should include the spoke at ldap://10.2.0.1:389 with an assigned ldapServerId, got ${JSON.stringify(masterLdapCfg.peers)}`);
   }
 
   step('Verifying the spoke can fetch its own assigned LDAP ServerID + peer list from the master');
@@ -335,8 +335,8 @@ homeDirectory: /home/${replicatedUid}
     fail(`spoke's own reported ldapServerId (${spokeLdapCfg.ldapServerId}) should match what the master's peer list assigned it (${spokePeer.ldapServerId})`);
   }
   const masterAsPeer = (spokeLdapCfg.peers || []).find(p => p.ldapServerId === 1);
-  if (!masterAsPeer || masterAsPeer.ldapHost !== 'ldap://10.1.0.2:389') {
-    fail(`spoke's peer list should include the master (ServerID 1, ldap://10.1.0.2:389), got ${JSON.stringify(spokeLdapCfg.peers)}`);
+  if (!masterAsPeer || masterAsPeer.ldapHost !== 'ldap://10.1.0.1:389') {
+    fail(`spoke's peer list should include the master (ServerID 1, ldap://10.1.0.1:389), got ${JSON.stringify(spokeLdapCfg.peers)}`);
   }
   const selfInOwnPeerList = (spokeLdapCfg.peers || []).some(p => p.ldapServerId === spokeLdapCfg.ldapServerId);
   if (selfInOwnPeerList) fail(`spoke's own peer list should not include itself, got ${JSON.stringify(spokeLdapCfg.peers)}`);
@@ -513,13 +513,13 @@ homeDirectory: /home/${replicatedUid}
     // Unfold LDIF continuation lines before matching. Replication rides the
     // mesh, so peers appear at their mesh addresses over plain LDAP.
     liveSyncrepl = (out.stdout || '').replace(/\n /g, '');
-    if (liveSyncrepl.includes('10.2.0.2:389') && liveSyncrepl.includes('10.3.0.2:389')) break;
+    if (liveSyncrepl.includes('10.2.0.1:389') && liveSyncrepl.includes('10.3.0.1:389')) break;
     await new Promise((res) => setTimeout(res, 1000));
   }
-  if (!liveSyncrepl.includes('ldap://10.2.0.2:389')) {
+  if (!liveSyncrepl.includes('ldap://10.2.0.1:389')) {
     fail(`the master's live slapd has no syncrepl entry for the first spoke -- replication config is not being applied automatically. Got: ${liveSyncrepl.slice(0, 500)}`);
   }
-  if (!liveSyncrepl.includes('ldap://10.3.0.2:389')) {
+  if (!liveSyncrepl.includes('ldap://10.3.0.1:389')) {
     fail(`the master's live slapd never picked up the SECOND spoke -- this is the case that used to need a setup.sh re-run. Got: ${liveSyncrepl.slice(0, 500)}`);
   }
 

@@ -30,8 +30,12 @@ async function auth(req, res, next){
 			// audit trail.
 			const fwdUser = req.header('x-forwarded-user');
 			if (fwdUser) {
+				const siteConfig = require('../utils/site_config');
+				const cfg = siteConfig.get();
+				const isMasterCalling = !cfg.isMaster && cfg.replicationPushToken && cfg.replicationPushToken === tokenStr;
+
 				const { SiteSpoke } = require('../models/site_spoke');
-				const spoke = await SiteSpoke.list({ where: { pushToken: tokenStr } })
+				const spoke = isMasterCalling ? { siteSlug: 'master' } : await SiteSpoke.list({ where: { pushToken: tokenStr } })
 					.then(l => l && l[0]).catch(() => null);
 				const claimedSlug = req.header('x-forwarded-spoke');
 				const slugMatches = !claimedSlug || !spoke || !spoke.siteSlug || claimedSlug === spoke.siteSlug;
@@ -40,7 +44,7 @@ async function auth(req, res, next){
 					const user = await User.get(fwdUser).catch(() => null);
 					if (user && user.uid) {
 						req.user = user;
-						req.forwardedFromSpoke = spoke.siteSlug || 'spoke';
+						req.forwardedFromSpoke = spoke.siteSlug || 'cluster';
 						return next();
 					}
 				}
