@@ -7,6 +7,7 @@
 
 const router = require('express').Router();
 const { ApiToken } = require('../models/api_token');
+const { replicateOnFinish } = require('../utils/replicate_on_finish');
 
 function forbidden() {
 	const e = new Error('Forbidden');
@@ -58,6 +59,8 @@ router.post('/', async function(req, res, next) {
 
 		const token = await ApiToken.add(req.body);
 
+		replicateOnFinish(res, 'api-token-created');
+
 		return res.json({
 			results: token,
 			token: token._raw_token,
@@ -93,8 +96,12 @@ router.put('/:id', async function(req, res, next) {
 			update.expires_at = Number(req.body.expires_at) || 0;
 		}
 
+		const results = await token.update(update);
+
+		replicateOnFinish(res, 'api-token-updated');
+
 		return res.json({
-			results: await token.update(update),
+			results,
 			message: `API token '${token.name}' updated.`,
 		});
 	} catch (error) {
@@ -105,7 +112,9 @@ router.put('/:id', async function(req, res, next) {
 router.delete('/:id', async function(req, res, next) {
 	try {
 		const token = await getOwned(req, req.params.id);
-		await token.remove();
+		await token.delete();
+
+		replicateOnFinish(res, 'api-token-revoked');
 
 		return res.json({
 			id: req.params.id,
@@ -120,6 +129,8 @@ router.post('/:id/rotate', async function(req, res, next) {
 	try {
 		const token = await getOwned(req, req.params.id);
 		const raw = await token.rotate();
+
+		replicateOnFinish(res, 'api-token-rotated');
 
 		return res.json({
 			token: raw,

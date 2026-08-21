@@ -7,6 +7,7 @@ const permission = require('../utils/permission');
 const {groupCns} = require('../utils/user_groups');
 const {UserVerification} = require('../models/verification');
 const {InviteToken} = require('../models/token');
+const { replicateOnFinish } = require('../utils/replicate_on_finish');
 
 router.get('/', async function(req, res, next){
 	try{
@@ -50,6 +51,11 @@ router.post('/', async function(req, res, next){
 			}
 		}
 
+		// LDAP identity changes on the master must reach every spoke. Syncrepl
+		// is the real-time path, but when the mesh tunnel isn't carrying packets
+		// the resync fallback (full LDAP snapshot) keeps spokes in sync.
+		replicateOnFinish(res, 'user-created');
+
 		return res.json({results: user, message: `User ${user.uid} created.`});
 	}catch(error){
 		next(error);
@@ -66,6 +72,8 @@ router.delete('/:uid', async function(req, res, next){
 			user = await User.get(req.params.uid);
 			await permission.byGroup(req.user, ['app_sso_admin'])
 		}
+
+		replicateOnFinish(res, 'user-deleted');
 
 		return res.json({uid: req.params.uid, results: await user.remove()})
 	}catch(error){
@@ -109,6 +117,7 @@ router.post('/accept-tos', async function(req, res, next){
 		const verif = await UserVerification.getOrCreate(req.user.uid);
 		await verif.markTosAccepted();
 		User.clearCache();
+		replicateOnFinish(res, 'user-tos-accepted');
 		return res.json({ success: true });
 	}catch(error){
 		next(error);
@@ -121,6 +130,7 @@ router.put('/password', async function(req, res, next){
 		const verif = await UserVerification.getOrCreate(req.user.uid);
 		await verif.update({ password_must_change: false });
 		User.clearCache();
+		replicateOnFinish(res, 'user-password-changed');
 		return res.json({results: result, message: 'Password changed.'});
 	}catch(error){
 		next(error);
@@ -143,6 +153,9 @@ router.put('/:uid/password', async function(req, res, next){
 			const verif = await UserVerification.getOrCreate(user.uid);
 			await verif.update({ password_must_change: true });
 		}
+
+		replicateOnFinish(res, 'user-password-changed');
+
 		return res.json({
 			results: result,
 			message: `User ${user.uid} password changed.`
@@ -158,6 +171,9 @@ router.put('/:uid/active', async function(req, res, next){
 		const user = await User.get(req.params.uid);
 		const active = req.body.active !== false && req.body.active !== 'false';
 		await user.setActive(active);
+
+		replicateOnFinish(res, active ? 'user-activated' : 'user-deactivated');
+
 		return res.json({
 			uid: req.params.uid,
 			active,
@@ -181,6 +197,9 @@ router.put('/:uid/group-member/:memberUid', async function(req, res, next){
 	try{
 		await permission.byGroup(req.user, ['app_sso_admin']);
 		await User.addPersonalGroupMember(req.params.uid, req.params.memberUid);
+
+		replicateOnFinish(res, 'personal-group-member-added');
+
 		return res.json({
 			results: true,
 			message: `Added ${req.params.memberUid} to ${req.params.uid}'s group`
@@ -194,6 +213,9 @@ router.delete('/:uid/group-member/:memberUid', async function(req, res, next){
 	try{
 		await permission.byGroup(req.user, ['app_sso_admin']);
 		await User.removePersonalGroupMember(req.params.uid, req.params.memberUid);
+
+		replicateOnFinish(res, 'personal-group-member-removed');
+
 		return res.json({
 			results: true,
 			message: `Removed ${req.params.memberUid} from ${req.params.uid}'s group`
@@ -224,6 +246,8 @@ router.put('/:uid', async function(req, res, next){
 
 		const updatedUser = await user.update(req.body);
 		User.clearCache();
+
+		replicateOnFinish(res, 'user-updated');
 
 		return res.json({
 			results: updatedUser,
@@ -321,6 +345,10 @@ router.post('/key', async function(req, res, next){
 			uid: req.user.uid,
 			key: req.body.key
 		});
+
+		if (added === true) {
+			replicateOnFinish(res, 'user-ssh-key-added');
+		}
 
 		return res.status(added === true ? 200 : 400).json({
 			message: added

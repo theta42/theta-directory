@@ -7,6 +7,7 @@ const agentManager = require('../utils/agent_manager');
 const agentKeys = require('../utils/agent_keys');
 const ldapTunnel = require('../utils/ldap_tunnel');
 const { Agent, AgentJoinKey } = require('../models/agent');
+const { replicateOnFinish } = require('../utils/replicate_on_finish');
 
 const ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_admin'];
 
@@ -103,6 +104,8 @@ router.post('/enroll', async (req, res, next) => {
 
     logAgentAudit('enroll', { actor: req.user.uid, agentId: agent.id, agentName: agent.name, resourceId: resourceId || null });
 
+    replicateOnFinish(res, 'agent-enrolled');
+
     const publicKey = await agentManager.publicKeyBase64();
     res.json({
       status: 'ok',
@@ -137,6 +140,7 @@ router.put('/nodes/:id', async (req, res, next) => {
 
     const updated = await agent.update(patch);
     logAgentAudit('update', { actor: req.user.uid, agentId: agent.id, fields: Object.keys(patch) });
+    replicateOnFinish(res, 'agent-updated');
     res.json({ status: 'ok', agent: updated.toPublic(agentManager.liveState(agent.id)) });
   } catch (err) { next(err); }
 });
@@ -150,6 +154,7 @@ router.post('/nodes/:id/revoke', async (req, res, next) => {
     await agent.update({ revoked: true });
     agentManager.disconnect(agent.id, 4003, 'Enrollment revoked');
     logAgentAudit('revoke', { actor: req.user.uid, agentId: agent.id, agentName: agent.name });
+    replicateOnFinish(res, 'agent-revoked');
     res.json({ status: 'ok' });
   } catch (err) { next(err); }
 });
@@ -163,6 +168,7 @@ router.post('/nodes/:id/rotate', async (req, res, next) => {
     // using it so the agent reconnects with the new one.
     agentManager.disconnect(agent.id, 4004, 'Token rotated');
     logAgentAudit('rotate', { actor: req.user.uid, agentId: agent.id, agentName: agent.name });
+    replicateOnFinish(res, 'agent-token-rotated');
     res.json({ status: 'ok', token, publicKey: await agentManager.publicKeyBase64() });
   } catch (err) { next(err); }
 });
@@ -174,6 +180,7 @@ router.delete('/nodes/:id', async (req, res, next) => {
     agentManager.disconnect(agent.id, 4003, 'Enrollment deleted');
     await agent.delete();
     logAgentAudit('delete', { actor: req.user.uid, agentId: agent.id, agentName: agent.name });
+    replicateOnFinish(res, 'agent-deleted');
     res.json({ status: 'ok' });
   } catch (err) { next(err); }
 });
@@ -320,6 +327,7 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
             const newToken = await existingAgent.rotateToken();
             agent = existingAgent;
             issuedToken = newToken;
+            require('../utils/site_replicate').replicateToSpokes('agent-token-rotated');
           } else {
             const enrolled = await Agent.enroll({
               name: hostname || `agent-${Date.now().toString(36)}`,
@@ -328,6 +336,7 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
             });
             agent = enrolled.agent;
             issuedToken = enrolled.token;
+            require('../utils/site_replicate').replicateToSpokes('agent-enrolled');
           }
           await joinKey.update({
             use_count: (joinKey.use_count || 0) + 1,

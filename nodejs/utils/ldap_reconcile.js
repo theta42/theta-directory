@@ -61,23 +61,19 @@ async function desiredConfig() {
 		return null; // not enough to ask with; nothing to converge on
 	}
 
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), 10000);
+	const { fetchWithAuthRedirect } = require('./fetch_with_auth_redirect');
 	try {
 		const url = `${String(cfg.masterUrl).replace(/\/+$/, '')}/api/site/ldap-peers` +
 			`?endpoint=${encodeURIComponent(cfg.selfUrl)}`;
-		const resp = await fetch(url, {
-			headers: { Authorization: 'Bearer ' + cfg.masterJoinKey },
-			signal: controller.signal
-		});
+		const resp = await fetchWithAuthRedirect(url, {
+			headers: { Authorization: 'Bearer ' + cfg.masterJoinKey }
+		}, { timeoutMs: 10000 });
 		if (!resp.ok) return null;
 		const body = await resp.json();
 		if (!body || !body.ldapServerId) return null;
 		return { serverId: body.ldapServerId, peers: body.peers || [] };
 	} catch (e) {
 		return null;
-	} finally {
-		clearTimeout(timer);
 	}
 }
 

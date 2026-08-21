@@ -10,7 +10,7 @@ const { projectResources } = require('@simpleworkjs/directory-schema');
 
 const SUPER_ADMIN_GROUP = permission.SUPER_ADMIN_GROUP;
 const groups = require('../utils/groups');
-const meshReplicate = require('../utils/site_replicate');
+const { replicateOnFinish } = require('../utils/replicate_on_finish');
 const jumpClient = require('../utils/jump_client');
 
 // Make `childCn` a member of `parentCn`, i.e. everyone in the child is
@@ -264,11 +264,7 @@ router.use((req, res, next) => {
       const hint = cfg.masterUrl ? ' Directory writes must go to the master at ' + cfg.masterUrl + '.' : '';
       return res.status(403).json({ status: 'error', message: 'This node is a spoke (read-only catalog).' + hint });
     }
-    res.on('finish', () => {
-      if (res.statusCode >= 200 && res.statusCode < 300) {
-        meshReplicate.replicateToSpokes(`${req.method} ${req.path}`);
-      }
-    });
+    replicateOnFinish(res, `${req.method} ${req.path}`);
   }
   next();
 });
@@ -1233,7 +1229,8 @@ router.post('/site-promote', async (req, res, next) => {
     // Fire-and-forget: let every known spoke know a new master exists so
     // their next resync targets it. (They'll also learn this the hard way if
     // their old-master resync calls start failing, but this speeds it up.)
-    meshReplicate.replicateToSpokes('master-promoted');
+    const siteReplicate = require('../utils/site_replicate');
+    siteReplicate.replicateToSpokes('master-promoted');
 
     const cfg = siteConfig.get();
     res.json({

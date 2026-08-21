@@ -54,6 +54,7 @@
  */
 
 const siteConfig = require('../utils/site_config');
+const { fetchWithAuthRedirect } = require('../utils/fetch_with_auth_redirect');
 
 // Writes the master owns AND replicates back to this node.
 //
@@ -61,6 +62,7 @@ const siteConfig = require('../utils/site_config');
 //   /tos                         → UserVerification; in POST /api/site/export
 //   /directory-admin             → the Resource catalog; in the export
 //   /agent/enroll, /agent/nodes  → Agent fleet rows; in the export
+//   /api-token                   → ApiToken (PAT) rows; in the export
 //
 // Two neighbours that look like they belong here and do NOT, both for the same
 // reason -- the record itself is not replicated, so forwarding it would file it
@@ -81,7 +83,8 @@ const FORWARD_PATHS = [
   /^\/api\/tos(\/|$)/,
   /^\/api\/directory-admin(\/|$)/,
   /^\/api\/agent\/enroll(\/|$)/,
-  /^\/api\/agent\/nodes(\/|$)/
+  /^\/api\/agent\/nodes(\/|$)/,
+  /^\/api\/api-token(\/|$)/
 ];
 
 // Carve-outs inside the paths above, for the two operations that are about
@@ -264,25 +267,19 @@ async function spokeWriteProxy(req, res, next) {
     body = req.body;
   }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FORWARD_TIMEOUT_MS);
-
   let resp;
   try {
-    resp = await fetch(masterUrl + (req.originalUrl || req.url), {
+    resp = await fetchWithAuthRedirect(masterUrl + (req.originalUrl || req.url), {
       method: req.method,
       headers: forwardHeaders,
-      body,
-      signal: controller.signal
-    });
+      body
+    }, { timeoutMs: FORWARD_TIMEOUT_MS });
   } catch (err) {
     return res.status(503).json({
       status: 'error',
       message: `Master directory at ${masterUrl} is unreachable for write operations (${err.message}). `
         + 'This site is in read-only offline mode; reads, SSSD auth and DNS are unaffected.'
     });
-  } finally {
-    clearTimeout(timer);
   }
 
   const data = Buffer.from(await resp.arrayBuffer());

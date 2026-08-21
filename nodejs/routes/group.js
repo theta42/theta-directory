@@ -3,7 +3,8 @@
 const router = require('express').Router();
 const {User} = require('../models/user_ldap');
 const {Group} = require('../models/group_ldap');
-const permission = require('../utils/permission'); 
+const permission = require('../utils/permission');
+const { replicateOnFinish } = require('../utils/replicate_on_finish');
 
 router.get('/', async function(req, res, next){
 	try{
@@ -23,8 +24,12 @@ router.post('/', async function(req, res, next){
 		await permission.byGroup(req.user, ['app_sso_admin']);
 
 		req.body.owner = req.user.dn;
+		const group = await Group.add(req.body);
+
+		replicateOnFinish(res, 'group-created');
+
 		return res.json({
-			results: await Group.add(req.body),
+			results: group,
 			message: `${req.body.name} was added!`
 		})
 	}catch(error){
@@ -84,6 +89,9 @@ router.put('/:group/nested/:child', async function(req, res, next){
 
 		const results = await parent.addMember({dn: child.dn});
 		User.clearCache();
+
+		replicateOnFinish(res, 'group-nested');
+
 		return res.json({
 			results,
 			message: `Nested ${req.params.child} inside ${req.params.group}.`
@@ -105,6 +113,9 @@ router.delete('/:group/nested/:child', async function(req, res, next){
 		const child  = await Group.get(req.params.child);
 		const results = await parent.removeMember({dn: child.dn});
 		User.clearCache();
+
+		replicateOnFinish(res, 'group-un-nested');
+
 		return res.json({
 			results,
 			message: `Removed ${req.params.child} from ${req.params.group}.`
@@ -131,8 +142,12 @@ router.put('/owner/:group/:uid', async function(req, res, next){
 
 		var group = await Group.get(req.params.group);
 		var user = await User.get(req.params.uid);
+		const results = await group.addOwner(user);
+
+		replicateOnFinish(res, 'group-owner-added');
+
 		return res.json({
-			results: await group.addOwner(user),
+			results,
 			message: `Added owner ${req.params.uid} to ${req.params.group} group.`
 		});
 	}catch(error){
@@ -147,8 +162,12 @@ router.delete('/owner/:group/:uid', async function(req, res, next){
 
 		var group = await Group.get(req.params.group);
 		var user = await User.get(req.params.uid);
+		const results = await group.removeOwner(user);
+
+		replicateOnFinish(res, 'group-owner-removed');
+
 		return res.json({
-			results: await group.removeOwner(user),
+			results,
 			message: `Removed Owner ${req.params.uid} from ${req.params.group} group.`
 		});
 	}catch(error){
@@ -168,6 +187,9 @@ router.put('/:group/:uid', async function(req, res, next){
 		// (isServiceAccount, isAdmin, group-gated nav/UI) -- without this,
 		// a membership change here is invisible for up to the cache's TTL.
 		User.clearCache();
+
+		replicateOnFinish(res, 'group-member-added');
+
 		return res.json({
 			results,
 			message: `Added user ${req.params.uid} to ${req.params.group} group.`
@@ -195,6 +217,9 @@ router.delete('/:group/:uid', async function(req, res, next){
 		var user = await User.get(req.params.uid);
 		const results = await group.removeMember(user);
 		User.clearCache();
+
+		replicateOnFinish(res, 'group-member-removed');
+
 		return res.json({
 			results,
 			message: `Removed user ${req.params.uid} from ${req.params.group} group.`
@@ -210,8 +235,12 @@ router.delete('/:group', async function(req, res, next){
 		await permission.byGroup(req.user, ['app_sso_admin'], [req.params.group]);
 
 		var group = await Group.get(req.params.group);
+		const removed = await group.remove();
+
+		replicateOnFinish(res, 'group-deleted');
+
 		return res.json({
-			removed: await group.remove(),
+			removed,
 			results: group,
 			message: `Group ${req.params.group} Deleted`
 		});

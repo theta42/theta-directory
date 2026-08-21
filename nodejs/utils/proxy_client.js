@@ -16,6 +16,7 @@
 // agent-signing key in agent_keys.js.
 
 const baoConf = require('@simpleworkjs/bao-conf');
+const { fetchWithAuthRedirect } = require('./fetch_with_auth_redirect');
 
 const PATH = 'integrations/theta-proxy'; // baoConf adds the secret/data prefix
 const REQUEST_TIMEOUT_MS = 10000;
@@ -75,12 +76,10 @@ async function ensureRelayRoute({ host, ip, targetPort }) {
 	}
 
 	const headers = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
-	const controller = new AbortController();
-	const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 	try {
-		const existing = await fetch(base.replace(/\/+$/, '') + '/api/host/' + encodeURIComponent(host), {
-			headers, signal: controller.signal
-		});
+		const existing = await fetchWithAuthRedirect(base.replace(/\/+$/, '') + '/api/host/' + encodeURIComponent(host), {
+			headers
+		}, { timeoutMs: REQUEST_TIMEOUT_MS });
 
 		if (existing.status === 200) {
 			// GET /api/host/:item wraps the record in { item, results }, not
@@ -91,22 +90,20 @@ async function ensureRelayRoute({ host, ip, targetPort }) {
 			if (current.ip === ip && Number(current.targetPort) === Number(targetPort)) {
 				return { note: 'already up to date' };
 			}
-			const put = await fetch(base.replace(/\/+$/, '') + '/api/host/' + encodeURIComponent(host), {
-				method: 'PUT', headers, body: JSON.stringify({ ip, targetPort }), signal: controller.signal
-			});
+			const put = await fetchWithAuthRedirect(base.replace(/\/+$/, '') + '/api/host/' + encodeURIComponent(host), {
+				method: 'PUT', headers, body: JSON.stringify({ ip, targetPort })
+			}, { timeoutMs: REQUEST_TIMEOUT_MS });
 			if (put.status === 401) { invalidateToken(); return { note: 'update failed: HTTP 401 (proxy API token rejected -- mint/store a fresh one)' }; }
 			return put.ok ? { note: 'updated' } : { note: `update failed: HTTP ${put.status}` };
 		}
 
-		const create = await fetch(base.replace(/\/+$/, '') + '/api/host', {
-			method: 'POST', headers, body: JSON.stringify({ host, ip, targetPort }), signal: controller.signal
-		});
+		const create = await fetchWithAuthRedirect(base.replace(/\/+$/, '') + '/api/host', {
+			method: 'POST', headers, body: JSON.stringify({ host, ip, targetPort })
+		}, { timeoutMs: REQUEST_TIMEOUT_MS });
 		if (create.status === 401) { invalidateToken(); return { note: 'create failed: HTTP 401 (proxy API token rejected -- mint/store a fresh one)' }; }
 		return create.ok ? { note: 'created' } : { note: `create failed: HTTP ${create.status}` };
 	} catch (err) {
 		return { note: `failed: ${err.message}` };
-	} finally {
-		clearTimeout(timer);
 	}
 }
 

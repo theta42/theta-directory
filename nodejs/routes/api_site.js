@@ -37,6 +37,7 @@ const { reconcileSoon } = require('../utils/ldap_reconcile');
 const User = require('../models/user');
 const { Agent } = require('../models/agent');
 const { UserVerification } = require('../models/verification');
+const { ApiToken } = require('../models/api_token');
 const siteConfig = require('../utils/site_config');
 const {
   importDirectory, ldapAddArgs, baseDnFrom, siteIsFresh,
@@ -156,7 +157,7 @@ router.post('/export', async (req, res, next) => {
     // meshSites: the cluster roster. Without it a spoke has no idea any other
     // site exists, its gateway builds no peers, and the mesh silently only
     // works at whichever site happens to be the master.
-    const [ldif, resources, edges, signingKey, meshSites, agents, baoSecrets, userVerifications] = await Promise.all([
+    const [ldif, resources, edges, signingKey, meshSites, agents, baoSecrets, userVerifications, apiTokens] = await Promise.all([
       slurpLdif(),
       Resource.list(),
       ResourceEdge.list(),
@@ -172,7 +173,8 @@ router.post('/export', async (req, res, next) => {
       meshRoster.syncFromSpokes().then(() => meshRoster.roster()).catch(() => []),
       Agent.list().catch(() => []),
       exportSharedBaoSecrets().catch(() => []),
-      UserVerification.listDetail().catch(() => [])
+      UserVerification.listDetail().catch(() => []),
+      ApiToken.list().catch(() => [])
     ]);
 
     await key.update({ use_count: (key.use_count || 0) + 1, last_used_on: Math.floor(Date.now() / 1000) }).catch(() => {});
@@ -190,6 +192,7 @@ router.post('/export', async (req, res, next) => {
       agents: (agents || []).map(a => (a.toReplica ? a.toReplica() : (a.toJSON ? a.toJSON() : a))),
       baoSecrets: baoSecrets || [],
       userVerifications: userVerifications || [],
+      apiTokens: (apiTokens || []).map(t => (t.toReplica ? t.toReplica() : (t.toJSON ? t.toJSON() : t))),
       ...(signingKey ? { signingKey } : {})
     });
   } catch (e) { next(e); }
@@ -242,6 +245,15 @@ router.post('/spokes', async (req, res, next) => {
     // ldapServerId 2.)
     const spoke = await withLock('site-spoke-register', async () => {
       let row = (await SiteSpoke.list({ where: { endpoint: cleanEndpoint } }))[0];
+      // A spoke that legitimately changes its public endpoint (http -> https,
+      // port change, hostname change) must keep its assigned LDAP ServerID and
+      // pushToken. The endpoint string is the normal lookup key, but when it has
+      // changed we still recognize the spoke by its stable siteSlug. Without
+      // this, re-registration minted a second row with a second ServerID for
+      // the same site, which broke mesh addressing and doubled the directory.
+      if (!row && siteSlug) {
+        row = (await SiteSpoke.list({ where: { siteSlug } }))[0];
+      }
       // Only fields the caller ACTUALLY sent are written.
       //
       // This used to assign noInbound/meshIp/publicHost unconditionally, so
@@ -255,6 +267,15 @@ router.post('/spokes', async (req, res, next) => {
       if (meshIp !== undefined) patch.meshIp = meshIp || '';
       if (publicHost !== undefined) patch.publicHost = publicHost || '';
       if (row) {
+        // The caller always asserts its current endpoint, so refresh it even
+        // when the lookup happened by siteSlug.
+        patch.endpoint = cleanEndpoint;
+        // Older rows (or rows created before push tokens existed) may have a
+        // NULL pushToken. Generate one now so this spoke can accept resync
+        // pushes; the caller will persist it in /config/site.json.
+        if (!row.pushToken) {
+          patch.pushToken = SiteSpoke.generatePushToken();
+        }
         await row.update(patch);
         return row;
       }
@@ -455,8 +476,8 @@ router.post('/resync', async (req, res, next) => {
     // this node's replication config should be.
     reconcileSoon('resync');
 
-    logAudit('resynced', { reason: (req.body && req.body.reason) || 'unspecified', resourcesCreated: imp.created, resourcesUpdated: imp.updated });
-    res.json({ status: 'ok', resources: { created: imp.created, updated: imp.updated, edges: imp.edgeCount } });
+    logAudit('resynced', { reason: (req.body && req.body.reason) || 'unspecified', resourcesCreated: imp.created, resourcesUpdated: imp.updated, apiTokensImported: imp.apiTokensImported });
+    res.json({ status: 'ok', resources: { created: imp.created, updated: imp.updated, edges: imp.edgeCount }, apiTokens: { imported: imp.apiTokensImported } });
   } catch (e) { next(e); }
 });
 
@@ -786,6 +807,12 @@ router.delete('/spokes/:id', async (req, res, next) => {
 });
 
 // Force a resync push at one spoke (or all of them) right now.
+//
+// This used to await every push and return the per-spoke results, but a spoke
+// that is slow to adopt the full directory snapshot can take longer than an
+// edge proxy's timeout, so the UI got a 504 even though replication succeeded.
+// The pushes now run fire-and-forget; callers should poll GET /api/site/spokes
+// and watch `last_seen_on` for the outcome.
 router.post('/spokes/resync', async (req, res, next) => {
   try {
     const cfg = siteConfig.get();
@@ -1103,7 +1130,53 @@ async function adoptFromMaster({ masterUrl, joinKey }) {
     }
   }
 
-  return { imp, ldapNote, signingKeyNote, exportData, base };
+  // 7. Adopt API tokens from master so an sso_... token minted on the master is
+  // valid on every spoke. Only the bcrypt hash travels; the raw secret is never
+  // stored and only shown once at creation time.
+  let apiTokensImported = 0;
+  if (Array.isArray(exportData.apiTokens)) {
+    const exportedIds = new Set();
+    for (const t of exportData.apiTokens) {
+      if (!t || !t.id) continue;
+      try {
+        exportedIds.add(t.id);
+        const existing = await ApiToken.get(t.id).catch(() => null);
+        const fields = {
+          secret_hash: t.secret_hash,
+          name: t.name || 'Replicated token',
+          description: t.description || '',
+          created_by: t.created_by,
+          created_on: t.created_on || Date.now(),
+          updated_on: t.updated_on || Date.now(),
+          expires_at: t.expires_at || 0,
+          last_used_on: t.last_used_on || 0,
+          is_valid: t.is_valid !== false
+        };
+        if (existing) {
+          await existing.update(fields);
+        } else {
+          await ApiToken.create({ id: t.id, ...fields });
+        }
+        apiTokensImported++;
+      } catch (e) {
+        console.warn(`[site] could not adopt API token ${t.id}: ${e.message}`);
+      }
+    }
+    // Tokens the master no longer has are deleted or revoked there; the master
+    // is the authority for the cluster-wide PAT set. Only remove rows when the
+    // master actually sent an apiTokens array (older releases omit it).
+    try {
+      const localTokens = await ApiToken.list();
+      for (const local of localTokens || []) {
+        if (exportedIds.has(local.id)) continue;
+        await local.delete();
+      }
+    } catch (e) {
+      console.warn('[site] could not prune deleted API tokens:', e.message);
+    }
+  }
+
+  return { imp, ldapNote, signingKeyNote, exportData, base, apiTokensImported };
 }
 
 router.post('/join', async (req, res, next) => {
@@ -1141,7 +1214,7 @@ router.post('/join', async (req, res, next) => {
 
     // Spoke identity: preserve this spoke's own siteSlug (or the one passed
     // explicitly on join), never overwrite with master's siteSlug.
-    const effectiveSiteSlug = siteSlug || (cfg.siteSlug && cfg.siteSlug !== 'site-default' ? cfg.siteSlug : exportData.siteSlug) || 'site-spoke';
+    const effectiveSiteSlug = siteSlug || (cfg.siteSlug && cfg.siteSlug !== 'site-default' && cfg.siteSlug !== exportData.siteSlug ? cfg.siteSlug : null) || (selfUrl ? 'site-' + new URL(selfUrl).hostname.replace(/[^a-z0-9]/gi, '-') : 'site-spoke');
 
     // 3. Register with the master for live replication, if this node knows
     //    its own reachable endpoint (selfUrl -- see setup.env's
