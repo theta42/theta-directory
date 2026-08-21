@@ -114,6 +114,48 @@ class AgentManager {
       last_seen: Math.floor(Date.now() / 1000),
       ...extra
     }).catch(err => console.error(`[AgentManager] could not persist agent ${agent.id}:`, err.message));
+
+    // If on a spoke, push status update to master
+    try {
+      const siteConfig = require('./site_config');
+      const cfg = siteConfig.get();
+      if (!cfg.isMaster && cfg.masterUrl && cfg.masterJoinKey) {
+        const now = Date.now();
+        if (!this._lastPushMap) this._lastPushMap = new Map();
+        const lastPush = this._lastPushMap.get(agent.id) || 0;
+        if (extra.lastDiscovery || (now - lastPush > 30000)) {
+          this._lastPushMap.set(agent.id, now);
+          const { fetchWithAuthRedirect } = require('./fetch_with_auth_redirect');
+          const targetUrl = String(cfg.masterUrl).replace(/\/+$/, '') + '/api/site/spokes/agent-report';
+          fetchWithAuthRedirect(targetUrl, {
+            method: 'POST',
+            headers: { Authorization: 'Bearer ' + cfg.masterJoinKey, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              agent: {
+                id: agent.id,
+                name: agent.name,
+                description: agent.description,
+                tokenHash: agent.tokenHash,
+                tokenPrefix: agent.tokenPrefix,
+                resourceId: agent.resourceId,
+                revoked: agent.revoked,
+                enrolled_by: agent.enrolled_by,
+                enrolled_on: agent.enrolled_on,
+                version: agent.version,
+                last_seen: Math.floor(Date.now() / 1000),
+                last_ip: agent.last_ip,
+                lastDiscovery: agent.lastDiscovery,
+                lastTelemetry: agent.lastTelemetry
+              },
+              discovery: extra.lastDiscovery,
+              telemetry: extra.lastTelemetry
+            })
+          }, { timeoutMs: 10000 }).catch(() => {});
+        }
+      }
+    } catch (e) {
+      // Best-effort
+    }
   }
 
   async handleDiscovery(agent, payload) {

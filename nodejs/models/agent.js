@@ -117,14 +117,16 @@ class Agent extends Model {
 	toPublic(liveState) {
 		const data = this.toJSON ? this.toJSON() : { ...this };
 		delete data.tokenHash;
+		const nowSec = Math.floor(Date.now() / 1000);
+		const isRecentlySeen = !!(data.last_seen && (nowSec - Number(data.last_seen)) < 120);
+		const connected = !!(liveState && liveState.connected);
 		return {
 			...data,
 			version: data.version || (data.lastDiscovery && data.lastDiscovery.version) || (data.lastTelemetry && data.lastTelemetry.version) || 'unknown',
 			lastSeen: data.last_seen ? new Date(data.last_seen * 1000).toISOString() : null,
-			connected: !!(liveState && liveState.connected),
-			// "Online" is a live-connection fact, not a stored one. A row with a
-			// last_seen from an hour ago is an installed agent that is down.
-			isOnline: !!(liveState && liveState.connected),
+			connected: connected,
+			// "Online" if directly connected to this node or actively seen on peer node within 2 minutes.
+			isOnline: connected || isRecentlySeen,
 			lastResponse: (liveState && liveState.lastResponse) || null
 		};
 	}

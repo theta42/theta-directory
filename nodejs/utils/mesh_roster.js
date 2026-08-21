@@ -166,7 +166,14 @@ async function pushSelfToMaster(site) {
 				endpoint: cfg.selfUrl,
 				siteSlug: site.slug || cfg.siteSlug,
 				gatewayPublicKey: site.gatewayPublicKey,
-				gatewayEndpoint: site.gatewayEndpoint || ''
+				gatewayEndpoint: site.gatewayEndpoint || '',
+				gatewayExitPublicKey: site.gatewayExitPublicKey || '',
+				exitOpen: !!site.exitOpen,
+				country: site.country || '',
+				city: site.city || '',
+				lan168: site.lan168 || '',
+				lan172: site.lan172 || '',
+				dnsHost: site.dnsHost || ''
 			})
 		}, { timeoutMs: 10000 });
 		if (!resp.ok) {
@@ -186,7 +193,8 @@ async function pushSelfToMaster(site) {
  * This site's OWN row is skipped: its gateway publishes locally and pushes up,
  * so the local copy is always at least as fresh as the master's, and letting a
  * (possibly stale) export overwrite it would blank out a key that was just
- * published.
+ * published. If this site has no local row yet, the master's identity is
+ * adopted as an initial placeholder so the site is never missing.
  */
 async function adoptRoster(meshSites) {
 	if (!Array.isArray(meshSites) || !meshSites.length) return { adopted: 0 };

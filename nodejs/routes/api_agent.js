@@ -43,6 +43,105 @@ function logAgentAudit(action, details) {
   }));
 }
 
+async function pushAgentToMaster(agent, token) {
+  const siteConfig = require('../utils/site_config');
+  const cfg = siteConfig.get();
+  if (cfg.isMaster || !cfg.masterUrl || !cfg.masterJoinKey) return;
+  try {
+    const { fetchWithAuthRedirect } = require('../utils/fetch_with_auth_redirect');
+    const targetUrl = String(cfg.masterUrl).replace(/\/+$/, '') + '/api/site/spokes/agent-report';
+    await fetchWithAuthRedirect(targetUrl, {
+      method: 'POST',
+      headers: { Authorization: 'Bearer ' + cfg.masterJoinKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        agent: {
+          id: agent.id,
+          name: agent.name,
+          description: agent.description,
+          tokenHash: agent.tokenHash,
+          tokenPrefix: agent.tokenPrefix,
+          resourceId: agent.resourceId,
+          revoked: agent.revoked,
+          enrolled_by: agent.enrolled_by,
+          enrolled_on: agent.enrolled_on,
+          version: agent.version,
+          last_seen: agent.last_seen,
+          last_ip: agent.last_ip,
+          lastDiscovery: agent.lastDiscovery,
+          lastTelemetry: agent.lastTelemetry
+        }
+      })
+    }, { timeoutMs: 10000 });
+  } catch (err) {
+    console.warn(`[Theta Agent] could not push agent ${agent.name} to master: ${err.message}`);
+  }
+}
+
+async function dispatchCommandClusterWide(agent, command, payload, requiresSigning, req) {
+  if (agentManager.isConnected(agent.id)) {
+    return await agentManager.sendCommand(agent, command, payload, requiresSigning);
+  }
+
+  // Multi-site command routing: if this request was already forwarded, don't re-forward to avoid loops
+  if (req && (req.header('x-command-routed') || req.forwardedFromSpoke)) {
+    throw new Error(`Agent "${agent.name}" is not connected to this node`);
+  }
+
+  const siteConfig = require('../utils/site_config');
+  const cfg = siteConfig.get();
+  const { fetchWithAuthRedirect } = require('../utils/fetch_with_auth_redirect');
+
+  if (!cfg.isMaster && cfg.masterUrl && (cfg.replicationPushToken || cfg.masterJoinKey)) {
+    // Spoke -> Master
+    const targetUrl = String(cfg.masterUrl).replace(/\/+$/, '') + `/api/agent/nodes/${agent.id}/command`;
+    const token = cfg.replicationPushToken || cfg.masterJoinKey;
+    const resp = await fetchWithAuthRedirect(targetUrl, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + token,
+        'X-Forwarded-User': (req.user && req.user.uid) || 'admin',
+        'X-Command-Routed': '1',
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ command, payload, isHighRisk: requiresSigning })
+    }, { timeoutMs: 15000 });
+    if (resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      return data.sentMessage || data;
+    }
+    const errBody = await resp.json().catch(() => ({}));
+    throw new Error(errBody.message || `Master returned HTTP ${resp.status}`);
+  } else if (cfg.isMaster) {
+    // Master -> Spokes
+    const { SiteSpoke } = require('../models/site_spoke');
+    const spokes = await SiteSpoke.list();
+    for (const spoke of spokes) {
+      if (!spoke.endpoint || !spoke.pushToken) continue;
+      try {
+        const targetUrl = String(spoke.endpoint).replace(/\/+$/, '') + `/api/agent/nodes/${agent.id}/command`;
+        const resp = await fetchWithAuthRedirect(targetUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer ' + spoke.pushToken,
+            'X-Forwarded-User': (req.user && req.user.uid) || 'admin',
+            'X-Command-Routed': '1',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ command, payload, isHighRisk: requiresSigning })
+        }, { timeoutMs: 5000 });
+        if (resp.ok) {
+          const data = await resp.json().catch(() => ({}));
+          return data.sentMessage || data;
+        }
+      } catch (e) {
+        // Try next spoke
+      }
+    }
+  }
+
+  throw new Error(`Agent "${agent.name}" is not connected`);
+}
+
 // The agent WebSocket (/api/agent/ws) authenticates its own token against the
 // Agent table (see initAgentWebSockets). These REST routes are admin-facing, so
 // they're auth + admin gated.
@@ -105,6 +204,7 @@ router.post('/enroll', async (req, res, next) => {
     logAgentAudit('enroll', { actor: req.user.uid, agentId: agent.id, agentName: agent.name, resourceId: resourceId || null });
 
     replicateOnFinish(res, 'agent-enrolled');
+    pushAgentToMaster(agent, token);
 
     const publicKey = await agentManager.publicKeyBase64();
     res.json({
@@ -141,6 +241,7 @@ router.put('/nodes/:id', async (req, res, next) => {
     const updated = await agent.update(patch);
     logAgentAudit('update', { actor: req.user.uid, agentId: agent.id, fields: Object.keys(patch) });
     replicateOnFinish(res, 'agent-updated');
+    pushAgentToMaster(updated);
     res.json({ status: 'ok', agent: updated.toPublic(agentManager.liveState(agent.id)) });
   } catch (err) { next(err); }
 });
@@ -155,6 +256,7 @@ router.post('/nodes/:id/revoke', async (req, res, next) => {
     agentManager.disconnect(agent.id, 4003, 'Enrollment revoked');
     logAgentAudit('revoke', { actor: req.user.uid, agentId: agent.id, agentName: agent.name });
     replicateOnFinish(res, 'agent-revoked');
+    pushAgentToMaster(agent);
     res.json({ status: 'ok' });
   } catch (err) { next(err); }
 });
@@ -169,6 +271,7 @@ router.post('/nodes/:id/rotate', async (req, res, next) => {
     agentManager.disconnect(agent.id, 4004, 'Token rotated');
     logAgentAudit('rotate', { actor: req.user.uid, agentId: agent.id, agentName: agent.name });
     replicateOnFinish(res, 'agent-token-rotated');
+    pushAgentToMaster(agent, token);
     res.json({ status: 'ok', token, publicKey: await agentManager.publicKeyBase64() });
   } catch (err) { next(err); }
 });
@@ -264,10 +367,10 @@ router.post('/nodes/:id/command', async (req, res, next) => {
     if (agent.revoked) return res.status(403).json({ status: 'error', message: 'agent enrollment is revoked' });
 
     const requiresSigning = isHighRisk || HIGH_RISK_COMMANDS.includes(command);
-    const msg = await agentManager.sendCommand(agent, command, payload || {}, requiresSigning);
+    const msg = await dispatchCommandClusterWide(agent, command, payload || {}, requiresSigning, req);
 
     logAgentAudit('command', {
-      actor: req.user.uid,
+      actor: (req.user && req.user.uid) || 'admin',
       agentId: agent.id,
       agentName: agent.name,
       resourceId: agent.resourceId || null,
@@ -328,6 +431,7 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
             agent = existingAgent;
             issuedToken = newToken;
             require('../utils/site_replicate').replicateToSpokes('agent-token-rotated');
+            pushAgentToMaster(agent, issuedToken);
           } else {
             const enrolled = await Agent.enroll({
               name: hostname || `agent-${Date.now().toString(36)}`,
@@ -337,6 +441,7 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
             agent = enrolled.agent;
             issuedToken = enrolled.token;
             require('../utils/site_replicate').replicateToSpokes('agent-enrolled');
+            pushAgentToMaster(agent, issuedToken);
           }
           await joinKey.update({
             use_count: (joinKey.use_count || 0) + 1,
