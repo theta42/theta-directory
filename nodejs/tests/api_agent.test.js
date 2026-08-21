@@ -91,4 +91,25 @@ describe('Agent REST API & Live Resync Triggers', () => {
 		expect(deleteRes.body.status).toBe('ok');
 		expect(replicateSpy).toHaveBeenCalledWith('agent-deleted');
 	});
+
+	test('agent toPublic reports isOnline true when recently active on another node', async () => {
+		const { agent } = await Agent.enroll({
+			name: 'peer-node-agent',
+			description: 'Connected on spoke'
+		});
+
+		// Seen 30 seconds ago on a spoke
+		await agent.update({ last_seen: Math.floor(Date.now() / 1000) - 30 });
+
+		// On this node, liveState is { connected: false }
+		const pub = agent.toPublic({ connected: false });
+		expect(pub.connected).toBe(false);
+		expect(pub.isOnline).toBe(true);
+
+		// Seen 10 minutes ago
+		await agent.update({ last_seen: Math.floor(Date.now() / 1000) - 600 });
+		const pubOld = agent.toPublic({ connected: false });
+		expect(pubOld.connected).toBe(false);
+		expect(pubOld.isOnline).toBe(false);
+	});
 });

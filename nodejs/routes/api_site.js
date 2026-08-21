@@ -230,7 +230,11 @@ router.post('/spokes', async (req, res, next) => {
     const key = await SiteJoinKey.authenticate(rawKey);
     if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
 
-    const { endpoint, siteSlug, noInbound, meshIp, publicHost, gatewayPublicKey, gatewayEndpoint } = req.body || {};
+    const {
+      endpoint, siteSlug, noInbound, meshIp, publicHost,
+      gatewayPublicKey, gatewayEndpoint, gatewayExitPublicKey,
+      exitOpen, country, city, lan168, lan172, dnsHost
+    } = req.body || {};
     if (!endpoint || !/^https?:\/\//.test(endpoint)) {
       return res.status(400).json({ status: 'error', message: 'a valid http(s) endpoint is required' });
     }
@@ -309,8 +313,16 @@ router.post('/spokes', async (req, res, next) => {
           publishedAt: now,
           lastSeenAt: now
         };
+        if (gatewayExitPublicKey !== undefined) patch.gatewayExitPublicKey = gatewayExitPublicKey || null;
+        if (exitOpen !== undefined) patch.exitOpen = !!exitOpen;
+        if (country !== undefined) patch.country = country || null;
+        if (city !== undefined) patch.city = city || null;
+        if (lan168 !== undefined) patch.lan168 = lan168;
+        if (lan172 !== undefined) patch.lan172 = lan172;
+        if (dnsHost !== undefined) patch.dnsHost = dnsHost || null;
+
         if (existing) await existing.update(patch);
-        else await MeshSite.create({ id: crypto.randomUUID(), siteId: spoke.ldapServerId, ...patch });
+        else await MeshSite.create({ id: crypto.randomUUID(), siteId: spoke.ldapServerId, lan168: lan168 || '192.168.1.0/24', lan172: lan172 || '172.16.0.0/24', ...patch });
         // Every other site needs this too, so push it out rather than waiting
         // for the next unrelated catalog change.
         require('../utils/site_replicate').replicateToSpokes('mesh-roster-changed');
@@ -447,6 +459,75 @@ router.get('/ldap-peers', async (req, res, next) => {
     }
 
     res.json({ status: 'ok', ldapServerId: caller.ldapServerId, peers });
+  } catch (e) { next(e); }
+});
+
+// ── Spoke Discovery Report (SPOKE -> MASTER) ──────────────────────────────
+// Spokes forward local discovery outputs (e.g. Proxmox, Docker, Nmap, iLO, agent)
+// to the master so they are reconciled into the authoritative catalog and
+// replicated back to all spokes.
+router.post('/spokes/discovery-report', async (req, res, next) => {
+  try {
+    const cfg = siteConfig.get();
+    if (!cfg.isMaster) return res.status(400).json({ status: 'error', message: 'only master receives discovery reports' });
+    const rawKey = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const key = await SiteJoinKey.authenticate(rawKey);
+    if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
+
+    const { sourceName, payload, options } = req.body || {};
+    if (!sourceName || !payload) {
+      return res.status(400).json({ status: 'error', message: 'sourceName and payload are required' });
+    }
+
+    const { DiscoveryReconciler } = require('../services/discovery_reconciler');
+    const result = await DiscoveryReconciler.reconcile(sourceName, payload, { ...(options || {}), _localOnly: true });
+
+    // Broadcast updated directory catalog to all spokes
+    require('../utils/site_replicate').replicateToSpokes(`discovery:${sourceName}`);
+    res.json({ status: 'ok', result });
+  } catch (e) { next(e); }
+});
+
+// ── Spoke Agent Report (SPOKE -> MASTER) ──────────────────────────────────
+// Spokes forward newly enrolled agents, telemetry, and discovery to the master
+// so the agent fleet is known cluster-wide and replicated to all spokes.
+router.post('/spokes/agent-report', async (req, res, next) => {
+  try {
+    const cfg = siteConfig.get();
+    if (!cfg.isMaster) return res.status(400).json({ status: 'error', message: 'only master receives agent reports' });
+    const rawKey = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+    const key = await SiteJoinKey.authenticate(rawKey);
+    if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
+
+    const { agent: a, discovery, telemetry } = req.body || {};
+    if (!a || !a.id) return res.status(400).json({ status: 'error', message: 'agent data is required' });
+
+    const { Agent } = require('../models/agent');
+    const existing = await Agent.get(a.id).catch(() => null);
+    const fields = {
+      name: a.name || 'Unnamed Agent',
+      description: a.description || null,
+      tokenPrefix: a.tokenPrefix || null,
+      resourceId: a.resourceId || null,
+      revoked: !!a.revoked,
+      enrolled_by: a.enrolled_by || 'replicated',
+      enrolled_on: a.enrolled_on || Math.floor(Date.now() / 1000),
+      version: a.version || null,
+      last_seen: a.last_seen || Math.floor(Date.now() / 1000),
+      last_ip: a.last_ip || null,
+      ...(a.tokenHash ? { tokenHash: a.tokenHash } : {}),
+      ...(discovery ? { lastDiscovery: discovery } : (a.lastDiscovery ? { lastDiscovery: a.lastDiscovery } : {})),
+      ...(telemetry ? { lastTelemetry: telemetry } : (a.lastTelemetry ? { lastTelemetry: a.lastTelemetry } : {}))
+    };
+
+    if (existing) {
+      await existing.update(fields);
+    } else if (fields.tokenHash) {
+      await Agent.create({ id: a.id, ...fields });
+    }
+
+    require('../utils/site_replicate').replicateToSpokes('agent-reported');
+    res.json({ status: 'ok' });
   } catch (e) { next(e); }
 });
 

@@ -67,6 +67,29 @@ jest.mock('../utils/ldap_reconcile', () => ({
 	reconcileSoon: () => {}
 }));
 
+jest.mock('../utils/site_replicate', () => ({
+	replicateToSpokes: () => {}
+}));
+
+const mockAgents = [];
+jest.mock('../models/agent', () => ({
+	Agent: {
+		get: async (id) => mockAgents.find(a => a.id === id) || null,
+		create: async (data) => {
+			const row = { ...data };
+			row.update = async (patch) => { Object.assign(row, patch); return row; };
+			mockAgents.push(row);
+			return row;
+		}
+	}
+}));
+
+jest.mock('../services/discovery_reconciler', () => ({
+	DiscoveryReconciler: {
+		reconcile: async () => ({ newDevices: 1 })
+	}
+}));
+
 const request = require('supertest');
 const express = require('express');
 
@@ -144,4 +167,41 @@ test('registration for a brand new siteSlug still mints a new row', async () => 
 	expect(res.status).toBe(200);
 	expect(res.body.ldapServerId).toBe(2); // lowest free ID after existing row with 3
 	expect(mockSpokes.length).toBe(2);
+});
+
+test('discovery report forwards from spoke to master', async () => {
+	mockJoinKeys.set('stj_discovery', { keyPrefix: 'stj_discovery' });
+	const res = await router()
+		.post('/api/site/spokes/discovery-report')
+		.set('Authorization', 'Bearer stj_discovery')
+		.send({
+			sourceName: 'proxmox-spoke',
+			payload: {
+				resources: [{ kind: 'host', name: 'pdp-node1', slug: 'host-pdp-node1', metadata: { ip: '10.4.168.200' } }],
+				edges: []
+			}
+		});
+
+	expect(res.status).toBe(200);
+	expect(res.body.status).toBe('ok');
+});
+
+test('agent report saves newly enrolled agent and updates last_seen', async () => {
+	mockJoinKeys.set('stj_agent', { keyPrefix: 'stj_agent' });
+	const res = await router()
+		.post('/api/site/spokes/agent-report')
+		.set('Authorization', 'Bearer stj_agent')
+		.send({
+			agent: {
+				id: 'a1b2c3d4-0000-0000-0000-000000000001',
+				name: 'theta-suite-pdp',
+				tokenHash: 'abc123hash',
+				tokenPrefix: 'abc12345',
+				enrolled_by: 'join-key:pdp',
+				last_seen: Math.floor(Date.now() / 1000)
+			}
+		});
+
+	expect(res.status).toBe(200);
+	expect(res.body.status).toBe('ok');
 });

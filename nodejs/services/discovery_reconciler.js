@@ -20,6 +20,30 @@ function isDescendant(candidateId, rootId, edges) {
 
 class DiscoveryReconciler {
   static async reconcile(sourceName, payload, options = {}) {
+    const siteConfig = require('../utils/site_config');
+    const cfg = siteConfig.get();
+    if (!cfg.isMaster && cfg.masterUrl && cfg.masterJoinKey && !options._localOnly) {
+      try {
+        const { fetchWithAuthRedirect } = require('../utils/fetch_with_auth_redirect');
+        const targetUrl = String(cfg.masterUrl).replace(/\/+$/, '') + '/api/site/spokes/discovery-report';
+        const resp = await fetchWithAuthRedirect(targetUrl, {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer ' + cfg.masterJoinKey,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ sourceName, payload, options })
+        }, { timeoutMs: 15000 });
+        if (resp.ok) {
+          const body = await resp.json().catch(() => ({}));
+          return body.result || { newDevices: 0 };
+        }
+        console.warn(`[DiscoveryReconciler] master rejected discovery forward (${resp.status}); applying locally as fallback`);
+      } catch (err) {
+        console.warn(`[DiscoveryReconciler] could not forward discovery to master (${err.message}); applying locally as fallback`);
+      }
+    }
+
     const { resources = [], edges = [] } = payload;
     let newDevices = 0;
     const location = options.location || options.site || null;
