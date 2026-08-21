@@ -205,14 +205,14 @@ async function applyReplicationConfig({ serverId, peers }) {
 		syncreplChanged = true;
 	}
 
+	const dbMods = [];
 	if (syncreplChanged) {
 		// No `{n}` prefix on the values -- slapd assigns the ordering itself.
 		const values = [...want.entries()]
 			.sort((a, b) => a[0] - b[0])
 			.map(([rid, provider]) => `olcSyncrepl: ${syncreplValue({ rid, provider, baseDn, bindDn, cred })}`);
-		modifications.push(
-			`dn: ${current.dbDn}\nchangetype: modify\nreplace: olcSyncrepl\n` +
-			(values.length ? values.join('\n') + '\n' : '')
+		dbMods.push(
+			`replace: olcSyncrepl\n` + (values.length ? values.join('\n') + '\n' : '')
 		);
 	}
 
@@ -221,20 +221,22 @@ async function applyReplicationConfig({ serverId, peers }) {
 	// replicate with, and slapd rejects it with no syncrepl configured.
 	const wantMirror = want.size > 0;
 	if (wantMirror !== current.mirrorMode) {
-		modifications.push(
-			`dn: ${current.dbDn}\nchangetype: modify\nreplace: olcMirrorMode\nolcMirrorMode: ${wantMirror ? 'TRUE' : 'FALSE'}\n`
+		dbMods.push(
+			`replace: olcMirrorMode\nolcMirrorMode: ${wantMirror ? 'TRUE' : 'FALSE'}\n`
 		);
 		changes.push(`mirrormode -> ${wantMirror}`);
+	}
+
+	if (dbMods.length > 0) {
+		const orderedDbMods = wantMirror ? dbMods : dbMods.slice().reverse();
+		modifications.push(`dn: ${current.dbDn}\nchangetype: modify\n` + orderedDbMods.join('-\n'));
 	}
 
 	if (modifications.length === 0) {
 		return { applied: true, changed: false, changes: [], note: 'already in sync' };
 	}
 
-	// mirrormode must be set AFTER syncrepl exists and cleared BEFORE the last
-	// one goes away, so ordering matters: adds first, mirror last when
-	// enabling; the reverse when disabling.
-	const ordered = wantMirror ? modifications : modifications.slice().reverse();
+	const ordered = modifications;
 
 	try {
 		await runLdap('ldapmodify', [...ldapArgs(), '-c'], ordered.join('\n') + '\n');

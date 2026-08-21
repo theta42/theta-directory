@@ -35,7 +35,7 @@ const { withLock } = require('../utils/mutex');
 // with converges slapd's live cn=config (utils/ldap_reconcile.js).
 const { reconcileSoon } = require('../utils/ldap_reconcile');
 const User = require('../models/user');
-const { Agent } = require('../models/agent');
+const { Agent, AgentJoinKey } = require('../models/agent');
 const { UserVerification } = require('../models/verification');
 const { ApiToken } = require('../models/api_token');
 const siteConfig = require('../utils/site_config');
@@ -157,7 +157,7 @@ router.post('/export', async (req, res, next) => {
     // meshSites: the cluster roster. Without it a spoke has no idea any other
     // site exists, its gateway builds no peers, and the mesh silently only
     // works at whichever site happens to be the master.
-    const [ldif, resources, edges, signingKey, meshSites, agents, baoSecrets, userVerifications, apiTokens] = await Promise.all([
+    const [ldif, resources, edges, signingKey, meshSites, agents, baoSecrets, userVerifications, apiTokens, agentJoinKeys] = await Promise.all([
       slurpLdif(),
       Resource.list(),
       ResourceEdge.list(),
@@ -174,7 +174,8 @@ router.post('/export', async (req, res, next) => {
       Agent.list().catch(() => []),
       exportSharedBaoSecrets().catch(() => []),
       UserVerification.listDetail().catch(() => []),
-      ApiToken.list().catch(() => [])
+      ApiToken.list().catch(() => []),
+      AgentJoinKey.list().catch(() => [])
     ]);
 
     await key.update({ use_count: (key.use_count || 0) + 1, last_used_on: Math.floor(Date.now() / 1000) }).catch(() => {});
@@ -190,6 +191,7 @@ router.post('/export', async (req, res, next) => {
       // toReplica(), not toPublic(): the fleet has to arrive with tokenHash or
       // no agent can authenticate against a spoke. See models/agent.js.
       agents: (agents || []).map(a => (a.toReplica ? a.toReplica() : (a.toJSON ? a.toJSON() : a))),
+      agentJoinKeys: (agentJoinKeys || []).map(k => (k.toReplica ? k.toReplica() : (k.toJSON ? k.toJSON() : k))),
       baoSecrets: baoSecrets || [],
       userVerifications: userVerifications || [],
       apiTokens: (apiTokens || []).map(t => (t.toReplica ? t.toReplica() : (t.toJSON ? t.toJSON() : t))),
@@ -1261,6 +1263,45 @@ async function adoptFromMaster({ masterUrl, joinKey }) {
       }
     } catch (e) {
       console.warn('[site] could not prune deleted API tokens:', e.message);
+    }
+  }
+
+  // 8. Adopt agent join keys from master so join keys issued on master work on every spoke.
+  if (Array.isArray(exportData.agentJoinKeys)) {
+    const exportedKeyIds = new Set();
+    for (const jk of exportData.agentJoinKeys) {
+      if (!jk || !jk.id || !jk.keyHash) continue;
+      try {
+        exportedKeyIds.add(jk.id);
+        const existing = await AgentJoinKey.get(jk.id).catch(() => null);
+        const fields = {
+          label: jk.label || 'default',
+          keyHash: jk.keyHash,
+          keyPrefix: jk.keyPrefix || '',
+          revoked: !!jk.revoked,
+          created_by: jk.created_by || null,
+          created_on: jk.created_on || null,
+          expires_on: jk.expires_on || null,
+          use_count: jk.use_count || 0,
+          last_used_on: jk.last_used_on || null
+        };
+        if (existing) {
+          await existing.update(fields);
+        } else {
+          await AgentJoinKey.create({ id: jk.id, ...fields });
+        }
+      } catch (e) {
+        console.warn(`[site] could not adopt agent join key ${jk.id}: ${e.message}`);
+      }
+    }
+    try {
+      const localKeys = await AgentJoinKey.list();
+      for (const local of localKeys || []) {
+        if (exportedKeyIds.has(local.id)) continue;
+        await local.delete();
+      }
+    } catch (e) {
+      console.warn('[site] could not prune deleted agent join keys:', e.message);
     }
   }
 
