@@ -17,8 +17,8 @@ full architecture). This page covers the server endpoints that make a spoke
    - **setup.sh**: set `CFG_MASTER_DIRECTORY_URL` + `CFG_MASTER_DIRECTORY_JOIN_KEY`
      in `setup.env` before the first run.
 3. The spoke pulls the master's directory export (LDAP tree + resource
-   catalog + agent-signing key), imports it, and persists its own spoke role
-   (`isMaster: false`, `masterUrl`, `siteSlug`) in `/config/site.json`.
+   catalog + agent fleet + API tokens + user verifications + shared OpenBao secrets + agent-signing key),
+   imports it, and persists its own spoke role (`isMaster: false`, `masterUrl`, `siteSlug`) in `/config/site.json`.
 4. If the spoke also knows its own reachable URL (`selfUrl` — `setup.sh` passes
    `https://$CFG_SSO_HOST` automatically), it registers itself with the master
    (`POST /api/site/spokes`) so the master can push live updates back to it
@@ -31,7 +31,7 @@ directory can never be merged into a master's.
 
 ## Live replication (not a one-time snapshot)
 
-A registered spoke stays in sync: every successful catalog write on the
+A registered spoke stays in sync: every successful catalog, user, group, API token, or agent write on the
 master fires a fire-and-forget push (`utils/site_replicate.js`) at every
 registered spoke, concurrently — one unreachable spoke never blocks or delays
 delivery to another. The spoke's `POST /api/site/resync` handler (called by

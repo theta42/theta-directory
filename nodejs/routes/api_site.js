@@ -1217,7 +1217,7 @@ router.post('/join', async (req, res, next) => {
 
     // Spoke identity: preserve this spoke's own siteSlug (or the one passed
     // explicitly on join), never overwrite with master's siteSlug.
-    const effectiveSiteSlug = siteSlug || (cfg.siteSlug && cfg.siteSlug !== 'site-default' ? cfg.siteSlug : exportData.siteSlug) || 'site-spoke';
+    const effectiveSiteSlug = siteSlug || (cfg.siteSlug && cfg.siteSlug !== 'site-default' && cfg.siteSlug !== exportData.siteSlug ? cfg.siteSlug : null) || (selfUrl ? 'site-' + new URL(selfUrl).hostname.replace(/[^a-z0-9]/gi, '-') : 'site-spoke');
 
     // 3. Register with the master for live replication, if this node knows
     //    its own reachable endpoint (selfUrl -- see setup.env's

@@ -1229,7 +1229,8 @@ router.post('/site-promote', async (req, res, next) => {
     // Fire-and-forget: let every known spoke know a new master exists so
     // their next resync targets it. (They'll also learn this the hard way if
     // their old-master resync calls start failing, but this speeds it up.)
-    meshReplicate.replicateToSpokes('master-promoted');
+    const siteReplicate = require('../utils/site_replicate');
+    siteReplicate.replicateToSpokes('master-promoted');
 
     const cfg = siteConfig.get();
     res.json({

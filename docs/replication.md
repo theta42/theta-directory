@@ -18,8 +18,7 @@ By default, the `sso-manager` Docker container runs a single, independent OpenLD
 
 In an N-Way Multi-Master setup, every site runs a fully active OpenLDAP server (`slapd`).
 - **Reads and Writes anywhere**: A user can change their password or update their profile at Site A, Site B, or Site C.
-- **Conflict Resolution**: OpenLDAP's `syncrepl` engine uses Context Sequence Numbers (CSN) to track changes. If Site A goes offline and a user changes their password at Site B, Site A will automatically pull the newest changes the moment it rejoins the cluster.
-- **Independent Redis**: Session data, API Tokens, and OAuth Clients are stored in Redis. By design, Redis is NOT replicated in this geographic setup. This ensures that a failure at Site A never causes Site B's Redis to become read-only, which would break the web UI at Site B. OAuth clients must be configured per-site.
+- **Independent Redis**: Session data and short-lived tokens are stored in Redis. By design, Redis is NOT replicated in this geographic setup. This ensures that a failure at Site A never causes Site B's Redis to become read-only, which would break the web UI at Site B. API Tokens (PATs) and the Directory Resource Catalog are stored in the replicated SQLite database and synchronized across all sites. OAuth clients must be configured per-site.
 
 ## Configuration
 

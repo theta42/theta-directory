@@ -62,6 +62,7 @@ const { fetchWithAuthRedirect } = require('../utils/fetch_with_auth_redirect');
 //   /tos                         → UserVerification; in POST /api/site/export
 //   /directory-admin             → the Resource catalog; in the export
 //   /agent/enroll, /agent/nodes  → Agent fleet rows; in the export
+//   /api-token                   → ApiToken (PAT) rows; in the export
 //
 // Two neighbours that look like they belong here and do NOT, both for the same
 // reason -- the record itself is not replicated, so forwarding it would file it
@@ -82,7 +83,8 @@ const FORWARD_PATHS = [
   /^\/api\/tos(\/|$)/,
   /^\/api\/directory-admin(\/|$)/,
   /^\/api\/agent\/enroll(\/|$)/,
-  /^\/api\/agent\/nodes(\/|$)/
+  /^\/api\/agent\/nodes(\/|$)/,
+  /^\/api\/api-token(\/|$)/
 ];
 
 // Carve-outs inside the paths above, for the two operations that are about

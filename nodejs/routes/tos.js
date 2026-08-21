@@ -4,6 +4,7 @@ const router = require('express').Router();
 const {Tos} = require('../models/tos');
 const {UserVerification} = require('../models/verification');
 const permission = require('../utils/permission');
+const { replicateOnFinish } = require('../utils/replicate_on_finish');
 
 // Any authenticated user may read the current ToS (it's what they already
 // see on /tos and during onboarding, and it isn't sensitive) -- only saving
@@ -45,6 +46,8 @@ router.put('/', async function(req, res, next) {
 				}
 			}
 		}
+
+		replicateOnFinish(res, 'tos-updated');
 
 		return res.json({results: tos, resetCount});
 	} catch (error) {

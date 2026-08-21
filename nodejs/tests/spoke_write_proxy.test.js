@@ -126,7 +126,11 @@ describe('spoke_write_proxy middleware', () => {
     ['POST', '/api/agent/enroll'],
     ['PUT', '/api/agent/nodes/abc-123'],
     ['POST', '/api/tos/accept'],
-    ['POST', '/api/ldif-import']
+    ['POST', '/api/ldif-import'],
+    ['POST', '/api/api-token'],
+    ['PUT', '/api/api-token/tok-123'],
+    ['DELETE', '/api/api-token/tok-123'],
+    ['POST', '/api/api-token/tok-123/rotate']
   ])('%s %s forwards to the master', async (method, url) => {
     jest.spyOn(siteConfig, 'get').mockReturnValue(SPOKE);
     const next = jest.fn();
@@ -265,6 +269,49 @@ describe('spoke_write_proxy middleware', () => {
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(503);
     expect(res.jsonBody.message).toContain('unreachable for write operations');
+  });
+
+  test('follows same-host 301/307 redirects on master and preserves credentials/body', async () => {
+    jest.spyOn(siteConfig, 'get').mockReturnValue(SPOKE);
+    let redirected = false;
+
+    mockFetchImpl = async (url, opts) => {
+      if (url === 'https://master.example.com/api/user') {
+        return {
+          status: 301,
+          ok: false,
+          headers: new Map([['location', 'https://master.example.com/api/user/redirected']]),
+          get(name) { return this.headers.get(name.toLowerCase()); },
+          entries() { return this.headers.entries(); }
+        };
+      }
+      if (url === 'https://master.example.com/api/user/redirected') {
+        redirected = true;
+        expect(opts.method).toBe('POST');
+        expect(opts.headers['authorization']).toBe('Bearer push_test_token');
+        expect(opts.headers['x-forwarded-user']).toBe('alice');
+        expect(JSON.parse(opts.body)).toEqual({ name: 'Alice' });
+        return {
+          status: 200,
+          ok: true,
+          headers: new Map([['content-type', 'application/json']]),
+          arrayBuffer: async () => Buffer.from(JSON.stringify({ status: 'ok', redirected: true })),
+          entries() { return this.headers.entries(); }
+        };
+      }
+      throw new Error('unexpected url: ' + url);
+    };
+
+    const res = makeRes();
+    await spokeWriteProxy(
+      makeReq({ url: '/api/user', user: { uid: 'alice' }, body: { name: 'Alice' } }),
+      res,
+      jest.fn()
+    );
+
+    expect(redirected).toBe(true);
+    expect(res.statusCode).toBe(200);
+    expect(JSON.parse(res.body.toString())).toEqual({ status: 'ok', redirected: true });
   });
 
   test('returns 503 with a recovery hint when this spoke has no push token', async () => {
