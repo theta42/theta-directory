@@ -13,8 +13,8 @@ Mail.send = function(to, subject, message, from){
 	// recipient list must not actually hit SMTP. Tests already tolerate this
 	// (see e.g. tests/misc.test.js: "SMTP failure is non-fatal") since none
 	// assert on real delivery.
-	if(conf.environment === 'test'){
-		return Promise.resolve({accepted: [], rejected: [], response: 'skipped: NODE_ENV=test'});
+	if(conf.environment === 'test' || !conf.smtp || !conf.smtp.host){
+		return Promise.resolve({accepted: [], rejected: [], response: 'skipped: no SMTP host configured'});
 	}
 
 	return new Promise(function(resolve, reject){

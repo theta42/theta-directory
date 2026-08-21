@@ -25,7 +25,7 @@ router.post('/', async function(req, res, next){
 		await permission.byGroup(req.user, ['app_sso_admin'])
 
 		req.body.created_by = req.user.uid
-		req.body.manager = [req.user.dn];
+		req.body.manager = req.user.dn ? [req.user.dn] : [];
 
 		let user = await User.add(req.body);
 		const verif = await UserVerification.getOrCreate(user.uid);

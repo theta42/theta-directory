@@ -212,7 +212,13 @@ router.post('/ping', async (req, res, next) => {
     const rawKey = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
     const key = await SiteJoinKey.authenticate(rawKey);
     if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
-    res.json({ status: 'ok', siteSlug: siteConfig.get().siteSlug, baseDn: baseDnFrom(conf), ts: Math.floor(Date.now() / 1000) });
+    res.json({
+      status: 'ok',
+      siteSlug: siteConfig.get().siteSlug,
+      baseDn: baseDnFrom(conf),
+      ldapAdminPass: (conf.ldap && conf.ldap.bindPassword) || '',
+      ts: Math.floor(Date.now() / 1000)
+    });
   } catch (e) { next(e); }
 });
 
@@ -446,7 +452,8 @@ router.get('/ldap-peers', async (req, res, next) => {
     // mesh address cannot be derived (should not happen for a master).
     const masterHost = ldapMeshHost(1) || ldapHostFor(cfg.masterUrl || req.protocol + '://' + req.get('host'));
     const spokes = await SiteSpoke.list();
-    const caller = spokes.find((s) => s.endpoint === callerEndpoint);
+    const normalize = (u) => String(u || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, '');
+    const caller = spokes.find((s) => s.endpoint === callerEndpoint || normalize(s.endpoint) === normalize(callerEndpoint));
     if (!caller || !caller.ldapServerId) {
       return res.status(404).json({ status: 'error', message: 'this endpoint is not a registered spoke -- register via POST /api/site/spokes first' });
     }
