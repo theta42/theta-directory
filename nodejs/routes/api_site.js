@@ -826,24 +826,21 @@ router.post('/spokes/resync', async (req, res, next) => {
       return res.status(404).json({ status: 'error', message: id ? 'spoke not found' : 'no spokes registered' });
     }
 
-    const { replicateToSpokes } = require('../utils/site_replicate');
-    // Run the pushes in the background so this request never stalls the proxy.
-    Promise.all(targets.map(async (spoke) => {
+    // Unlike the write-triggered path this one AWAITS the result: an operator
+    // clicking "Sync now" is asking a question ("can you reach it?"), and a
+    // fire-and-forget answer of "sure, probably" would be useless to them.
+    const results = await Promise.all(targets.map(async (spoke) => {
       try {
         await pushResync(spoke, 'manual');
         await spoke.update({ last_seen_on: Math.floor(Date.now() / 1000) }).catch(() => {});
+        return { endpoint: spoke.endpoint, ok: true };
       } catch (e) {
-        // Individual failures are best-effort; the operator polls last_seen_on.
+        return { endpoint: spoke.endpoint, ok: false, error: e.message };
       }
-    })).catch(() => {});
+    }));
 
-    logAudit('spokes_resynced', { actor: req.user.uid, requested: targets.length, ok: null, note: 'pushes scheduled' });
-    res.status(202).json({
-      status: 'ok',
-      message: `Resync push scheduled for ${targets.length} spoke(s). Poll GET /api/site/spokes and check last_seen_on for results.`,
-      scheduled: targets.length,
-      targets: targets.map(s => ({ id: s.id, endpoint: s.endpoint, siteSlug: s.siteSlug }))
-    });
+    logAudit('spokes_resynced', { actor: req.user.uid, requested: targets.length, ok: results.filter(r => r.ok).length });
+    res.json({ status: 'ok', results, ok: results.filter(r => r.ok).length, failed: results.filter(r => !r.ok).length });
   } catch (e) { next(e); }
 });
 
