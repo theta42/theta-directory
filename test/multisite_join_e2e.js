@@ -80,8 +80,10 @@ async function apiEventually(label, url, path, opts, key, timeoutMs = 15000) {
   let res;
   for (;;) {
     res = await api(url, path, opts);
-    if (res.status === 200 && res.body && res.body[key] !== undefined) return res.body[key];
-    const retriable = res.status === 403 || res.status >= 500;
+    if (res.status === 200 && res.body && (key === undefined || res.body[key] !== undefined)) {
+      return key === undefined ? res.body : res.body[key];
+    }
+    const retriable = res.status === 401 || res.status === 403 || res.status >= 500;
     if (!retriable || Date.now() >= deadline) break;
     await new Promise((r) => setTimeout(r, 250));
   }
@@ -522,7 +524,7 @@ homeDirectory: /home/${replicatedUid}
   }
 
   step('Verifying the master reports no replication drift (the automatic path worked)');
-  const { body: driftStatus } = await api(MASTER_URL, '/api/directory-admin/site-status', { token: masterToken });
+  const driftStatus = await apiEventually('master site-status drift', MASTER_URL, '/api/directory-admin/site-status', { token: masterToken }, undefined, 20000) || {};
   if (driftStatus.ldap && driftStatus.ldap.source !== 'cn=config') {
     fail(`site-status should read the live cn=config, got source=${JSON.stringify(driftStatus.ldap && driftStatus.ldap.source)}`);
   }
@@ -546,9 +548,9 @@ homeDirectory: /home/${replicatedUid}
   }
 
   step('Verifying the master now reports two registered spokes');
-  const { body: twoSpokeStatus } = await api(MASTER_URL, '/api/directory-admin/site-status', { token: masterToken });
-  if (twoSpokeStatus.config.registeredSpokesCount !== 2) {
-    fail(`expected master to report 2 registered spokes, got ${JSON.stringify(twoSpokeStatus.config.registeredSpokesCount)}`);
+  const twoSpokeStatus = await apiEventually('master site-status 2 spokes', MASTER_URL, '/api/directory-admin/site-status', { token: masterToken }, undefined, 20000) || {};
+  if (!twoSpokeStatus.config || twoSpokeStatus.config.registeredSpokesCount !== 2) {
+    fail(`expected master to report 2 registered spokes, got ${JSON.stringify(twoSpokeStatus.config && twoSpokeStatus.config.registeredSpokesCount)}`);
   }
 
   // Operator actions on the Registered Spokes table (it used to be read-only,
@@ -561,7 +563,7 @@ homeDirectory: /home/${replicatedUid}
   }
 
   step('Removing a spoke from the registry, then re-registering it');
-  const { body: beforeRemoval } = await api(MASTER_URL, '/api/directory-admin/site-status', { token: masterToken });
+  const beforeRemoval = await apiEventually('master site-status before removal', MASTER_URL, '/api/directory-admin/site-status', { token: masterToken }, undefined, 20000) || {};
   const spoke2Row = (beforeRemoval.spokes || []).find((s) => s.endpoint === 'http://spoke2:3001');
   if (!spoke2Row || !spoke2Row.id) {
     fail(`site-status must expose a spoke id for the table's actions, got ${JSON.stringify(beforeRemoval.spokes)}`);
@@ -569,8 +571,8 @@ homeDirectory: /home/${replicatedUid}
     const removeRes = await api(MASTER_URL, `/api/site/spokes/${spoke2Row.id}`, { method: 'DELETE', token: masterToken });
     if (removeRes.status !== 200) fail(`removing a spoke failed: ${removeRes.status} ${JSON.stringify(removeRes.body)}`);
 
-    const { body: afterRemoval } = await api(MASTER_URL, '/api/directory-admin/site-status', { token: masterToken });
-    if (afterRemoval.config.registeredSpokesCount !== 1) {
+    const afterRemoval = await apiEventually('master site-status after removal', MASTER_URL, '/api/directory-admin/site-status', { token: masterToken }, undefined, 20000) || {};
+    if (!afterRemoval.config || afterRemoval.config.registeredSpokesCount !== 1) {
       fail(`expected 1 registered spoke after removal, got ${afterRemoval.config.registeredSpokesCount}`);
     }
 
