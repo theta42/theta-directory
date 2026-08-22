@@ -85,6 +85,21 @@ else
 	warn "  Redis snapshot failed -- not included in this backup"
 fi
 
+if [ -f ./config/inventory.sqlite ]; then
+	info "Snapshotting SQLite inventory.sqlite..."
+	if command -v sqlite3 >/dev/null 2>&1; then
+		sqlite3 ./config/inventory.sqlite ".backup '${dest}/inventory.sqlite'" || cp -a ./config/inventory.sqlite "${dest}/inventory.sqlite"
+		info "  -> ${dest}/inventory.sqlite (atomic backup)"
+	elif docker exec "$CONTAINER" sqlite3 /config/inventory.sqlite ".backup /tmp/inventory.sqlite" 2>/dev/null; then
+		docker cp "${CONTAINER}:/tmp/inventory.sqlite" "${dest}/inventory.sqlite" >/dev/null 2>&1
+		docker exec "$CONTAINER" rm -f /tmp/inventory.sqlite 2>/dev/null || true
+		info "  -> ${dest}/inventory.sqlite (container atomic backup)"
+	else
+		cp -a ./config/inventory.sqlite* "${dest}/" 2>/dev/null || true
+		info "  -> ${dest}/inventory.sqlite (file copy)"
+	fi
+fi
+
 if [ -d ./config ]; then
 	info "Copying ./config..."
 	cp -a ./config "${dest}/config"

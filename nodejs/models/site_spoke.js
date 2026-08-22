@@ -23,6 +23,12 @@ class SiteSpoke extends Model {
 		return crypto.randomBytes(24).toString('base64url');
 	}
 
+	static async authenticatePushToken(rawToken) {
+		if (!rawToken || typeof rawToken !== 'string') return null;
+		const spokes = await this.list().catch(() => []);
+		return (spokes || []).find((s) => s.pushToken === rawToken) || null;
+	}
+
 	static fields = {
 		id: { type: 'uuid', primaryKey: true },
 		endpoint: { type: 'string', isRequired: true, unique: true },

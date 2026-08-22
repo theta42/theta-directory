@@ -63,6 +63,16 @@ async function initORM() {
     });
     console.log('[initORM] ORM initialized successfully');
     console.log('[initORM] Resource.orm =', !!Resource.orm, 'Token.orm =', !!Token.orm);
+    const adapter = Resource.orm && Resource.orm.adapters && Resource.orm.adapters.sequelize;
+    if (adapter && adapter.sequelize && adapter.sequelize.getDialect() === 'sqlite') {
+      try {
+        await adapter.sequelize.query('PRAGMA journal_mode = WAL;');
+        await adapter.sequelize.query('PRAGMA busy_timeout = 10000;');
+        await adapter.sequelize.query('PRAGMA synchronous = NORMAL;');
+      } catch (e) {
+        console.warn('[initORM] failed to set SQLite PRAGMAs:', e.message);
+      }
+    }
     await healSchema();
     await ensureUniqueIndexes();
     // Migrate PATs from Redis (pre-v2.24.8 store) into the replicated SQLite

@@ -1264,4 +1264,13 @@ router.post('/site-promote', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+router.post('/janitor', async (req, res, next) => {
+  try {
+    const { DirectoryJanitor } = require('../services/directory_janitor');
+    const heal = req.body && req.body.heal !== false;
+    const report = await DirectoryJanitor.runFullAudit(heal);
+    res.json({ status: 'ok', report });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;
