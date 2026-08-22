@@ -117,7 +117,11 @@ app.use('/api/ldif-import', middleware.auth, require('./routes/api_ldif_import')
 // Multi-site join (site join keys, master export, spoke join) — mounted before
 // the 404 catch-all; /api/site/export is reachable by other hosts with a
 // Bearer site-join-key (no admin session).
-app.use('/api/site', require('./routes/api_site'));
+const apiSiteRouter = require('./routes/api_site');
+app.use('/api/site', apiSiteRouter);
+if (typeof apiSiteRouter.startPeriodicResync === 'function') {
+  apiSiteRouter.startPeriodicResync();
+}
 // The WireGuard cluster control API. Auth is per-route inside (gateways,
 // admins, and users enrolling their own devices are three different levels).
 app.use('/api/mesh', require('./routes/api_mesh'));

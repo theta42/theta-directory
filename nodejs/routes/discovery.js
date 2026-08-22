@@ -139,6 +139,12 @@ router.get(['/access/:uid', '/access/:uid/:slug'], async (req, res, next) => {
 // Used by external agents (e.g. ldap-client) to push discovery data.
 router.post('/sync', async (req, res, next) => {
 	try {
+		const { isDirectoryAdmin } = require('@simpleworkjs/directory-schema');
+		const { withGroups } = require('../utils/user_groups');
+		const user = await withGroups(req.user);
+		if (!isDirectoryAdmin(user) && !user.isMachine) {
+			return res.status(403).json(envelope({ error: 'Only admins or machines can sync discovery' }));
+		}
 		const { DiscoveryReconciler } = require('../services/discovery_reconciler');
 		// Assuming the caller provides a source name and payload
 		const source = req.body.source || 'agent';
