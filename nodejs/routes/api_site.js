@@ -339,26 +339,21 @@ router.post('/spokes', async (req, res, next) => {
       }
     }
 
-    // Ensure a kind: 'site' Resource exists in the Master's Directory catalog
-    // so the master and other spokes see this spoke in the Directory tree.
+    // Ensure a kind: 'site' Resource, host, and stack services exist in the
+    // Master's Directory catalog so the master and all spokes see this spoke's
+    // entire topology in the Directory tree.
     if (spoke.siteSlug) {
       try {
-        // Must match the slug the SPOKE'S OWN bootstrap seeds for itself
-        // (theta-suite bootstrap/bootstrap.js: `site_${slugify(CFG_SITE_NAME)}`,
-        // where slugify collapses runs of non-alphanumerics to a DASH). This
-        // used to collapse them to an underscore instead, so a two-word site
-        // name produced `site_staten_island` here and `site_staten-island`
-        // there: every multi-word site ended up listed TWICE in the directory
-        // tree, once per convention, with neither row knowing about the other.
         const cleanName = spoke.siteSlug.replace(/^site[-_]/i, '');
-        const resourceSlug = `site_${cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}`;
-        const existingSite = await Resource.getBySlug(resourceSlug).catch(() => null);
-        if (!existingSite) {
-          await Resource.create({
+        const cleanSlug = cleanName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+        const siteSlug = `site_${cleanSlug}`;
+        let siteRes = await Resource.getBySlug(siteSlug).catch(() => null);
+        if (!siteRes) {
+          siteRes = await Resource.create({
             id: crypto.randomUUID(),
             kind: 'site',
             name: cleanName || spoke.siteSlug,
-            slug: resourceSlug,
+            slug: siteSlug,
             metadata: {
               isCurrentSite: false,
               isSpoke: true,
@@ -367,10 +362,63 @@ router.post('/spokes', async (req, res, next) => {
             },
             created_on: now
           });
-          require('../utils/site_replicate').replicateToSpokes('spoke-site-created');
         }
+
+        // Auto-create spoke stack host parented to the site
+        const hostSlug = `host_theta-suite-${cleanSlug}`;
+        let hostRes = await Resource.getBySlug(hostSlug).catch(() => null);
+        if (!hostRes) {
+          hostRes = await Resource.create({
+            id: crypto.randomUUID(),
+            kind: 'host',
+            name: `theta-suite-${cleanName}`,
+            slug: hostSlug,
+            metadata: {
+              subType: 'linux',
+              isSpokeHost: true,
+              endpoint: cleanEndpoint,
+              ip: spoke.meshIp || null,
+              address: cleanEndpoint
+            },
+            created_on: now
+          });
+        }
+        const siteEdge = await ResourceEdge.list({ where: { parentId: siteRes.id, childId: hostRes.id } });
+        if (!siteEdge || siteEdge.length === 0) {
+          await ResourceEdge.create({ id: crypto.randomUUID(), parentId: siteRes.id, childId: hostRes.id, relation: 'hosts' });
+        }
+
+        // Auto-create spoke bootstrap services parented to the spoke host
+        const spokeHost = cleanEndpoint.replace(/^https?:\/\//, '').replace(/\/+$/, '');
+        const services = [
+          { name: `SSO Manager (${cleanName})`, slug: `sso-manager-${cleanSlug}`, subType: 'web', port: 3001, address: `https://${spokeHost}` },
+          { name: `Proxy (${cleanName})`, slug: `proxy-${cleanSlug}`, subType: 'web', port: 3000, address: spoke.publicHost ? `https://${spoke.publicHost}` : `https://${spokeHost.replace(/^sso\./, 'proxy.')}` },
+          { name: `OpenLDAP (${cleanName})`, slug: `openldap-${cleanSlug}`, subType: 'openldap', port: 389, address: `ldaps://${spokeHost}:636` },
+          { name: `OpenResty (${cleanName})`, slug: `openresty-${cleanSlug}`, subType: 'openresty', port: 443, address: `https://${spokeHost}` },
+          { name: `Jump Host (${cleanName})`, slug: `jump-host-${cleanSlug}`, subType: 'jump-host', port: 2222, address: `ssh://${spokeHost.replace(/^sso\./, 'jump.')}:2222` }
+        ];
+
+        for (const s of services) {
+          let svcRes = await Resource.getBySlug(s.slug).catch(() => null);
+          if (!svcRes) {
+            svcRes = await Resource.create({
+              id: crypto.randomUUID(),
+              kind: 'service',
+              name: s.name,
+              slug: s.slug,
+              metadata: { subType: s.subType, port: s.port, address: s.address, requestable: false },
+              created_on: now
+            });
+          }
+          const svcEdge = await ResourceEdge.list({ where: { parentId: hostRes.id, childId: svcRes.id } });
+          if (!svcEdge || svcEdge.length === 0) {
+            await ResourceEdge.create({ id: crypto.randomUUID(), parentId: hostRes.id, childId: svcRes.id, relation: 'hosts' });
+          }
+        }
+
+        require('../utils/site_replicate').replicateToSpokes('spoke-site-created');
       } catch (err) {
-        console.warn(`[site] could not auto-create site resource for spoke: ${err.message}`);
+        console.warn(`[site] could not auto-create site/host/services resources for spoke: ${err.message}`);
       }
     }
 
@@ -506,7 +554,8 @@ router.post('/spokes/agent-report', async (req, res, next) => {
     if (!cfg.isMaster) return res.status(400).json({ status: 'error', message: 'only master receives agent reports' });
     const rawKey = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const key = await SiteJoinKey.authenticate(rawKey);
-    if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
+    const spoke = !key ? await SiteSpoke.authenticatePushToken(rawKey) : null;
+    if (!key && !spoke) return res.status(401).json({ status: 'error', message: 'invalid or revoked site credentials' });
 
     const { agent: a, discovery, telemetry } = req.body || {};
     if (!a || !a.id) return res.status(400).json({ status: 'error', message: 'agent data is required' });
@@ -1296,14 +1345,22 @@ async function adoptFromMaster({ masterUrl, joinKey }) {
     }
     try {
       const localKeys = await AgentJoinKey.list();
+      const cutoff = Math.floor(Date.now() / 1000) - 3600;
       for (const local of localKeys || []) {
         if (exportedKeyIds.has(local.id)) continue;
+        if (local.created_on && local.created_on > cutoff && !local.revoked) continue;
         await local.delete();
       }
     } catch (e) {
       console.warn('[site] could not prune deleted agent join keys:', e.message);
     }
   }
+
+  try {
+    const userMod = require('../models/user');
+    const UserModel = userMod.User || userMod;
+    if (UserModel && typeof UserModel.clearCache === 'function') UserModel.clearCache();
+  } catch (e) {}
 
   return { imp, ldapNote, signingKeyNote, exportData, base, apiTokensImported };
 }

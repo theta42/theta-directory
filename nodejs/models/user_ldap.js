@@ -28,7 +28,7 @@ function hashPasswordSSHA512(password) {
 const cache = new LRUCache({
 	// how long to live in ms
 	ttlAutopurge: true,
-  ttl: 1000 * 60 * 5,
+  ttl: 1000 * 15,
 });
 
 function makeClient() {

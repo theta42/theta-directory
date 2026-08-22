@@ -108,7 +108,11 @@ describe('spoke_write_proxy middleware', () => {
     ['POST', '/api/webhook/abc', 'an inbound webhook authenticated by its own payload'],
     ['POST', '/api/discovery/run', 'a discovery plugin run, which is per-site'],
     ['POST', '/api/access-requests', 'a request row that is not replicated back'],
-    ['POST', '/api/agent/join-keys', 'a join key that has to be redeemable here']
+    ['POST', '/api/user', 'LDAP users replicate via OpenLDAP MMR'],
+    ['PUT', '/api/user/alice', 'LDAP user updates replicate via OpenLDAP MMR'],
+    ['POST', '/api/group', 'LDAP groups replicate via OpenLDAP MMR'],
+    ['DELETE', '/api/group/devs', 'LDAP group deletion replicates via OpenLDAP MMR'],
+    ['POST', '/api/ldif-import', 'LDIF import replicates via OpenLDAP MMR']
   ])('%s %s stays local (%s)', async (method, url) => {
     jest.spyOn(siteConfig, 'get').mockReturnValue(SPOKE);
     const next = jest.fn();
@@ -118,15 +122,11 @@ describe('spoke_write_proxy middleware', () => {
   });
 
   test.each([
-    ['POST', '/api/user'],
-    ['PUT', '/api/user/alice'],
-    ['POST', '/api/group'],
-    ['DELETE', '/api/group/devs'],
     ['POST', '/api/directory-admin/resources'],
     ['POST', '/api/agent/enroll'],
     ['PUT', '/api/agent/nodes/abc-123'],
+    ['POST', '/api/agent/join-keys'],
     ['POST', '/api/tos/accept'],
-    ['POST', '/api/ldif-import'],
     ['POST', '/api/api-token'],
     ['PUT', '/api/api-token/tok-123'],
     ['DELETE', '/api/api-token/tok-123'],
@@ -176,7 +176,7 @@ describe('spoke_write_proxy middleware', () => {
   test('does not leak the caller\'s own credentials upstream', async () => {
     jest.spyOn(siteConfig, 'get').mockReturnValue(SPOKE);
     const req = makeReq({
-      url: '/api/user/alice',
+      url: '/api/directory-admin/resources/res-123',
       method: 'PUT',
       headers: { 'auth-token': 'local-session-uuid', cookie: 'sid=abc', 'content-type': 'application/json' },
       user: { uid: 'alice' }
@@ -193,7 +193,7 @@ describe('spoke_write_proxy middleware', () => {
     const { Auth } = require('../models/auth');
     jest.spyOn(Auth, 'checkToken').mockResolvedValue({ uid: 'bob' });
 
-    const req = makeReq({ url: '/api/user/accept-tos', headers: { 'auth-token': 'token-123' } });
+    const req = makeReq({ url: '/api/tos/accept', headers: { 'auth-token': 'token-123' } });
     const res = makeRes();
     await spokeWriteProxy(req, res, jest.fn());
 
@@ -204,7 +204,7 @@ describe('spoke_write_proxy middleware', () => {
   test('hands an unresolvable caller to the local router rather than inventing an identity', async () => {
     jest.spyOn(siteConfig, 'get').mockReturnValue(SPOKE);
     const next = jest.fn();
-    await spokeWriteProxy(makeReq({ url: '/api/user' , headers: {} }), makeRes(), next);
+    await spokeWriteProxy(makeReq({ url: '/api/directory-admin/resources' , headers: {} }), makeRes(), next);
     expect(next).toHaveBeenCalledTimes(1);
     expect(mockFetchCalls.length).toBe(0);
   });
@@ -223,38 +223,12 @@ describe('spoke_write_proxy middleware', () => {
 
     const res = makeRes();
     await spokeWriteProxy(
-      makeReq({ url: '/api/user/accept-tos', headers: { 'auth-token': 'token-456' } }), res, jest.fn()
+      makeReq({ url: '/api/tos/accept', headers: { 'auth-token': 'token-456' } }), res, jest.fn()
     );
 
     expect(res.statusCode).toBe(200);
     expect(UserVerification.getOrCreate).toHaveBeenCalledWith('alice');
     expect(markTosAcceptedSpy).toHaveBeenCalled();
-    expect(clearCacheSpy).toHaveBeenCalled();
-  });
-
-  test('applies a forwarded DOB update locally so onboarding can proceed immediately', async () => {
-    jest.spyOn(siteConfig, 'get').mockReturnValue(SPOKE);
-
-    const { User } = require('../models/user');
-    const clearCacheSpy = jest.spyOn(User, 'clearCache').mockImplementation(() => {});
-    const updateSpy = jest.fn().mockResolvedValue({});
-    jest.spyOn(User, 'get').mockResolvedValue({ update: updateSpy });
-
-    const res = makeRes();
-    await spokeWriteProxy(
-      makeReq({
-        method: 'PUT',
-        url: '/api/user/alice',
-        user: { uid: 'alice' },
-        body: { dateOfBirth: '1990-06-15' }
-      }),
-      res,
-      jest.fn()
-    );
-
-    expect(res.statusCode).toBe(200);
-    expect(User.get).toHaveBeenCalledWith('alice');
-    expect(updateSpy).toHaveBeenCalledWith({ dateOfBirth: '1990-06-15' });
     expect(clearCacheSpy).toHaveBeenCalled();
   });
 
@@ -264,7 +238,7 @@ describe('spoke_write_proxy middleware', () => {
 
     const res = makeRes();
     const next = jest.fn();
-    await spokeWriteProxy(makeReq({ url: '/api/user', user: { uid: 'bob' }, body: { uid: 'bob' } }), res, next);
+    await spokeWriteProxy(makeReq({ url: '/api/directory-admin/resources', user: { uid: 'bob' }, body: { uid: 'bob' } }), res, next);
 
     expect(next).not.toHaveBeenCalled();
     expect(res.statusCode).toBe(503);
@@ -276,16 +250,16 @@ describe('spoke_write_proxy middleware', () => {
     let redirected = false;
 
     mockFetchImpl = async (url, opts) => {
-      if (url === 'https://master.example.com/api/user') {
+      if (url === 'https://master.example.com/api/directory-admin/resources') {
         return {
           status: 301,
           ok: false,
-          headers: new Map([['location', 'https://master.example.com/api/user/redirected']]),
+          headers: new Map([['location', 'https://master.example.com/api/directory-admin/resources/redirected']]),
           get(name) { return this.headers.get(name.toLowerCase()); },
           entries() { return this.headers.entries(); }
         };
       }
-      if (url === 'https://master.example.com/api/user/redirected') {
+      if (url === 'https://master.example.com/api/directory-admin/resources/redirected') {
         redirected = true;
         expect(opts.method).toBe('POST');
         expect(opts.headers['authorization']).toBe('Bearer push_test_token');
@@ -304,7 +278,7 @@ describe('spoke_write_proxy middleware', () => {
 
     const res = makeRes();
     await spokeWriteProxy(
-      makeReq({ url: '/api/user', user: { uid: 'alice' }, body: { name: 'Alice' } }),
+      makeReq({ url: '/api/directory-admin/resources', user: { uid: 'alice' }, body: { name: 'Alice' } }),
       res,
       jest.fn()
     );
@@ -317,7 +291,7 @@ describe('spoke_write_proxy middleware', () => {
   test('returns 503 with a recovery hint when this spoke has no push token', async () => {
     jest.spyOn(siteConfig, 'get').mockReturnValue({ ...SPOKE, replicationPushToken: undefined });
     const res = makeRes();
-    await spokeWriteProxy(makeReq({ url: '/api/user', user: { uid: 'bob' } }), res, jest.fn());
+    await spokeWriteProxy(makeReq({ url: '/api/directory-admin/resources', user: { uid: 'bob' } }), res, jest.fn());
     expect(res.statusCode).toBe(503);
     expect(res.jsonBody.message).toContain('Re-register');
     expect(mockFetchCalls.length).toBe(0);
