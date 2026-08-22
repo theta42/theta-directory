@@ -57,7 +57,7 @@ async function desiredConfig() {
 		return { serverId: 1, peers };
 	}
 
-	if (!cfg.masterUrl || !cfg.masterJoinKey || !cfg.selfUrl) {
+	if (!cfg.masterUrl || (!cfg.masterJoinKey && !cfg.replicationPushToken) || !cfg.selfUrl) {
 		return null; // not enough to ask with; nothing to converge on
 	}
 
@@ -66,7 +66,7 @@ async function desiredConfig() {
 		const url = `${String(cfg.masterUrl).replace(/\/+$/, '')}/api/site/ldap-peers` +
 			`?endpoint=${encodeURIComponent(cfg.selfUrl)}`;
 		const resp = await fetchWithAuthRedirect(url, {
-			headers: { Authorization: 'Bearer ' + cfg.masterJoinKey }
+			headers: { Authorization: 'Bearer ' + (cfg.replicationPushToken || cfg.masterJoinKey) }
 		}, { timeoutMs: 10000 });
 		if (!resp.ok) return null;
 		const body = await resp.json();

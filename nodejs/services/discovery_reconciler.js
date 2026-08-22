@@ -22,14 +22,14 @@ class DiscoveryReconciler {
   static async reconcile(sourceName, payload, options = {}) {
     const siteConfig = require('../utils/site_config');
     const cfg = siteConfig.get();
-    if (!cfg.isMaster && cfg.masterUrl && cfg.masterJoinKey && !options._localOnly) {
+    if (!cfg.isMaster && cfg.masterUrl && (cfg.masterJoinKey || cfg.replicationPushToken) && !options._localOnly) {
       try {
         const { fetchWithAuthRedirect } = require('../utils/fetch_with_auth_redirect');
         const targetUrl = String(cfg.masterUrl).replace(/\/+$/, '') + '/api/site/spokes/discovery-report';
         const resp = await fetchWithAuthRedirect(targetUrl, {
           method: 'POST',
           headers: {
-            Authorization: 'Bearer ' + cfg.masterJoinKey,
+            Authorization: 'Bearer ' + (cfg.replicationPushToken || cfg.masterJoinKey),
             'Content-Type': 'application/json'
           },
           body: JSON.stringify({ sourceName, payload, options })
