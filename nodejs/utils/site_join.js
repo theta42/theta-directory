@@ -448,7 +448,11 @@ async function hasNonBootstrapRows(model, kind) {
     if (!Array.isArray(rows) || !rows.length) return false;
     const seeds = kind === 'plugin' ? BOOTSTRAP_PLUGIN_SLUGS : BOOTSTRAP_OAUTH_CLIENTS;
     const key = kind === 'plugin' ? 'slug' : 'name';
-    return rows.some(r => !seeds.has((r && r[key]) || ''));
+    return rows.some(r => {
+      const val = (r && r[key]) || '';
+      if (kind === 'plugin') return !seeds.has(val);
+      return !val.startsWith('theta-proxy') && !val.startsWith('theta-jump');
+    });
   } catch (e) {
     return false;
   }
