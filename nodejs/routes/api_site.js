@@ -1503,3 +1503,18 @@ router.post('/join', async (req, res, next) => {
 });
 
 module.exports = router;
+
+function startPeriodicResync() {
+  setInterval(async () => {
+    const cfg = siteConfig.get();
+    if (cfg.isMaster || !cfg.masterUrl || !cfg.masterJoinKey) return;
+    try {
+      const imp = await adoptFromMaster({ masterUrl: cfg.masterUrl, joinKey: cfg.masterJoinKey });
+      reconcileSoon('periodic-resync');
+    } catch (err) {
+      console.error('[site] Periodic resync failed:', err.message);
+    }
+  }, 5 * 60 * 1000);
+}
+
+module.exports.startPeriodicResync = startPeriodicResync;
