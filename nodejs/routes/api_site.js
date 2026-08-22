@@ -489,7 +489,8 @@ router.get('/ldap-peers', async (req, res, next) => {
     const auth = req.headers.authorization || '';
     const rawKey = auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
     const key = await SiteJoinKey.authenticate(rawKey);
-    if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
+    const spokeAuth = !key ? await SiteSpoke.authenticatePushToken(rawKey) : null;
+    if (!key && !spokeAuth) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key or push token' });
 
     const callerEndpoint = req.query.endpoint;
     if (!callerEndpoint) {
@@ -530,7 +531,8 @@ router.post('/spokes/discovery-report', async (req, res, next) => {
     if (!cfg.isMaster) return res.status(400).json({ status: 'error', message: 'only master receives discovery reports' });
     const rawKey = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
     const key = await SiteJoinKey.authenticate(rawKey);
-    if (!key) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key' });
+    const spokeAuth = !key ? await SiteSpoke.authenticatePushToken(rawKey) : null;
+    if (!key && !spokeAuth) return res.status(401).json({ status: 'error', message: 'invalid or revoked site join key or push token' });
 
     const { sourceName, payload, options } = req.body || {};
     if (!sourceName || !payload) {
