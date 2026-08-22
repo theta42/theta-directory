@@ -1,3 +1,9 @@
+## [2.24.21] - 2026-08-22
+- fix: **Agent Location Parenting Resolution**. Fixed a bug where `nyc-do` resource parenting dropped agents into the master site if they were registered with a domain rather than an IP, as the location metadata was not passed to the `DiscoveryReconciler`.
+- fix: **Fire-and-Forget Replication**. The system lacked catch-up guarantees. Added a 5-minute periodic `adoptFromMaster` sync on Spokes to ensure any missed webhooks do not cause permanent data drift.
+- fix: **Unauthenticated Agent Discovery**. The agent discovery/telemetry pipeline `/api/discovery/sync` endpoint previously allowed unauthenticated payload injection. This has now been restricted to admins and machine accounts.
+- fix: **Spoke Onboarding Requirement Resets**. Fixed a bug where Master overwrote Spoke onboarding states (TOS, Passwords) upon resync because Spoke proxies were not configured to forward these SQLite model writes back to the Master via `spoke_write_proxy.js`.
+
 ## [2.24.15] - $(date +%Y-%m-%d)
 - fix: `siteIsFresh` now correctly ignores bootstrap-seeded OAuth clients even if they were given a site-specific suffix (e.g. `theta-proxy (holycore)`). This allows a brand new bootstrapped spoke with a custom site name to successfully join a master.
 ## [2.24.14] - 2026-08-22
