@@ -459,6 +459,24 @@ class AgentManager {
       const { ResourceEdge } = require('../models/resource');
 
       const hostSlug = `host-${discovery.hostname.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`;
+      // Find target site based on location or IP
+      const sites = await Resource.list({ where: { kind: 'site' } });
+      let targetSite = null;
+      if (discovery.location && discovery.location !== 'default') {
+        targetSite = sites.find(s => 
+          s.name === discovery.location || 
+          s.slug === discovery.location || 
+          s.slug === `site_${discovery.location}`
+        );
+      }
+      if (!targetSite && discovery.public_ip) {
+        targetSite = sites.find(s => {
+          const siteIp = (s.metadata?.public_ip || s.metadata?.ip || s.metadata?.address || '').trim();
+          return siteIp && (siteIp === discovery.public_ip || siteIp.includes(discovery.public_ip));
+        });
+      }
+      if (!targetSite) targetSite = sites.find(s => s.metadata?.isCurrentSite) || sites[0];
+
       await DiscoveryReconciler.reconcile('theta-agent', {
         resources: [{
           kind: 'host',
@@ -467,7 +485,7 @@ class AgentManager {
           metadata: { ...metadata, subType: 'linux', managed: true }
         }],
         edges: []
-      });
+      }, { location: targetSite ? targetSite.name : undefined });
 
       // Find the matched or created host resource
       const allHosts = await Resource.list({ where: { kind: 'host' } });
@@ -482,34 +500,7 @@ class AgentManager {
         await agent.update({ resourceId: hostRes.id }).catch(() => {});
 
         // Attach host to matching Site by Public IP if not already parented
-        const existingEdges = await ResourceEdge.list({ where: { childId: hostRes.id } });
-        if (existingEdges.length === 0) {
-          const sites = await Resource.list({ where: { kind: 'site' } });
-let targetSite = null;
-          if (discovery.location && discovery.location !== 'default') {
-            targetSite = sites.find(s => 
-              s.name === discovery.location || 
-              s.slug === discovery.location || 
-              s.slug === `site_${discovery.location}`
-            );
-          }
-          if (!targetSite && discovery.public_ip) {
-            targetSite = sites.find(s => {
-              const siteIp = (s.metadata?.public_ip || s.metadata?.ip || s.metadata?.address || '').trim();
-              return siteIp && (siteIp === discovery.public_ip || siteIp.includes(discovery.public_ip));
-            });
-          }
-          if (!targetSite) targetSite = sites.find(s => s.metadata?.isCurrentSite) || sites[0];
-
-          if (targetSite) {
-            await ResourceEdge.create({
-              id: crypto.randomUUID(),
-              parentId: targetSite.id,
-              childId: hostRes.id,
-              relation: 'hosts'
-            }).catch(() => {});
-          }
-        }
+        // Edge creation is now handled by DiscoveryReconciler above
       }
     } catch (err) {
       // Never let a directory write break the agent connection.
