@@ -1,3 +1,6 @@
+## [2.24.14] - 2026-08-22
+- Added docs/KNOWN_ISSUES.md for multi-site known limits and tradeoffs.
+
 ## v2.24.11
 - fix: **Agent join key cross-site replication and auto-enrollment across spokes.** Added `toReplica()` method to `AgentJoinKey` to preserve `keyHash` during export. Added `replicateOnFinish` to `POST /api/agent/join-keys`, `POST /join-keys/:id/revoke`, and `DELETE /join-keys/:id` in `routes/api_agent.js`. Added `agentJoinKeys` export and adoption/pruning during resync in `routes/api_site.js`, allowing agents on spokes to authenticate and enroll against master-issued join keys immediately.
 - fix: **Atomic OpenLDAP runtime configuration modifications.** Consolidated database attribute modifications (`olcSyncrepl` and `olcMirrorMode`) in `utils/ldap_runtime_config.js` into a single atomic LDIF modify operation with hyphen separators, preventing `slapd` deadlocks when applying live multi-master syncrepl configuration changes.
