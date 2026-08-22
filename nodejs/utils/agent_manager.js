@@ -485,14 +485,21 @@ class AgentManager {
         const existingEdges = await ResourceEdge.list({ where: { childId: hostRes.id } });
         if (existingEdges.length === 0) {
           const sites = await Resource.list({ where: { kind: 'site' } });
-          let targetSite = null;
-          if (discovery.public_ip) {
+let targetSite = null;
+          if (discovery.location && discovery.location !== 'default') {
+            targetSite = sites.find(s => 
+              s.name === discovery.location || 
+              s.slug === discovery.location || 
+              s.slug === `site_${discovery.location}`
+            );
+          }
+          if (!targetSite && discovery.public_ip) {
             targetSite = sites.find(s => {
               const siteIp = (s.metadata?.public_ip || s.metadata?.ip || s.metadata?.address || '').trim();
               return siteIp && (siteIp === discovery.public_ip || siteIp.includes(discovery.public_ip));
             });
           }
-          if (!targetSite) targetSite = sites[0];
+          if (!targetSite) targetSite = sites.find(s => s.metadata?.isCurrentSite) || sites[0];
 
           if (targetSite) {
             await ResourceEdge.create({
