@@ -416,7 +416,8 @@ router.post('/spokes', async (req, res, next) => {
           }
         }
 
-        require('../utils/site_replicate').replicateToSpokes('spoke-site-created');
+        const { replicateOnFinish } = require('../utils/replicate_on_finish');
+        replicateOnFinish(res);
       } catch (err) {
         console.warn(`[site] could not auto-create site/host/services resources for spoke: ${err.message}`);
       }
