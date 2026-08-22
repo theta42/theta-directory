@@ -1,3 +1,5 @@
+## [2.24.15] - $(date +%Y-%m-%d)
+- fix: `siteIsFresh` now correctly ignores bootstrap-seeded OAuth clients even if they were given a site-specific suffix (e.g. `theta-proxy (holycore)`). This allows a brand new bootstrapped spoke with a custom site name to successfully join a master.
 ## [2.24.14] - 2026-08-22
 - Added docs/KNOWN_ISSUES.md for multi-site known limits and tradeoffs.
 
