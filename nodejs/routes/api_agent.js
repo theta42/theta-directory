@@ -46,13 +46,13 @@ function logAgentAudit(action, details) {
 async function pushAgentToMaster(agent, token) {
   const siteConfig = require('../utils/site_config');
   const cfg = siteConfig.get();
-  if (cfg.isMaster || !cfg.masterUrl || !cfg.masterJoinKey) return;
+  if (cfg.isMaster || !cfg.masterUrl || (!cfg.masterJoinKey && !cfg.replicationPushToken)) return;
   try {
     const { fetchWithAuthRedirect } = require('../utils/fetch_with_auth_redirect');
     const targetUrl = String(cfg.masterUrl).replace(/\/+$/, '') + '/api/site/spokes/agent-report';
     await fetchWithAuthRedirect(targetUrl, {
       method: 'POST',
-      headers: { Authorization: 'Bearer ' + cfg.masterJoinKey, 'Content-Type': 'application/json' },
+      headers: { Authorization: 'Bearer ' + (cfg.replicationPushToken || cfg.masterJoinKey), 'Content-Type': 'application/json' },
       body: JSON.stringify({
         agent: {
           id: agent.id,

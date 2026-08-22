@@ -119,7 +119,7 @@ class AgentManager {
     try {
       const siteConfig = require('./site_config');
       const cfg = siteConfig.get();
-      if (!cfg.isMaster && cfg.masterUrl && cfg.masterJoinKey) {
+      if (!cfg.isMaster && cfg.masterUrl && (cfg.masterJoinKey || cfg.replicationPushToken)) {
         const now = Date.now();
         if (!this._lastPushMap) this._lastPushMap = new Map();
         const lastPush = this._lastPushMap.get(agent.id) || 0;
@@ -129,7 +129,7 @@ class AgentManager {
           const targetUrl = String(cfg.masterUrl).replace(/\/+$/, '') + '/api/site/spokes/agent-report';
           fetchWithAuthRedirect(targetUrl, {
             method: 'POST',
-            headers: { Authorization: 'Bearer ' + cfg.masterJoinKey, 'Content-Type': 'application/json' },
+            headers: { Authorization: 'Bearer ' + (cfg.replicationPushToken || cfg.masterJoinKey), 'Content-Type': 'application/json' },
             body: JSON.stringify({
               agent: {
                 id: agent.id,

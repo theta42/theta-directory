@@ -56,34 +56,27 @@
 const siteConfig = require('../utils/site_config');
 const { fetchWithAuthRedirect } = require('../utils/fetch_with_auth_redirect');
 
-// Writes the master owns AND replicates back to this node.
+// Writes the master owns in SQL AND replicates back to this node via export/resync.
 //
-//   /user, /group, /ldif-import  → LDAP identity; comes back over MMR syncrepl
 //   /tos                         → UserVerification; in POST /api/site/export
 //   /directory-admin             → the Resource catalog; in the export
 //   /agent/enroll, /agent/nodes  → Agent fleet rows; in the export
 //   /api-token                   → ApiToken (PAT) rows; in the export
 //
-// Two neighbours that look like they belong here and do NOT, both for the same
-// reason -- the record itself is not replicated, so forwarding it would file it
-// somewhere the site that created it can never see:
+// Operations that stay LOCAL (do NOT forward):
 //
-//   /access-requests    the AccessRequest row is local. Forwarding it means a
-//                       user raises a request at their own site and neither
-//                       they nor the local approver can ever see it. Approval
-//                       does an LDAP group add, and the local slapd is a real
-//                       multi-provider MMR peer, so the grant still reaches the
-//                       whole cluster.
-//   /agent/join-keys    AgentJoinKey is local. A key minted here has to be
-//                       redeemable here -- that is the entire enrolment flow.
+//   /user, /group, /ldif-import  OpenLDAP runs full Multi-Master Replication (MMR)
+//                                directly between all nodes in the mesh. Writing
+//                                locally gives instant read-your-own-writes consistency,
+//                                avoids stale cache races, and replicates to master/peers.
+//   /access-requests             the AccessRequest row is local.
+//   /agent/join-keys             AgentJoinKey is local and replicated via export/resync.
 const FORWARD_PATHS = [
-  /^\/api\/user(\/|$)/,
-  /^\/api\/group(\/|$)/,
-  /^\/api\/ldif-import(\/|$)/,
   /^\/api\/tos(\/|$)/,
   /^\/api\/directory-admin(\/|$)/,
   /^\/api\/agent\/enroll(\/|$)/,
   /^\/api\/agent\/nodes(\/|$)/,
+  /^\/api\/agent\/join-keys(\/|$)/,
   /^\/api\/api-token(\/|$)/
 ];
 
@@ -184,7 +177,7 @@ async function refreshLocalDerivedState(req, user) {
   const path = absolutePath(req);
   try {
     const { UserVerification } = require('../models/verification');
-    if (/^\/api\/user\/accept-tos(\/|$)/.test(path)) {
+    if (/^\/api\/(user\/accept-tos|tos\/accept)(\/|$)/.test(path)) {
       const verif = await UserVerification.getOrCreate(user.uid);
       await verif.markTosAccepted();
     } else if (/^\/api\/user\/password(\/|$)/.test(path)) {
