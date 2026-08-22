@@ -73,6 +73,8 @@ const { fetchWithAuthRedirect } = require('../utils/fetch_with_auth_redirect');
 //   /agent/join-keys             AgentJoinKey is local and replicated via export/resync.
 const FORWARD_PATHS = [
   /^\/api\/tos(\/|$)/,
+  /^\/api\/user\/accept-tos(\/|$)/,
+  /^\/api\/user\/([^\/]+\/)?password(\/|$)/,
   /^\/api\/directory-admin(\/|$)/,
   /^\/api\/agent\/enroll(\/|$)/,
   /^\/api\/agent\/nodes(\/|$)/,
@@ -180,7 +182,7 @@ async function refreshLocalDerivedState(req, user) {
     if (/^\/api\/(user\/accept-tos|tos\/accept)(\/|$)/.test(path)) {
       const verif = await UserVerification.getOrCreate(user.uid);
       await verif.markTosAccepted();
-    } else if (/^\/api\/user\/password(\/|$)/.test(path)) {
+    } else if (/^\/api\/user\/([^\/]+\/)?password(\/|$)/.test(path)) {
       const verif = await UserVerification.getOrCreate(user.uid);
       await verif.update({ password_must_change: false });
     }
