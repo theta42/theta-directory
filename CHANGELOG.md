@@ -1,3 +1,13 @@
+## [2.25.2] - 2026-08-23
+- fix: **Dependabot security alerts.** Patched all three open transitive-dependency
+  alerts via npm overrides (no direct-dependency API changes): `js-yaml` 3.15.0 →
+  3.15.1 (GHSA-5p4m-2wfm-xmqj, quadratic CPU in `!!omap` — dev/test chain via
+  istanbul), `xml2js` 0.4.23 → 0.5.0 (GHSA-776f-qx25-q3cc, prototype pollution;
+  reached through `node-nmap`'s nmap-XML parsing), and `uuid` 8.3.2 → 11.1.1 under
+  `sequelize` (GHSA-w5hq-g745-h8pq, missing buffer bounds check in v3/v5/v6).
+  Verified `require("uuid").v1/.v4` (sequelize) and `xml2js.parseString` callbacks
+  (node-nmap) against the upgraded majors.
+
 ## [2.25.1] - 2026-08-23
 - fix: **Install Agent authorize page error handling.** The `/install-agent/authorize`
   page (opened by the Windows installer's join-key button) now uses the shared
