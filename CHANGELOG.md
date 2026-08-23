@@ -1,4 +1,4 @@
-## [Unreleased]
+## [2.25.0] - 2026-08-22
 - feat: **"Download binaries" tab in the Install Agent modal.** The Directory
   app's Install Agent modal (Directory page) now has a third tab listing direct
   download URLs for the agent artifacts it stages under `/resources/theta-agent/`
