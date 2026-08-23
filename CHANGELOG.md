@@ -1,3 +1,11 @@
+## [Unreleased]
+- feat: **"Download binaries" tab in the Install Agent modal.** The Directory
+  app's Install Agent modal (Directory page) now has a third tab listing direct
+  download URLs for the agent artifacts it stages under `/resources/theta-agent/`
+  (`install.sh`, the Windows setup exe, `SHA256SUMS`), with copy buttons and a
+  HEAD-check that flags artifacts not staged by `setup.sh`. Useful for offline
+  and air-gapped hosts.
+
 ## [2.24.21] - 2026-08-22
 - fix: **Agent Location Parenting Resolution**. Fixed a bug where `nyc-do` resource parenting dropped agents into the master site if they were registered with a domain rather than an IP, as the location metadata was not passed to the `DiscoveryReconciler`.
 - fix: **Fire-and-Forget Replication**. The system lacked catch-up guarantees. Added a 5-minute periodic `adoptFromMaster` sync on Spokes to ensure any missed webhooks do not cause permanent data drift.

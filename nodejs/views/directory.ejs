@@ -2671,6 +2671,25 @@
   // stores a hash and cannot show it again.
   var pendingEnrollment = null;
 
+  // Download-binaries tab: fill in this Directory's artifact URLs and flag
+  // anything setup.sh did not stage (the Windows setup exe is fetched from
+  // GitHub at bring-up time, so it can legitimately be absent).
+  function populateAgentDownloadTab(origin) {
+    const base = String(origin || window.location.origin).replace(/\/+$/, '') + '/resources/theta-agent';
+    [['agent-dl-url-install', 'install.sh'],
+     ['agent-dl-url-winsetup', 'theta-agent-windows-amd64-setup.exe'],
+     ['agent-dl-url-sums', 'SHA256SUMS']].forEach(([id, file]) => {
+      $('#' + id).text(base + '/' + file);
+    });
+    ['install.sh', 'theta-agent-windows-amd64-setup.exe', 'SHA256SUMS'].forEach(file => {
+      fetch(base + '/' + file, { method: 'HEAD' }).then(res => {
+        if (!res.ok) $('#agent-download-status').append(
+          '<div class="text-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i><code>' + file +
+          '</code> is not staged on this Directory — re-run <code>setup.sh</code> to stage it.</div>');
+      }).catch(() => {});
+    });
+  }
+
   function openAgentInstallModal() {
     const currentOrigin = window.location.origin;
     pendingEnrollment = null;
@@ -2695,6 +2714,11 @@
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="agent-mode-pre-btn" data-bs-toggle="tab" data-bs-target="#agent-mode-pre" type="button" role="tab">
             <i class="fa-solid fa-id-badge me-1"></i> Pre-register this host
+          </button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="agent-mode-download-btn" data-bs-toggle="tab" data-bs-target="#agent-mode-download" type="button" role="tab">
+            <i class="fa-solid fa-download me-1"></i> Download binaries
           </button>
         </li>
       </ul>
@@ -2930,6 +2954,59 @@
       </div>
       </div>
         </div><!-- /pre-register pane -->
+
+        <!-- ── Download binaries: direct artifact links ─────────────────── -->
+        <div class="tab-pane fade" id="agent-mode-download" role="tabpanel">
+          <div class="card border-primary">
+            <div class="card-header py-2 fw-bold small bg-primary-subtle">
+              <i class="fa-solid fa-download me-1"></i> Agent binaries served by this Directory
+            </div>
+            <div class="card-body py-3">
+              <p class="small text-muted mb-3">
+                Direct downloads of the artifacts this Directory stages for agent installs
+                (<code>/resources/theta-agent/</code>). Handy for offline or air-gapped hosts,
+                or to inspect an installer before running it. The Windows setup exe and the
+                checksums are staged by <code>setup.sh</code> from the pinned theta-agent release.
+              </p>
+              <table class="table table-sm align-middle mb-2">
+                <thead>
+                  <tr>
+                    <th class="small">Artifact</th>
+                    <th class="small">Purpose</th>
+                    <th class="small" style="width:45%">URL</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="agent-download-table">
+                  <tr>
+                    <td class="small fw-bold"><code>install.sh</code></td>
+                    <td class="small text-muted">Linux bootstrap (fetches the agent binary from GitHub Releases)</td>
+                    <td><code class="small text-wrap" id="agent-dl-url-install" style="user-select: all;"></code></td>
+                    <td class="text-end"><button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand('agent-dl-url-install', 'agent-dl-copy-install')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>
+                  </tr>
+                  <tr>
+                    <td class="small fw-bold"><code>theta-agent-windows-amd64-setup.exe</code></td>
+                    <td class="small text-muted">Windows installer (fully offline: agent, tray, WireGuard, credential provider)</td>
+                    <td><code class="small text-wrap" id="agent-dl-url-winsetup" style="user-select: all;"></code></td>
+                    <td class="text-end"><button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand('agent-dl-url-winsetup', 'agent-dl-copy-winsetup')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>
+                  </tr>
+                  <tr>
+                    <td class="small fw-bold"><code>SHA256SUMS</code></td>
+                    <td class="small text-muted">Checksums for the staged artifacts — verify before running</td>
+                    <td><code class="small text-wrap" id="agent-dl-url-sums" style="user-select: all;"></code></td>
+                    <td class="text-end"><button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand('agent-dl-url-sums', 'agent-dl-copy-sums')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>
+                  </tr>
+                </tbody>
+              </table>
+              <div id="agent-download-status" class="small mb-2"></div>
+              <p class="small text-muted mb-0">
+                Other release artifacts (raw Linux binaries, tray, session helper, ARM builds) are on
+                <a href="https://github.com/theta42/theta-agent/releases/latest" target="_blank" rel="noopener noreferrer">
+                  GitHub Releases <i class="fa-solid fa-arrow-up-right-from-square fa-xs ms-1"></i></a>.
+              </p>
+            </div>
+          </div>
+        </div><!-- /download pane -->
       </div><!-- /tab-content -->
     `;
 
@@ -3093,7 +3170,8 @@
         + '</div>'
         + '<span id="agent-jk-copy" class="d-none">' + esc(body.key) + '</span>'
       );
-      loadAgentJoinKeys();
+    loadAgentJoinKeys();
+    populateAgentDownloadTab(currentOrigin);
       updateAgentCommands();
     } catch (err) {
       app.messages.toast('Could not create a join key: ' + (err.message || err), 'danger');
