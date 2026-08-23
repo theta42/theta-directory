@@ -1,3 +1,11 @@
+## [2.25.1] - 2026-08-23
+- fix: **Install Agent authorize page error handling.** The `/install-agent/authorize`
+  page (opened by the Windows installer's join-key button) now uses the shared
+  `app.api` client instead of a raw `fetch`, and a failed mint shows an actionable
+  message -- including which admin groups (`app_sso_admin`,
+  `app_sso_directory_admin`, `app_super_admin`) can mint keys -- instead of a
+  generic "Request failed" while the installer times out.
+
 ## [2.25.0] - 2026-08-22
 - feat: **"Download binaries" tab in the Install Agent modal.** The Directory
   app's Install Agent modal (Directory page) now has a third tab listing direct

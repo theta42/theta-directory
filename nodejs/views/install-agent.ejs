@@ -24,33 +24,34 @@
 			showError('Invalid callback URL; the installer must be on this computer.');
 			return;
 		}
-		app.auth.isLoggedIn(function (err, isLoggedIn) {
-			if (!isLoggedIn) {
+		app.auth.isLoggedIn(function (err, user) {
+			if (!user) {
 				var here = '/install-agent/authorize?callback=' + encodeURIComponent(callback);
 				window.location.href = '/login?redirect=' + encodeURIComponent(here);
 				return;
 			}
-			fetch('/api/agent/join-keys', {
-				method: 'POST',
-				headers: {
-					'auth-token': app.auth.getToken(),
-					'Content-Type': 'application/json'
-				},
-				body: JSON.stringify({ label: 'installer' })
-			}).then(function (resp) {
-				if (!resp.ok) {
-					if (resp.status === 403) showError('You need site-admin privileges to mint a join key.');
-					else showError('Could not mint a join key (HTTP ' + resp.status + ').');
+			// Mint a join key and hand it to the installer's loopback listener.
+			// app.api sends the same auth-token header as every other page.
+			app.api.post('agent/join-keys', { label: 'installer' }).then(function (data) {
+				if (!data || !data.key) {
+					showError('The server did not return a join key. Try again.');
 					return;
 				}
-				return resp.json();
-			}).then(function (data) {
-				if (!data || !data.key) return;
 				var sep = callback.indexOf('?') >= 0 ? '&' : '?';
 				window.location.href = callback + sep
 					+ 'join_key=' + encodeURIComponent(data.key)
 					+ '&server_url=' + encodeURIComponent(window.location.origin);
-			}).catch(function () { showError('Request failed. Try again.'); });
+			}).catch(function (e) {
+				if (e && e.status === 'error' && /admin/i.test(e.message || '')) {
+					showError('Your account is not in a directory-admin group '
+						+ '(app_sso_admin / app_sso_directory_admin / app_super_admin), so it cannot mint '
+						+ 'join keys. Ask an admin to create one under Directory -> Install Agent and paste it below.');
+				} else if (e && e.status === 403) {
+					showError('You need site-admin privileges to mint a join key.');
+				} else {
+					showError('Could not mint a join key' + (e && e.message ? ': ' + e.message : '.') + ' Try again.');
+				}
+			});
 		});
 	});
 </script>
