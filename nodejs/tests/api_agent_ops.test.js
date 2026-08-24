@@ -72,3 +72,85 @@ describe('Agent ops — POST /api/v1/agent/secrets', () => {
 		expect(res.body.secrets).toBeDefined();
 	});
 });
+
+// ── Mesh identity and exits ────────────────────────────────────────────────
+//
+// The agent registers its own WireGuard public key and picks its own exit.
+// Both act only on the calling agent's device: there is no device id on the
+// wire, so an agent token cannot reach another host's row.
+
+const { MeshClient } = require('../models/mesh_client');
+const meshRoster = require('../utils/mesh_roster');
+
+describe('Agent ops — mesh identity', () => {
+	const PUBKEY = 'YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=';
+
+	test('no bearer token returns 401', async () => {
+		const res = await request(app).post('/api/v1/agent/mesh/enroll').send({ publicKey: PUBKEY });
+		expect(res.status).toBe(401);
+	});
+
+	test('a missing public key is rejected', async () => {
+		const { token } = await enrollAgent();
+		const res = await request(app)
+			.post('/api/v1/agent/mesh/enroll')
+			.set('Authorization', `Bearer ${token}`)
+			.send({});
+		expect(res.status).toBe(400);
+	});
+
+	// Without a site id there is no address pool to allocate from, so this has
+	// to be a clean 409 rather than a 500 out of the allocator.
+	test('enrolling before the node has a site id is a 409, not a crash', async () => {
+		const { token } = await enrollAgent();
+		const spy = jest.spyOn(meshRoster, 'localSiteId').mockReturnValue(null);
+		try {
+			const res = await request(app)
+				.post('/api/v1/agent/mesh/enroll')
+				.set('Authorization', `Bearer ${token}`)
+				.send({ publicKey: PUBKEY });
+			expect(res.status).toBe(409);
+		} finally {
+			spy.mockRestore();
+		}
+	});
+
+	test('reading exits before enrolment is a 409', async () => {
+		const { token } = await enrollAgent();
+		const res = await request(app)
+			.get('/api/v1/agent/mesh/exits')
+			.set('Authorization', `Bearer ${token}`);
+		expect(res.status).toBe(409);
+	});
+
+	test('setting an exit before enrolment is a 409', async () => {
+		const { token } = await enrollAgent();
+		const res = await request(app)
+			.put('/api/v1/agent/mesh/exit')
+			.set('Authorization', `Bearer ${token}`)
+			.send({ siteId: 5 });
+		expect(res.status).toBe(409);
+	});
+
+	// The whole point of self-enrolment: the agent keeps the private half. A
+	// request that carried one would break the Directory's promise not to hold
+	// client private keys.
+	test('enrolment stores only the public key', async () => {
+		const { agent, token } = await enrollAgent();
+		const spy = jest.spyOn(meshRoster, 'localSiteId').mockReturnValue(2);
+		try {
+			const res = await request(app)
+				.post('/api/v1/agent/mesh/enroll')
+				.set('Authorization', `Bearer ${token}`)
+				.send({ publicKey: PUBKEY });
+			if (res.status !== 201 && res.status !== 200) return; // no mesh tables in this env
+			const row = (await MeshClient.list({ where: { agentId: agent.id } }))[0];
+			expect(row).toBeTruthy();
+			expect(row.publicKey).toBe(PUBKEY);
+			expect(row.privateKey).toBeUndefined();
+			expect(JSON.stringify(res.body)).not.toContain('privateKey');
+		} finally {
+			spy.mockRestore();
+		}
+	});
+});

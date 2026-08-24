@@ -635,7 +635,7 @@ refresh_expired_interval = 300
     try {
       const payload = {
         message: 'Connected to SSO Manager C2',
-        protocol_version: '1.2.0',
+        protocol_version: '1.3.0',
         agent_id: agent.id
       };
       if (issuedToken) {
@@ -643,7 +643,53 @@ refresh_expired_interval = 300
         payload.auth_token = issuedToken;
         payload.public_key = await agentManager.publicKeyBase64();
       }
+      Object.assign(payload, await homeDetectHints());
       ws.send(JSON.stringify({ type: 'config', payload }));
     } catch (e) {}
   });
 };
+
+
+// Home-detection hints for the agent (theta-agent home_reach.go).
+//
+// The agent has always READ `site_public_ip` off this payload -- but nothing in
+// the suite ever sent it, so its homePublicIP stayed empty and its
+// `|| homePublicIP == ""` fallback made every agent believe it was permanently
+// at home. Auto-VPN could therefore never fire, because "away" never happened.
+//
+// Two hints, weakest last:
+//
+//   site_lan_endpoint  the site's resolver at its PHYSICAL LAN address. It
+//                      only resolves/routes while the client is actually on
+//                      that LAN, which is exactly the property home detection
+//                      needs, so reaching it is conclusive.
+//   site_public_ip     egress-address comparison. Kept as a fallback, but it
+//                      is wrong under CGNAT (unrelated sites share an address)
+//                      and at multi-WAN sites (several valid answers).
+//
+// Best-effort: a missing hint degrades detection, it must not break the
+// agent's connection.
+async function homeDetectHints() {
+  const hints = {};
+  try {
+    const roster = require('../utils/mesh_roster');
+    const siteId = roster.localSiteId();
+    if (siteId) {
+      const site = await roster.bySiteId(siteId);
+      // dnsHost is a host ON the LAN, not its shadow address -- the shadow is
+      // reachable over the mesh and so proves nothing about being home.
+      if (site && site.dnsHost) hints.site_lan_endpoint = `${site.dnsHost}:53`;
+    }
+  } catch (e) { /* no mesh yet */ }
+
+  try {
+    const { Resource } = require('../models/resource');
+    const sites = await Resource.list({ where: { kind: 'site' } });
+    const local = sites.find((s) => s.metadata && s.metadata.isCurrentSite) || sites[0];
+    const ip = local && local.metadata &&
+      (local.metadata.public_ip || local.metadata.ip || local.metadata.address);
+    if (ip) hints.site_public_ip = String(ip).trim();
+  } catch (e) { /* no site resource yet */ }
+
+  return hints;
+}

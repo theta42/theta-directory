@@ -51,10 +51,17 @@ class MeshSite extends Model {
 		isHub: { type: 'boolean', default: false },
 
 		// --- exit node -------------------------------------------------------
-		// Whether this site offers itself as an internet exit at all. Who may
-		// USE it is a separate, per-user decision (MeshExitGrant) -- an admin
-		// picks, rather than it being open to everyone who can see it.
-		exitOpen: { type: 'boolean', default: false },
+		// Whether this site offers itself as an internet exit at all.
+		//
+		// Defaults TRUE: a site that joined the mesh has a gateway with a
+		// default route, so it can carry traffic, and every site being a usable
+		// exit is the behaviour we want. It used to default false and be paired
+		// with a mandatory per-user MeshExitGrant -- two closed gates, which
+		// left a stock deployment with no usable exit anywhere. Set it false on
+		// a specific site to take that site out of the exit pool (a metered
+		// link, say); grants still exist for handing one user an exit that is
+		// not open to everyone.
+		exitOpen: { type: 'boolean', default: true },
 		// Shown in the agent's tray picker next to a flag.
 		country: { type: 'string' },
 		city: { type: 'string' },
