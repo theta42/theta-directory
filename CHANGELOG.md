@@ -1,3 +1,10 @@
+## [2.26.1] - 2026-08-24
+
+### Fixed
+- **The stack's own containers landed at the root of the resource tree on every fresh install.** Docker discovery attached each container to the service it implements by emitting the bare compose service name (`sso-manager`, `proxy`) as the parent slug — correct when it was written, but service resources have since become site-scoped and are seeded as `sso-manager-<site>`, with the bare name surviving only as a grandfathering `altSlug` that nothing outside the bootstrap consults. Every edge therefore named a parent that did not exist. The plugin now takes the site suffix (`serviceSuffix`, seeded by the bootstrap and backfilled into existing plugin instances), and falls back to the host when it has none.
+
+- **An unresolvable parent stranded its child instead of merely losing the edge.** The reconciler dropped such an edge silently, *and* excluded the child from the site fallback below it — because that fallback keyed on "appeared as a `childSlug` in the payload" rather than "actually got parented". So a plugin naming a stale parent produced resources with no parent at all, floating beside the site, with nothing in the log to say why. The fallback now keys on edges that genuinely resolved, and a dropped edge says which endpoint was missing.
+
 ## [2.26.0] - 2026-08-24
 
 ### Changed

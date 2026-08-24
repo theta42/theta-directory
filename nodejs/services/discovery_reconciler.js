@@ -256,7 +256,13 @@ class DiscoveryReconciler {
     // Now process edges. `allRes` above is already current -- rows created in
     // the loop were pushed onto it -- so no second full read is needed.
     const existingEdges = await ResourceEdge.list();
-    
+
+    // Children that came out of the edge loop with a real parent. The site
+    // fallback below uses this rather than "appeared as a childSlug in the
+    // payload": a resource whose intended edge was dropped still needs a home,
+    // and giving it the site is strictly better than leaving it at the root.
+    const parentedSlugs = new Set();
+
     for (const edge of edges) {
       // Find parent ID. It might be in the current payload (mapped to _actualId) or in DB by slug
       let parentId = null;
@@ -297,26 +303,36 @@ class DiscoveryReconciler {
         continue;
       }
 
-      if (parentId && childId) {
-        const edgeExists = existingEdges.find(e => e.parentId === parentId && e.childId === childId && e.relation === edge.relation);
-        if (!edgeExists) {
-          const created = await ResourceEdge.create({
-            id: crypto.randomUUID(),
-            parentId,
-            childId,
-            relation: edge.relation
-          });
-          // Keep the in-memory edge list current so the cycle check above sees
-          // edges added earlier in this same payload.
-          existingEdges.push(created);
-        }
+      // An endpoint that resolves to nothing is a silent failure worth
+      // saying out loud: the edge is dropped, and until now the child was
+      // ALSO excluded from the site fallback below (see `parentedSlugs`), so
+      // a plugin naming a parent that does not exist stranded its resources
+      // at the root of the tree with no parent at all and nothing logged.
+      // A stale slug in a plugin is exactly how that happens in practice.
+      if (!parentId || !childId) {
+        const missing = !parentId ? `parent '${edge.parentSlug}'` : `child '${edge.childSlug}'`;
+        console.warn(`[DiscoveryReconciler] ${sourceName}: dropping ${edge.parentSlug} -> ${edge.childSlug} (${missing} does not resolve to a resource)`);
+        continue;
       }
+
+      const edgeExists = existingEdges.find(e => e.parentId === parentId && e.childId === childId && e.relation === edge.relation);
+      if (!edgeExists) {
+        const created = await ResourceEdge.create({
+          id: crypto.randomUUID(),
+          parentId,
+          childId,
+          relation: edge.relation
+        });
+        // Keep the in-memory edge list current so the cycle check above sees
+        // edges added earlier in this same payload.
+        existingEdges.push(created);
+      }
+      parentedSlugs.add(edge.childSlug);
     }
     
     if (targetSite) {
-      const childSlugs = new Set(edges.map(e => e.childSlug));
       for (const res of resources) {
-        if (res._actualId && res._actualId !== targetSite.id && !childSlugs.has(res._originalSlug || res.slug)) {
+        if (res._actualId && res._actualId !== targetSite.id && !parentedSlugs.has(res._originalSlug || res.slug)) {
           const edgeExists = existingEdges.find(e => e.childId === res._actualId);
           if (!edgeExists) {
             const created = await ResourceEdge.create({
