@@ -2676,14 +2676,20 @@
   // GitHub at bring-up time, so it can legitimately be absent).
   function populateAgentDownloadTab(origin) {
     const base = String(origin || window.location.origin).replace(/\/+$/, '') + '/resources/theta-agent';
-    [['agent-dl-url-install', 'install.sh'],
-     ['agent-dl-url-winsetup', 'theta-agent-windows-amd64-setup.exe'],
-     ['agent-dl-url-sums', 'SHA256SUMS']].forEach(([id, file]) => {
-      $('#' + id).text(base + '/' + file);
-    });
-    ['install.sh', 'theta-agent-windows-amd64-setup.exe', 'SHA256SUMS'].forEach(file => {
-      fetch(base + '/' + file, { method: 'HEAD' }).then(res => {
-        if (!res.ok) $('#agent-download-status').append(
+    $('#agent-download-status').empty();
+    [['install', 'install.sh'],
+     ['winsetup', 'theta-agent-windows-amd64-setup.exe'],
+     ['sums', 'SHA256SUMS']].forEach(([key, file]) => {
+      const url = base + '/' + file;
+      $('#agent-dl-url-' + key).text(url);
+      // The URL text alone is not a download -- give the row a real link, and
+      // point it at the same origin so `download` is honoured (cross-origin
+      // hrefs are treated as plain navigations by every current browser).
+      $('#agent-dl-link-' + key).attr({ href: url, download: file }).removeClass('disabled');
+      fetch(url, { method: 'HEAD' }).then(res => {
+        if (res.ok) return;
+        $('#agent-dl-link-' + key).addClass('disabled').removeAttr('href');
+        $('#agent-download-status').append(
           '<div class="text-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i><code>' + file +
           '</code> is not staged on this Directory — re-run <code>setup.sh</code> to stage it.</div>');
       }).catch(() => {});
@@ -2982,19 +2988,19 @@
                     <td class="small fw-bold"><code>install.sh</code></td>
                     <td class="small text-muted">Linux bootstrap (fetches the agent binary from GitHub Releases)</td>
                     <td><code class="small text-wrap" id="agent-dl-url-install" style="user-select: all;"></code></td>
-                    <td class="text-end"><button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand('agent-dl-url-install', 'agent-dl-copy-install')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>
+                    <td class="text-end text-nowrap"><a id="agent-dl-link-install" class="btn btn-sm btn-primary me-1 disabled" role="button"><i class="fa-solid fa-download me-1"></i> Download</a><button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand('agent-dl-url-install', 'agent-dl-copy-install')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>
                   </tr>
                   <tr>
                     <td class="small fw-bold"><code>theta-agent-windows-amd64-setup.exe</code></td>
                     <td class="small text-muted">Windows installer (fully offline: agent, tray, WireGuard, credential provider)</td>
                     <td><code class="small text-wrap" id="agent-dl-url-winsetup" style="user-select: all;"></code></td>
-                    <td class="text-end"><button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand('agent-dl-url-winsetup', 'agent-dl-copy-winsetup')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>
+                    <td class="text-end text-nowrap"><a id="agent-dl-link-winsetup" class="btn btn-sm btn-primary me-1 disabled" role="button"><i class="fa-solid fa-download me-1"></i> Download</a><button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand('agent-dl-url-winsetup', 'agent-dl-copy-winsetup')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>
                   </tr>
                   <tr>
                     <td class="small fw-bold"><code>SHA256SUMS</code></td>
                     <td class="small text-muted">Checksums for the staged artifacts — verify before running</td>
                     <td><code class="small text-wrap" id="agent-dl-url-sums" style="user-select: all;"></code></td>
-                    <td class="text-end"><button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand('agent-dl-url-sums', 'agent-dl-copy-sums')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>
+                    <td class="text-end text-nowrap"><a id="agent-dl-link-sums" class="btn btn-sm btn-primary me-1 disabled" role="button"><i class="fa-solid fa-download me-1"></i> Download</a><button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand('agent-dl-url-sums', 'agent-dl-copy-sums')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>
                   </tr>
                 </tbody>
               </table>
@@ -3017,6 +3023,10 @@
     });
 
     loadAgentJoinKeys();
+    // The Download-binaries tab is reachable the moment the modal opens, so it
+    // has to be filled in here. It used to be populated only after minting a
+    // join key, which left the tab blank for anyone who just wanted the links.
+    populateAgentDownloadTab(currentOrigin);
 
     // Only hosts can carry an agent -- the API rejects anything else, so don't
     // offer it here.
@@ -3170,8 +3180,7 @@
         + '</div>'
         + '<span id="agent-jk-copy" class="d-none">' + esc(body.key) + '</span>'
       );
-    loadAgentJoinKeys();
-    populateAgentDownloadTab(currentOrigin);
+      loadAgentJoinKeys();
       updateAgentCommands();
     } catch (err) {
       app.messages.toast('Could not create a join key: ' + (err.message || err), 'danger');

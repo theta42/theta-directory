@@ -1,3 +1,13 @@
+## [2.25.3] - 2026-08-23
+- fix: **the Install Agent modal's "Download binaries" tab could not download anything.** Three separate defects in `directory.ejs`:
+  - `populateAgentDownloadTab()` was only ever called from `mintAgentJoinKey()`'s success path, so opening the modal and clicking the tab left all three URL fields empty. It now runs when the modal opens, which is when the tab first becomes reachable.
+  - That call passed `currentOrigin`, a `const` scoped to `openAgentInstallModal()` — but `mintAgentJoinKey()` is a *sibling* function, not nested inside it. Every mint therefore threw `ReferenceError: currentOrigin is not defined` inside the enclosing `try`, and the `catch` surfaced it as **"Could not create a join key"** even though the server had already created the key. `updateAgentCommands()` on the following line never ran either. Removed.
+  - The tab never had download links at all — only URL text with Copy buttons. Each row now has a real `<a download>` button, disabled automatically when the artifact's `HEAD` check shows it is not staged.
+- fix: **seven icons rendered as blanks.** `invite_email.ejs`, `reset_password.ejs`, `login.ejs` and `profile.ejs` used the `fad` (duotone) prefix, which is Font Awesome **Pro**; the installed package is `@fortawesome/fontawesome-free@7.3.0`, whose CSS defines `.fas`/`.fa-solid`/`.far`/`.fab` but not `.fad`. Those `<i>` elements got no font-family and showed nothing — on the login, password-reset and invite pages. Switched to `fa-solid`; all six glyph names verified present in the free package.
+- fix: **two Bootstrap 4 input groups on Bootstrap 5.** `reset_password.ejs` and `invite_email.ejs` wrapped their addons in `.input-group-prepend`, removed in Bootstrap 5. Its border-radius rules target `.input-group > :first-child`, so the wrapper stopped the addon joining flush with the input. `login.ejs` already used the correct pattern; these two were the outliers.
+- chore: `.gitignore` now covers `nodejs/config/*.sqlite-shm` and `*.sqlite-wal`. Only the `.sqlite` file was ignored, so SQLite's WAL sidecars left the directory dirty in `git status` after any local run.
+- meta: **`package.json` version now matches the release tag.** It had lagged since v2.25.0 (still `2.25.0` at tag `v2.25.2`), so the app's reported build version under-reported the deployed release. Now `2.25.3`.
+
 ## [2.25.2] - 2026-08-23
 - fix: **Dependabot security alerts.** Patched all three open transitive-dependency
   alerts via npm overrides (no direct-dependency API changes): `js-yaml` 3.15.0 →
@@ -30,7 +40,7 @@
 - fix: **Unauthenticated Agent Discovery**. The agent discovery/telemetry pipeline `/api/discovery/sync` endpoint previously allowed unauthenticated payload injection. This has now been restricted to admins and machine accounts.
 - fix: **Spoke Onboarding Requirement Resets**. Fixed a bug where Master overwrote Spoke onboarding states (TOS, Passwords) upon resync because Spoke proxies were not configured to forward these SQLite model writes back to the Master via `spoke_write_proxy.js`.
 
-## [2.24.15] - $(date +%Y-%m-%d)
+## [2.24.15] - 2026-08-22
 - fix: `siteIsFresh` now correctly ignores bootstrap-seeded OAuth clients even if they were given a site-specific suffix (e.g. `theta-proxy (holycore)`). This allows a brand new bootstrapped spoke with a custom site name to successfully join a master.
 ## [2.24.14] - 2026-08-22
 - Added docs/KNOWN_ISSUES.md for multi-site known limits and tradeoffs.
