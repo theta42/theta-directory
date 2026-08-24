@@ -233,6 +233,32 @@ async function main() {
   });
   if (seedRes.status !== 200) fail(`seeding pre-join resource on master failed: ${seedRes.status} ${JSON.stringify(seedRes.body)}`);
 
+  // The regression this whole seeding change exists for. god_admin is created
+  // by EVERY site's own container entrypoint, so master and spoke each have one
+  // before they have ever spoken to each other. Put a member into the master's,
+  // then check below that the spoke ends up with the master's membership and
+  // not its own empty bootstrap copy.
+  //
+  // What used to happen: `ldapadd` cannot modify an entry that exists, so the
+  // master's god_admin was skipped on import (reported as success), and every
+  // entry that DID import got a fresh entryUUID/entryCSN. Replication then came
+  // up, the spoke's minutes-old copies were newer, and they overwrote the
+  // master's -- so joining a spoke silently reset the master's global groups.
+  step('Seeding a member into a BOOTSTRAP-SEEDED group on master (god_admin)');
+  const bootstrapGroupMember = `cn=admin,ou=people,${MASTER_BASE_DN}`;
+  await execFileAsync('ldapmodify', ['-x', '-H', `ldap://${MASTER_LDAP_HOST}:389`, '-D', `cn=admin,${MASTER_BASE_DN}`, '-w', LDAP_ADMIN_PASS], {
+    input: `dn: cn=god_admin,ou=groups,${MASTER_BASE_DN}
+changetype: modify
+add: member
+member: ${bootstrapGroupMember}
+`
+  }).catch((e) => {
+    // Already a member is fine -- the point is that it IS one before the join.
+    if (!/Type or value exists|already exists/i.test(String(e.stderr || e.message))) {
+      fail(`could not seed god_admin on master: ${e.stderr || e.message}`);
+    }
+  });
+
   step('Minting a site join key on master');
   const keyRes = await api(MASTER_URL, '/api/site/join-keys', {
     method: 'POST',
@@ -258,9 +284,41 @@ async function main() {
   // resync -- a callback-style fs.unlink() throwing into the catch that sets
   // this note, after ldapadd had already succeeded. Nothing asserted the note,
   // so it went unnoticed; assert it now.
-  step('Verifying the join reports the LDAP tree as actually imported');
-  if (!joinRes.body.ldap || !/^imported/.test(joinRes.body.ldap.note || '')) {
-    fail(`expected join to report an "imported..." ldap.note, got ${JSON.stringify(joinRes.body.ldap)}`);
+  //
+  // A join reports "seeded ...", not "imported ...": it replaces the local
+  // bootstrap tree with the master's dump offline, keeping entryUUID/entryCSN,
+  // rather than re-adding the entries over LDAP. "imported" is the RESYNC
+  // wording. Both are accepted here because what this step is really checking
+  // is that the LDAP half ran at all -- the failure it exists for was a note
+  // saying "skipped/failed".
+  step('Verifying the join reports the LDAP tree as actually adopted');
+  if (!joinRes.body.ldap || !/^(seeded|imported)/.test(joinRes.body.ldap.note || '')) {
+    fail(`expected join to report a "seeded..." or "imported..." ldap.note, got ${JSON.stringify(joinRes.body.ldap)}`);
+  }
+
+  // And specifically that a JOIN seeded rather than merged. This is the whole
+  // point of the fix: merging left the spoke's own bootstrap copies of
+  // god_admin and friends in place (ldapadd cannot modify an existing entry),
+  // and gave every entry it did create a fresh entryUUID/entryCSN -- so once
+  // replication came up the spoke's newer copies overwrote the master's, and
+  // joining a spoke silently reset the master's global groups.
+  if (!/^seeded/.test(joinRes.body.ldap.note || '')) {
+    fail(`a join must seed the directory offline, not merge into it -- got ${JSON.stringify(joinRes.body.ldap)}`);
+  }
+
+  // The direct regression check. If the spoke's own bootstrap copy of
+  // god_admin survived the join, this member is missing -- and once replication
+  // converges, the MASTER loses it too.
+  step('Verifying a bootstrap-seeded group arrived with the MASTER\'s membership');
+  {
+    const out = await execFileAsync('ldapsearch', [
+      '-x', '-LLL', '-H', `ldap://${SPOKE_LDAP_HOST}:389`,
+      '-D', `cn=admin,${MASTER_BASE_DN}`, '-w', LDAP_ADMIN_PASS,
+      '-b', `ou=groups,${MASTER_BASE_DN}`, '(cn=god_admin)', 'member'
+    ]).then((r) => r.stdout).catch((e) => String(e.stdout || ''));
+    if (!out.includes(bootstrapGroupMember)) {
+      fail(`the spoke's god_admin does not carry the master's membership -- its own bootstrap copy was kept instead of the master's entry. Got:\n${out}`);
+    }
   }
 
   // Assert on the LDAP tree itself, not just the note: the note is what hid
