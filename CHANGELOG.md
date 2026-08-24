@@ -1,3 +1,25 @@
+## [2.26.0] - 2026-08-24
+
+### Changed
+- **Every site is now a usable internet exit.** Using an exit required *two* gates — `MeshSite.exitOpen` on the site **and** a per-user `MeshExitGrant` — and both defaulted closed, so a stock deployment had no usable exit anywhere and nothing said why. `exitOpen` now defaults **true**, and `allowedExits()` returns every exit-open site. Grants still work as an **additional** path, so an exit can be handed to one user without opening the site to everyone, and existing grants keep working. Clear `offers an exit` on a site to take it out of the pool.
+- A one-time boot backfill opens the exits on sites that predate the flip — a model default only applies to new rows, so an upgraded deployment would otherwise stay closed. Marked in the site config so it runs **exactly once**: an operator who later closes a metered site must not have it silently reopened on the next restart.
+
+### Added
+- **Three agent-facing mesh endpoints** (`/api/v1/agent/…`), authenticated by the agent's own token and scoped to its own device — there is no device id on the wire that could name another host:
+  - `POST /mesh/enroll` — the agent registers its own WireGuard **public** key. Idempotent by agent id. Nothing previously created a `MeshClient` except an admin doing it by hand, so an installed agent never appeared under jump-host's mesh view at all.
+  - `GET /mesh/exits` / `PUT /mesh/exit` — read and set this device's exit, for the agent's tray picker. Permission is checked as the owning user, deliberately *not* with admin override, so a compromised agent token cannot route itself through a site its owner may not use.
+- **Home-detection hints in the agent config push**: `site_lan_endpoint` (the site's resolver at its physical LAN address — reaching it is conclusive) and `site_public_ip`. The agent has always *read* `site_public_ip`; nothing in the suite ever sent it, so every agent believed it was permanently at home and auto-VPN could never fire.
+- Protocol version → **1.3.0** (additive).
+
+### Fixed
+- **An admin could not see agent-enrolled devices at all.** The mesh page read `mesh/clients`, which returns only the calling user's devices — and self-enrolled devices are owned by whoever enrolled the agent. Admins now see every device at the site, with an owner column and an `agent` badge; non-admins are unchanged, and a failed site-wide read falls back to the caller's own list rather than showing nothing.
+- **Changing an exit did not reconfigure the device.** The UI said it never needed to, which is only true *between* exits: crossing the local-breakout boundary flips `AllowedIPs` between `0.0.0.0/0` and the split-tunnel pair, so the device genuinely needs the new config and nothing was sending it. Both the web UI and the agent-facing route now push through one shared helper — they had drifted into two implementations — and the UI reports honestly when the agent was unreachable.
+- `GET /api/mesh/site-clients` now returns `agentId`, `source` and `siteId`, without which the admin device list cannot tell a remotely-reconfigurable host from a phone.
+
+### Tests
+- **30 of 61 test files never ran.** `npm test` is an explicit file list and 30 files were not on it; it also listed `tests/subtypes.test.js`, which does not exist. Running all 61 showed 4 genuinely need a live LDAP/Redis stack — but **13 pass standalone and simply were not listed**, including `api_agent_ops.test.js`, which covers the endpoints extended here. Now **43 suites / 477 tests**, up from 30 / 390.
+- `no_native_dialogs` was failing on a **false positive**: its regex matched `/confirm(` inside the prose comment `app.messages.action()/confirm()`. The guard now skips comment-only lines — verified it still catches real calls — rather than the comment being reworded around it.
+
 ## [2.25.3] - 2026-08-23
 - fix: **the Install Agent modal's "Download binaries" tab could not download anything.** Three separate defects in `directory.ejs`:
   - `populateAgentDownloadTab()` was only ever called from `mintAgentJoinKey()`'s success path, so opening the modal and clicking the tab left all three URL fields empty. It now runs when the modal opens, which is when the tab first becomes reachable.

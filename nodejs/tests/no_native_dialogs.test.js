@@ -17,6 +17,31 @@ const ROOTS = ['views', 'public/js', 'public/lib/js'].map((d) => path.join(__dir
 // "confirmation", ".confirmed").
 const NATIVE_DIALOG_RE = /(^|[^.\w$])(alert|confirm|prompt)\s*\(/g;
 
+// Blank out comment-only lines before scanning.
+//
+// Prose about these functions is not a call to them: a comment reading
+// "app.messages.action()/confirm()" matched, because the `/` before `confirm`
+// satisfies the leading [^.\w$]. Only whole-line comments are removed --
+// stripping trailing `//` from arbitrary lines would eat the tail of any line
+// containing a URL, and a false negative in a guard like this is worse than a
+// false positive. Line count is preserved so reported line numbers stay right.
+function stripComments(src) {
+	let inBlock = false;
+	return src.split('\n').map((line) => {
+		const t = line.trim();
+		if (inBlock) {
+			if (t.includes('*/')) inBlock = false;
+			return '';
+		}
+		if (t.startsWith('/*') || t.startsWith('<%#')) {
+			if (!t.includes('*/')) inBlock = true;
+			return '';
+		}
+		if (t.startsWith('//') || t.startsWith('*') || t.startsWith('<!--')) return '';
+		return line;
+	}).join('\n');
+}
+
 function walk(dir) {
 	let files = [];
 	if (!fs.existsSync(dir)) return files;
@@ -32,7 +57,7 @@ test('no view or client-side script calls native alert()/confirm()/prompt()', ()
 	const offenders = [];
 	for (const root of ROOTS) {
 		for (const file of walk(root)) {
-			const src = fs.readFileSync(file, 'utf8');
+			const src = stripComments(fs.readFileSync(file, 'utf8'));
 			let m;
 			NATIVE_DIALOG_RE.lastIndex = 0;
 			while ((m = NATIVE_DIALOG_RE.exec(src))) {

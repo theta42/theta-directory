@@ -193,6 +193,12 @@ router.get('/site-clients', middleware.auth, requireAdmin, async (req, res, next
 			clients: rows.map((c) => ({
 				id: c.id, uid: c.uid, name: c.name,
 				publicKey: c.publicKey, assignedIp: c.assignedIp,
+				siteId: Number(c.siteId),
+				// The admin device list needs these to tell an agent-enrolled
+				// host (which can be reconfigured remotely) from a phone that
+				// was set up by hand and never will be.
+				agentId: c.agentId || null,
+				source: c.source || 'manual',
 				exitSiteId: c.exitSiteId === null || c.exitSiteId === undefined ? null : Number(c.exitSiteId)
 			}))
 		});
@@ -387,8 +393,12 @@ router.put('/clients/:id/exit', middleware.auth, async (req, res, next) => {
 			return res.status(403).json({ status: 'error', message: 'not your device' });
 		}
 		await clients.setExit(client, req.body.exitSiteId, { actorUid: req.user.uid, isAdmin: admin });
+		// Crossing the local-breakout boundary flips the device's AllowedIPs,
+		// so it needs the new config -- pushing here means an admin does not
+		// have to remember to hit the push button afterwards.
+		const pushed = await clients.pushConfigToAgent(client);
 		logAudit('mesh_client_exit_set', { actor: req.user.uid, client: client.id, exitSiteId: client.exitSiteId });
-		res.json({ status: 'ok', client });
+		res.json({ status: 'ok', client, pushed });
 	} catch (e) { next(e); }
 });
 

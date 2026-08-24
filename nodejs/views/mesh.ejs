@@ -45,11 +45,13 @@
 
 		<div class="tab-pane fade" id="tab-exits">
 			<div class="card shadow-sm">
-				<div class="card-header"><i class="fa-solid fa-globe me-2"></i>Who may use which exit</div>
+				<div class="card-header"><i class="fa-solid fa-globe me-2"></i>Extra exit access</div>
 				<div class="card-body">
 					<p class="small text-muted">
-						A site marked <em>offers an exit</em> is only saying it is willing to carry traffic.
-						Granting it to a user is a separate, explicit decision.
+						Every site marked <em>offers an exit</em> is already usable by everyone &mdash; you do
+						not need a grant here for those. Grants exist for the other case: handing one user a
+						site that is <em>not</em> in the shared pool. Take a site out of the pool by clearing
+						<em>offers an exit</em> in its settings.
 					</p>
 					<div class="row g-2 align-items-end mb-3">
 						<div class="col-md-4">
@@ -118,6 +120,8 @@
 							<input class="form-check-input" type="checkbox" id="site-exit-open">
 							<label class="form-check-label small" for="site-exit-open">Offers an exit</label>
 						</div>
+						<div class="form-text small">On by default. Clear it to take this site out of
+							the shared exit pool &mdash; a metered link, say.</div>
 					</div>
 					<div class="col-md-4">
 						<label class="form-label small fw-semibold">Country</label>
@@ -335,14 +339,29 @@ function setHub(siteId) {
 // ── devices ────────────────────────────────────────────────────────────────
 
 function loadDevices() {
+	// An admin gets every device at this site, not just their own. Devices that
+	// theta-agent enrolled for itself are owned by whoever enrolled the agent,
+	// so the per-user list left an admin unable to see -- let alone steer --
+	// the fleet's own machines.
+	//
+	// allowedExits is per-user and only meaningful for one's own devices, so it
+	// still comes from mesh/clients; an admin may set any exit regardless.
 	app.api.get('mesh/clients', function(err, data){
 		if (err || !data) {
 			$('#mesh-devices-wrap').html('<div class="text-center py-4 text-danger">Could not load devices: ' + esc((err && err.message) || 'unknown') + '</div>');
 			return;
 		}
-		meshState.devices = data.clients || [];
 		meshState.allowedExits = data.allowedExits || [];
-		renderDevices();
+		if (!meshState.isAdmin) {
+			meshState.devices = data.clients || [];
+			return renderDevices();
+		}
+		app.api.get('mesh/site-clients', function(err2, all){
+			// Fall back to the caller's own devices rather than showing nothing
+			// if the site-wide read fails.
+			meshState.devices = (!err2 && all && all.clients) ? all.clients : (data.clients || []);
+			renderDevices();
+		});
 	});
 }
 
@@ -352,9 +371,16 @@ function renderDevices() {
 			+ '<br><small>Add one to reach every site from a laptop or phone.</small></div>');
 		return;
 	}
+	var showOwner = meshState.isAdmin;
 	var rows = meshState.devices.map(function(c){
+		// A device theta-agent enrolled for itself, versus one a person set up
+		// by hand. Only the former can be reconfigured remotely.
+		var isAgent = !!c.agentId || c.source === 'agent';
 		return '<tr>'
-			+ '<td>' + esc(c.name) + '</td>'
+			+ '<td>' + esc(c.name)
+			+ (isAgent ? ' <span class="badge bg-secondary-subtle text-secondary-emphasis fw-normal" title="Enrolled by theta-agent on the machine itself">agent</span>' : '')
+			+ '</td>'
+			+ (showOwner ? '<td class="small">' + esc(c.uid || '—') + '</td>' : '')
 			+ '<td><code class="small">' + esc(c.assignedIp) + '</code></td>'
 			+ '<td>' + esc((siteById(c.siteId) || {}).name || ('site ' + c.siteId)) + '</td>'
 			+ '<td>' + exitSelect(c) + '</td>'
@@ -366,14 +392,21 @@ function renderDevices() {
 			+ '</tr>';
 	}).join('');
 	$('#mesh-devices-wrap').html('<div class="table-responsive"><table class="table table-striped mb-0 align-middle">'
-		+ '<thead><tr><th>Device</th><th>Address</th><th>Home site</th><th>Internet exit</th><th></th></tr></thead>'
+		+ '<thead><tr><th>Device</th>' + (showOwner ? '<th>Owner</th>' : '')
+		+ '<th>Address</th><th>Home site</th><th>Internet exit</th><th></th></tr></thead>'
 		+ '<tbody>' + rows + '</tbody></table>'
-		+ '<div class="p-3 small text-muted border-top">Changing an exit takes effect on the gateway without reconfiguring the device — '
-		+ 'no reconnect and no new config.</div></div>');
+		+ '<div class="p-3 small text-muted border-top">Switching between two exits is handled entirely at the '
+		+ 'gateway. Turning an exit on or off changes what the device tunnels (everything, versus just the '
+		+ 'mesh), so devices running theta-agent are sent the new config automatically; set one up by hand '
+		+ 'and you will need to re-export it.'
+		+ (showOwner ? ' Showing every device at this site.' : '')
+		+ '</div></div>');
 }
 
 function exitSelect(c) {
-	// Only exits this user was actually granted, plus whatever is already set.
+	// Every exit-open site, plus anything granted to this user specifically,
+	// plus whatever is already set (so a device on an exit that was later
+	// closed still shows where it is rather than silently reading as local).
 	var options = ['<option value="">Local breakout</option>'];
 	meshState.sites.forEach(function(s){
 		if (!s.exitOpen) return;
@@ -383,14 +416,24 @@ function exitSelect(c) {
 		if (s.country) label += ' (' + s.country + ')';
 		options.push('<option value="' + esc(s.siteId) + '"' + (Number(c.exitSiteId) === Number(s.siteId) ? ' selected' : '') + '>' + esc(label) + '</option>');
 	});
-	if (options.length === 1) return '<span class="text-muted small">No exits available to you</span>';
+	if (options.length === 1) return '<span class="text-muted small">No site offers an exit yet</span>';
 	return '<select class="form-select form-select-sm" onchange="setExit(\'' + esc(c.id) + '\', this.value)">' + options.join('') + '</select>';
 }
 
 function setExit(id, value) {
-	app.api.put('mesh/clients/' + id + '/exit', { exitSiteId: value === '' ? null : Number(value) }, function(err){
+	app.api.put('mesh/clients/' + id + '/exit', { exitSiteId: value === '' ? null : Number(value) }, function(err, data){
 		if (err) return app.messages.toast('Could not change the exit: ' + err.message, 'danger');
-		app.messages.toast(value === '' ? 'Now breaking out locally' : 'Exit changed', 'success');
+		var what = value === '' ? 'Now breaking out locally' : 'Exit changed';
+		// Say whether the device actually got the new config. Turning an exit
+		// on or off changes its AllowedIPs, so an agent that was offline is
+		// still on the old routing until it reconnects.
+		var device = meshState.devices.filter(function(d){ return d.id === id; })[0];
+		if (device && device.agentId && data && !data.pushed) {
+			app.messages.toast(what + ', but the agent is not reachable — it will pick up the new '
+				+ 'configuration when it reconnects.', 'warning');
+		} else {
+			app.messages.toast(what, 'success');
+		}
 		loadDevices();
 	});
 }

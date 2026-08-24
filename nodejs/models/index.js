@@ -146,6 +146,7 @@ async function ensureUniqueIndexes() {
   const qi = adapter.sequelize.getQueryInterface();
 
   await repairDuplicateServerIds();
+  await openExistingSiteExits();
 
   const wanted = [
     { model: 'SiteSpoke', field: 'ldapServerId', name: 'site_spoke_ldap_server_id_unique' },
@@ -221,4 +222,49 @@ async function repairDuplicateServerIds() {
 
 module.exports.initORM = initORM;
 module.exports.ensureUniqueIndexes = ensureUniqueIndexes;
+// One-time backfill for the exitOpen default flip (MeshSite.exitOpen went
+// false -> true).
+//
+// A model default only applies to rows created afterwards, so an upgraded
+// deployment would keep every existing site closed and still have no usable
+// exit anywhere -- the exact problem the flip was meant to fix. This opens the
+// sites that predate it.
+//
+// Guarded by a marker in the site config so it runs EXACTLY once: an operator
+// who later closes a site (a metered link, say) must not have it silently
+// reopened on the next restart. Fail-soft, like the other boot repairs.
+async function openExistingSiteExits() {
+  const siteConfig = require('../utils/site_config');
+  try {
+    if (siteConfig.get().meshExitsOpened) return;
+  } catch (_) { return; }
+
+  let rows;
+  try { rows = await MeshSite.list(); }
+  catch (e) { return; } // table not present yet
+
+  let opened = 0;
+  for (const row of rows || []) {
+    if (row.exitOpen) continue;
+    try {
+      await row.update({ exitOpen: true });
+      opened += 1;
+    } catch (e) {
+      console.warn(`[initORM] could not open the exit on site ${row.siteId}: ${e.message}`);
+    }
+  }
+
+  try {
+    siteConfig.save({ meshExitsOpened: true });
+  } catch (e) {
+    // Without the marker this would run again next boot and reopen a site the
+    // operator had closed, so say so loudly rather than leaving it silent.
+    console.warn(`[initORM] opened ${opened} site exit(s) but could not record the marker: ${e.message}`);
+    return;
+  }
+  if (opened) {
+    console.log(`[initORM] every site now offers an internet exit (${opened} pre-existing site(s) opened).`);
+  }
+}
+
 module.exports.repairDuplicateServerIds = repairDuplicateServerIds;

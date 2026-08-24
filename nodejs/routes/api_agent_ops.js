@@ -113,3 +113,170 @@ router.post('/secrets', async (req, res, next) => {
 });
 
 module.exports = router;
+
+// POST /mesh/enroll — an agent registers its own WireGuard identity.
+//
+//   { publicKey: "<44-char base64>" }
+//   -> { status: "ok", client: { id, name, assignedIp, siteId, exitSiteId } }
+//
+// Until this existed the agent had no mesh identity at all: the only thing that
+// created a MeshClient was an admin POSTing /api/mesh/clients by hand, so a
+// freshly installed agent never appeared under jump-host's mesh view. Worse,
+// the push path assumed the agent already held a keypair -- renderClientConf()
+// emits `PrivateKey = <generated on this device>` for an agent-owned device --
+// but nothing ever generated one, so a pushed config could not come up.
+//
+// The agent generates its keypair locally and sends only the public half; the
+// private key never leaves the host, which is what lets the Directory keep its
+// promise not to store client private keys.
+//
+// Idempotent by agentId: an agent that reconnects, or one whose key file was
+// replaced, converges onto a single device row rather than accumulating one per
+// restart and exhausting the site's address pool.
+const { MeshClient } = require('../models/mesh_client');
+const meshClients = require('../utils/mesh_clients');
+const meshRoster = require('../utils/mesh_roster');
+
+router.post('/mesh/enroll', async (req, res, next) => {
+	try {
+		const agent = await authenticateAgent(req);
+		if (!agent) return res.status(401).json({ status: 'error', message: 'unauthorized' });
+
+		const publicKey = String((req.body || {}).publicKey || '').trim();
+		if (!publicKey) {
+			return res.status(400).json({ status: 'error', message: 'publicKey is required' });
+		}
+
+		const siteId = meshRoster.localSiteId();
+		if (!siteId) {
+			return res.status(409).json({ status: 'error', message: 'this node has no site id yet' });
+		}
+
+		// The device belongs to whoever enrolled the agent, so it lands in a
+		// real user's device list. Agents enrolled by a join key with no
+		// recorded actor fall back to the agent's own id, which is still a
+		// stable owner key -- better than dropping the row entirely.
+		const uid = agent.enrolled_by || `agent:${agent.id}`;
+		const name = agent.name || `agent-${String(agent.id).slice(0, 8)}`;
+
+		const existing = (await MeshClient.list({ where: { agentId: agent.id } }))[0];
+		if (existing) {
+			const patch = {};
+			if (existing.publicKey !== publicKey) patch.publicKey = publicKey;
+			if (Object.keys(patch).length) await existing.update(patch);
+			return res.json({
+				status: 'ok',
+				rotated: !!patch.publicKey,
+				client: {
+					id: existing.id, name: existing.name, assignedIp: existing.assignedIp,
+					siteId: Number(existing.siteId),
+					exitSiteId: existing.exitSiteId === null || existing.exitSiteId === undefined
+						? null : Number(existing.exitSiteId)
+				}
+			});
+		}
+
+		const { client } = await meshClients.enroll({
+			uid, name, siteId, publicKey, source: 'agent', agentId: agent.id
+		});
+		res.status(201).json({
+			status: 'ok',
+			client: {
+				id: client.id, name: client.name, assignedIp: client.assignedIp,
+				siteId: Number(client.siteId),
+				exitSiteId: client.exitSiteId === null || client.exitSiteId === undefined
+					? null : Number(client.exitSiteId)
+			}
+		});
+	} catch (err) {
+		if (err && err.status) {
+			return res.status(err.status).json({ status: 'error', message: err.message });
+		}
+		next(err);
+	}
+});
+
+// ── Mesh exit selection, from the device itself ─────────────────────────────
+//
+// The Directory has always computed `allowedExits` "so the UI and the agent
+// tray render the same set" (routes/api_mesh.js), but the tray half was never
+// built and there was no agent-facing way to read or change it -- the only
+// endpoints were session-authenticated and keyed on a browser user. These two
+// close that gap.
+
+
+// Resolve the caller's own device row. Everything below acts on this one row
+// and nothing else, so an agent can never read or steer another host.
+async function deviceForAgent(agent) {
+	return (await MeshClient.list({ where: { agentId: agent.id } }))[0] || null;
+}
+
+// GET /mesh/exits — the exits this device may choose, and the one it is on.
+router.get('/mesh/exits', async (req, res, next) => {
+	try {
+		const agent = await authenticateAgent(req);
+		if (!agent) return res.status(401).json({ status: 'error', message: 'unauthorized' });
+
+		const device = await deviceForAgent(agent);
+		if (!device) {
+			return res.status(409).json({ status: 'error', message: 'this agent has no mesh device yet' });
+		}
+
+		const allowed = await meshClients.allowedExits(device.uid);
+		const roster = await meshRoster.roster();
+		const exits = roster
+			.filter((s) => allowed.has(Number(s.siteId)))
+			.map((s) => ({
+				siteId: Number(s.siteId),
+				name: s.name || s.slug || `site ${s.siteId}`,
+				country: s.country || '',
+				city: s.city || '',
+				// The device's own site is a valid pick, but it means "no exit"
+				// in practice -- flagged so the tray can say so.
+				isLocal: Number(s.siteId) === Number(device.siteId)
+			}))
+			.sort((a, b) => a.name.localeCompare(b.name));
+
+		res.json({
+			status: 'ok',
+			current: device.exitSiteId === null || device.exitSiteId === undefined
+				? null : Number(device.exitSiteId),
+			exits
+		});
+	} catch (err) {
+		if (err && err.status) return res.status(err.status).json({ status: 'error', message: err.message });
+		next(err);
+	}
+});
+
+// PUT /mesh/exit — route this device through an exit, or null for local
+// breakout. On success the new peer config is pushed straight back down the
+// agent's own WSS channel, so the change takes effect without anyone visiting
+// the web UI.
+router.put('/mesh/exit', async (req, res, next) => {
+	try {
+		const agent = await authenticateAgent(req);
+		if (!agent) return res.status(401).json({ status: 'error', message: 'unauthorized' });
+
+		const device = await deviceForAgent(agent);
+		if (!device) {
+			return res.status(409).json({ status: 'error', message: 'this agent has no mesh device yet' });
+		}
+
+		const raw = (req.body || {}).siteId;
+		const siteId = raw === null || raw === undefined || raw === '' ? null : Number(raw);
+
+		// setExit enforces allowedExits -- deliberately NOT with isAdmin, so a
+		// compromised agent token cannot route itself through a site its owner
+		// may not use.
+		await meshClients.setExit(device, siteId, { actorUid: device.uid });
+
+		// Same push the web UI performs, so both paths behave identically.
+		const pushed = await meshClients.pushConfigToAgent(device);
+
+		res.json({ status: 'ok', current: siteId, pushed });
+	} catch (err) {
+		if (err && err.status) return res.status(err.status).json({ status: 'error', message: err.message });
+		next(err);
+	}
+});

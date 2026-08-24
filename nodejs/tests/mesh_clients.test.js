@@ -4,7 +4,7 @@
 // exit. The models are mocked because these rules are the interesting part --
 // the ORM is exercised by the integration suite.
 
-const mockRows = { clients: [], grants: [] };
+const mockRows = { clients: [], grants: [], sites: [] };
 
 // Named with a `mock` prefix because jest.mock() factories are hoisted above
 // the file and may only close over variables it can prove are mock scaffolding.
@@ -33,13 +33,21 @@ jest.mock('../models/mesh_client', () => ({
 	}
 }));
 
+// allowedExits() reads the site roster too, now that every site offering an
+// exit is usable by every user rather than only those an admin granted.
+jest.mock('../models/mesh_site', () => ({
+	MeshSite: {
+		list: async (opts) => mockRows.sites.filter((r) => mockMatches(r, opts && opts.where))
+	}
+}));
+
 // withLock is a real distributed lock over Redis; here it just has to run the
 // body. The serialization it provides IS tested, in tests/mutex.test.js.
 jest.mock('../utils/mutex', () => ({ withLock: async (name, fn) => fn() }));
 
 const clients = require('../utils/mesh_clients');
 
-beforeEach(() => { mockRows.clients = []; mockRows.grants = []; });
+beforeEach(() => { mockRows.clients = []; mockRows.grants = []; mockRows.sites = []; });
 
 const PUBKEY_A = 'YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=';
 
@@ -102,6 +110,30 @@ describe('key custody', () => {
 	});
 });
 
+describe('config push on exit change', () => {
+	// Switching between two exits leaves AllowedIPs at 0.0.0.0/0 and the
+	// gateway reroutes, but crossing the local-breakout boundary flips it
+	// between 0.0.0.0/0 and the split-tunnel pair -- so the device needs the
+	// new config. Both the web UI and the tray go through this helper.
+	test('a device with no agent is never pushed to', async () => {
+		const { client } = await clients.enroll({ uid: 'alice', name: 'phone', siteId: 2 });
+		expect(await clients.pushConfigToAgent(client)).toBe(false);
+	});
+
+	test('a missing device is handled rather than thrown', async () => {
+		expect(await clients.pushConfigToAgent(null)).toBe(false);
+	});
+
+	// Best-effort: the selection is already persisted and the gateway
+	// reconciles on its own, so an unreachable agent must not fail the change.
+	test('a push failure is swallowed, not thrown', async () => {
+		const { client } = await clients.enroll({
+			uid: 'alice', name: 'laptop', siteId: 2, agentId: 'agent-1'
+		});
+		await expect(clients.pushConfigToAgent(client)).resolves.toBe(false);
+	});
+});
+
 describe('exit selection', () => {
 	test('a user may not pick an exit they were not granted', async () => {
 		const { client } = await clients.enroll({ uid: 'alice', name: 'laptop', siteId: 2 });
@@ -116,8 +148,42 @@ describe('exit selection', () => {
 		expect(client.exitSiteId).toBe(5);
 	});
 
-	// `exitOpen` on a site means it is WILLING to carry traffic. Permission is
-	// a separate, explicit decision, so an admin can always override.
+	// Every site that offers an exit is usable by every user. This used to
+	// require BOTH exitOpen on the site AND a per-user grant -- two gates, both
+	// closed by default, so a stock deployment had no usable exit anywhere.
+	test('any user can select a site that offers an exit, with no grant', async () => {
+		mockRows.sites.push({ siteId: 5, exitOpen: true });
+		const { client } = await clients.enroll({ uid: 'alice', name: 'laptop', siteId: 2 });
+		await clients.setExit(client, 5);
+		expect(client.exitSiteId).toBe(5);
+	});
+
+	test('allowedExits lists every exit-open site plus explicit grants', async () => {
+		mockRows.sites.push({ siteId: 3, exitOpen: true }, { siteId: 5, exitOpen: true });
+		await clients.grantExit('alice', 9, 'admin');
+		const allowed = await clients.allowedExits('alice');
+		expect([...allowed].sort((a, b) => a - b)).toEqual([3, 5, 9]);
+	});
+
+	// A site taken out of the pool deliberately (a metered link) stays out.
+	test('a site with exitOpen false is still refused without a grant', async () => {
+		mockRows.sites.push({ siteId: 5, exitOpen: false });
+		const { client } = await clients.enroll({ uid: 'alice', name: 'laptop', siteId: 2 });
+		await expect(clients.setExit(client, 5)).rejects.toThrow(/not permitted/);
+		expect(client.exitSiteId).toBe(null);
+	});
+
+	// An explicit grant still works for a site that is NOT in the open pool --
+	// that is the whole point of keeping grants alongside the open default.
+	test('an explicit grant still opens a closed site for one user', async () => {
+		mockRows.sites.push({ siteId: 5, exitOpen: false });
+		const { client } = await clients.enroll({ uid: 'alice', name: 'laptop', siteId: 2 });
+		await clients.grantExit('alice', 5, 'admin');
+		await clients.setExit(client, 5);
+		expect(client.exitSiteId).toBe(5);
+	});
+
+	// Permission is still a decision an admin can always override.
 	test('an admin can set an exit without a grant', async () => {
 		const { client } = await clients.enroll({ uid: 'alice', name: 'laptop', siteId: 2 });
 		await clients.setExit(client, 5, { isAdmin: true });

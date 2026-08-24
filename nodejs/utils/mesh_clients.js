@@ -97,18 +97,30 @@ async function listForUser(uid) {
 	return (await MeshClient.list({ where: { uid } })).sort((a, b) => Number(a.createdAt) - Number(b.createdAt));
 }
 
-/** Which exits this user has been granted, as a set of site ids. */
+/**
+ * Which exits this user may choose, as a set of site ids.
+ *
+ * Every site that offers an exit is usable by every user. This used to be the
+ * intersection of "site is willing" (MeshSite.exitOpen) and "admin granted this
+ * user that site" (MeshExitGrant) -- two gates, both closed by default, which
+ * meant a stock deployment had no usable exit anywhere and no indication why.
+ *
+ * MeshExitGrant is still written and still honoured as an ADDITIONAL grant, so
+ * an exit can be handed to a specific user without opening the site to
+ * everyone, and so existing grants keep working. It is no longer required.
+ */
 async function allowedExits(uid) {
+	const { MeshSite } = require('../models/mesh_site');
+	const open = (await MeshSite.list({ where: { exitOpen: true } })).map((s) => Number(s.siteId));
 	const grants = await MeshExitGrant.list({ where: { uid } });
-	return new Set(grants.map((g) => Number(g.siteId)));
+	return new Set([...open, ...grants.map((g) => Number(g.siteId))]);
 }
 
 /**
  * Point a device at an exit (or at null for local breakout).
  *
- * Checked against the user's grants, not against whether the site merely
- * offers an exit: `exitOpen` means a site is WILLING to carry traffic, never
- * that anyone may use it. An admin picks who gets what.
+ * Checked against allowedExits(), which is now "any site offering an exit,
+ * plus anything explicitly granted to this user".
  */
 async function setExit(client, exitSiteId, { actorUid, isAdmin } = {}) {
 	if (exitSiteId === null || exitSiteId === undefined || exitSiteId === '') {
@@ -149,6 +161,47 @@ async function revokeExit(uid, siteId) {
 	return true;
 }
 
+
+/**
+ * Re-render a device's peer config and push it down its agent's WSS channel.
+ *
+ * Needed whenever a device's exit changes. Switching between two exits leaves
+ * the client config alone -- AllowedIPs is 0.0.0.0/0 either way and the gateway
+ * reroutes -- but crossing the local-breakout boundary flips AllowedIPs between
+ * `0.0.0.0/0` and the split-tunnel pair, so the device genuinely needs the new
+ * config. Pushing unconditionally for agent-backed devices is simpler than
+ * reasoning about which transition just happened, and is a no-op on the wire
+ * when the config is identical.
+ *
+ * Best-effort by design: the selection is already persisted and the gateway
+ * converges on its own reconcile, so a disconnected agent must not fail the
+ * request. Returns whether the push actually went out.
+ */
+async function pushConfigToAgent(client) {
+	if (!client || !client.agentId) return false;
+	try {
+		const roster = require('./mesh_roster');
+		const { renderClientConf } = require('./mesh_client_conf');
+		const { Agent } = require('../models/agent');
+		const agentManager = require('./agent_manager');
+
+		const site = await roster.bySiteId(client.siteId);
+		if (!site || !site.gatewayPublicKey) return false;
+		const agent = (await Agent.list({ where: { id: client.agentId } }))[0];
+		if (!agent) return false;
+
+		// privateKey null: the agent fills in the key it generated at enrolment.
+		await agentManager.sendCommand(agent, 'wireguard_apply', {
+			config: renderClientConf({ client, site, privateKey: null })
+		}, true);
+		return true;
+	} catch (e) {
+		console.warn(`[mesh] could not push config to the agent for ${client.name}: ${e.message}`);
+		return false;
+	}
+}
+
 module.exports = {
-	nextFreeIp, enroll, listForUser, allowedExits, setExit, grantExit, revokeExit, MAX_CLIENT_INDEX
+	nextFreeIp, enroll, listForUser, allowedExits, setExit, grantExit, revokeExit,
+	pushConfigToAgent, MAX_CLIENT_INDEX
 };
