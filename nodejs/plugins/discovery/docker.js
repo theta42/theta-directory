@@ -14,6 +14,11 @@ module.exports = {
     // unmanaged strangers a fresh install has to triage.
     { key: 'stackProject', label: 'Own compose project', type: 'text', required: false, placeholder: 'theta-suite' },
     { key: 'hostSlug', label: 'Parent host slug', type: 'text', required: false, placeholder: 'host_<hostname>' },
+    // The stack's service resources are seeded per-site as `<service>-<site>`
+    // (bootstrap.js: `sso-manager-718it`, `proxy-718it`, ...). A container's
+    // compose service name alone therefore never matches one, which is why the
+    // stack's own containers arrived parentless.
+    { key: 'serviceSuffix', label: 'Site slug suffix on service resources', type: 'text', required: false, placeholder: '<site slug>' },
     { key: 'location', label: 'Location / Site (optional)', type: 'site_select', required: false, placeholder: 'Default Site' },
     { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: false }
   ],
@@ -58,6 +63,7 @@ module.exports = {
 
             const stackProject = (config.stackProject || '').trim();
             const hostSlug = (config.hostSlug || '').trim();
+            const serviceSuffix = (config.serviceSuffix || '').trim();
 
             for (const c of containers) {
               const labels = c.Labels || {};
@@ -105,13 +111,27 @@ module.exports = {
                 }
               });
 
-              // Attach the container to the service it implements when the
-              // catalog already has one under that slug (the bootstrap seeds
-              // `sso-manager`, `proxy`, `jump-host`, … using the same names
-              // compose uses). The reconciler drops an edge whose parent does
-              // not resolve, so an unmatched name is simply not linked.
-              if (isOwnStack && composeService) {
-                edges.push({ parentSlug: composeService, childSlug: slug, relation: 'runs' });
+              // Attach the container to the service it implements.
+              //
+              // This used to emit the bare compose service name, on the premise
+              // that the bootstrap seeded `sso-manager`, `proxy`, `jump-host`
+              // under exactly the names compose uses. That stopped being true
+              // when service resources became site-scoped: they are seeded as
+              // `sso-manager-<site>`, with the bare name kept only as a
+              // grandfathering altSlug that nothing outside the bootstrap
+              // consults. Every edge from this plugin therefore named a parent
+              // that did not exist, was dropped, and left the stack's own
+              // containers sitting at the root of the resource tree on every
+              // fresh install.
+              //
+              // So: prefer the site-scoped slug when the suffix is configured,
+              // and fall back to the host, which is where an unattachable
+              // container belongs anyway.
+              const serviceSlug = isOwnStack && composeService
+                ? (serviceSuffix ? `${composeService}-${serviceSuffix}` : composeService)
+                : '';
+              if (serviceSlug) {
+                edges.push({ parentSlug: serviceSlug, childSlug: slug, relation: 'runs' });
               } else if (hostSlug) {
                 edges.push({ parentSlug: hostSlug, childSlug: slug, relation: 'hosts' });
               }
