@@ -96,6 +96,11 @@ config/*-secrets.js
 # fixture. Was committed by mistake across many prior releases. NB: this is
 # nodejs/config/, distinct from the root ./config/ secrets dir above.
 nodejs/config/*.sqlite
+# SQLite's WAL sidecars, written next to the .sqlite above whenever the DB is
+# open in WAL mode. Same runtime data, same reasons -- without these the dir
+# shows up dirty in `git status` after any local run.
+nodejs/config/*.sqlite-shm
+nodejs/config/*.sqlite-wal
 
 # Jekyll build artifact (GitHub Pages builds remotely; ignore locally)
 docs/_site
