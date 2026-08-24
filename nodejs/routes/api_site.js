@@ -54,6 +54,7 @@ function logAudit(action, details) {
 }
 
 const { nextFreeLdapServerId, ldapMeshHost, ldapHostFor, ldapHostForSpoke } = require('../utils/ldap_replication');
+const { seedFromMasterLdif } = require('../utils/ldap_seed');
 const meshRoster = require('../utils/mesh_roster');
 const { MeshSite } = require('../models/mesh_site');
 
@@ -1090,7 +1091,20 @@ router.post('/reregister', async (req, res, next) => {
 // Shared by /join (first adoption) and /resync (live-replication re-pull):
 // fetch the master's export and apply it locally (catalog + LDAP). Throws on
 // any failure that should surface as a 502 to the caller.
-async function adoptFromMaster({ masterUrl, joinKey }) {
+// `seedLdap` distinguishes the FIRST adoption (a join) from every later one (a
+// resync). They need opposite treatment of the directory and used to get the
+// same one:
+//
+//   join   -- this node's tree is its own bootstrap seed and nothing else.
+//             Replace it wholesale with the master's dump, offline, keeping
+//             entryUUID/entryCSN, so the two sides are genuinely the same
+//             objects before multi-provider replication is switched on.
+//             See utils/ldap_seed.js for what went wrong when they were not.
+//   resync -- replication already owns the tree. Re-seeding would discard
+//             everything since the join, including entries replicated in from
+//             other sites, so the LDIF is applied additively and is expected to
+//             be a no-op.
+async function adoptFromMaster({ masterUrl, joinKey, seedLdap = false }) {
   const base = String(masterUrl).replace(/\/+$/, '');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30000);
@@ -1150,37 +1164,80 @@ async function adoptFromMaster({ masterUrl, joinKey }) {
     console.warn(`[site] could not adopt the cluster roster: ${e.message}`);
   }
 
-  // 2. Adopt the LDAP tree. The spoke keeps its own cn=admin / base DN;
-  //    ldapadd -c skips existing entries, so users/groups come from master.
+  // 2. Adopt the LDAP tree.
+  //
+  // On a JOIN this is an offline replica seed: slapd is stopped, the local
+  // bootstrap tree is replaced by the master's slapcat dump with its
+  // operational attributes intact, and slapd is restarted. That is the only
+  // way entryUUID and entryCSN survive the copy, and they have to -- syncrepl
+  // matches on the first and orders by the second.
+  //
+  // What this replaces, and why: the join used to `ldapadd -c` the master's
+  // dump on top of the tree docker-entrypoint.sh had already seeded. ldapadd
+  // cannot modify an entry that exists, so every DN the entrypoint seeds --
+  // including god_admin, app_sso_admin, app_sso_invite, app_sso_oauth_admin and
+  // app_sso_service_account -- was skipped, and reported as success. Then
+  // replication came up, the spoke's minutes-old copies of those groups were
+  // NEWER than the master's, and syncrepl pushed them backwards. Joining a
+  // spoke silently reset the master's global groups to the spoke's bootstrap
+  // defaults, and tore down and re-added the master's entire ou=people
+  // underneath live sessions.
   let ldapNote = 'imported';
   // Unique per call and 0600: this file is a full slapcat dump (password
   // hashes included), and a fixed name meant two concurrent joins/resyncs
   // would overwrite each other's dump mid-ldapadd.
   const ldifFile = path.join(os.tmpdir(), `theta-site-join-${crypto.randomUUID()}.ldif`);
-  try {
-    const adminDn = conf.ldap && conf.ldap.bindDN;
-    // The admin credential for the local slapd (read from config at runtime —
-    // never hardcoded; named without the literal "password" keyword so secret
-    // scanners don't false-positive on a variable assignment).
-    const ldapCred = conf.ldap && conf.ldap.bindPassword;
-    // slapcat's operational attributes have to come out before ldapadd will
-    // take any of this (see stripOperationalAttrs).
-    fs.writeFileSync(ldifFile, stripOperationalAttrs(exportData.ldif), { encoding: 'utf8', mode: 0o600 });
-    const argv = ldapAddArgs({ bindDN: adminDn, ldapCred, ldifFile, ldapUrl: conf.ldap && conf.ldap.url });
-    await execFileAsync(argv[0], argv.slice(1), { maxBuffer: 4 * 1024 * 1024, timeout: 120000 });
-  } catch (e) {
-    // `ldapadd -c` exits non-zero even when the only failures were entries
-    // this spoke already had, which is every join. Classify before reporting.
-    const summary = summarizeLdapAddResult(e.stderr);
-    ldapNote = summary.note || ('skipped/failed: ' + e.message);
-  } finally {
-    // fs.promises, not the callback-style fs.unlink this used to call: the
-    // latter throws ERR_INVALID_ARG_TYPE synchronously when handed no
-    // callback, which the catch above then reported as "LDAP import
-    // skipped/failed" on EVERY join and resync -- even though ldapadd had
-    // already succeeded a line earlier. In a finally so a FAILED ldapadd
-    // doesn't leave the dump on disk either.
-    await fs.promises.unlink(ldifFile).catch(() => {});
+  if (seedLdap) {
+    await seedLocalDirectoryFromMaster();
+  } else {
+    await applyMasterLdifAdditively();
+  }
+
+  async function seedLocalDirectoryFromMaster() {
+    // A failure here THROWS rather than being folded into a note. Everything
+    // the caller does after this -- registering the spoke, taking a ServerID,
+    // enabling multi-provider replication -- is what turns a wrong local tree
+    // into damage on the MASTER. A join whose directory did not seed cleanly
+    // has to stop here rather than carry on and report success.
+    const seeded = await seedFromMasterLdif(exportData.ldif, { baseDn: localBaseDn });
+    ldapNote = `seeded ${seeded.entries} entries from the master (offline replica seed)`;
+  }
+
+  // Resync path: replication owns the tree by now, so this is expected to
+  // report every entry as already present. It stays because a spoke whose
+  // replication has been broken for a while can still be dragged forward by
+  // it, and because creating an entry that is genuinely missing is safe --
+  // unlike on a join, where re-creating one the master already has is exactly
+  // what propagated backwards.
+  async function applyMasterLdifAdditively() {
+    try {
+      const adminDn = conf.ldap && conf.ldap.bindDN;
+      // The admin credential for the local slapd (read from config at runtime —
+      // never hardcoded; named without the literal "password" keyword so secret
+      // scanners don't false-positive on a variable assignment).
+      const ldapCred = conf.ldap && conf.ldap.bindPassword;
+      // slapd refuses operational attributes over LDAP, so they have to come
+      // out here. That is precisely why this path cannot seed a replica and
+      // why a join no longer uses it: an entry re-created without its
+      // entryUUID/entryCSN is a NEW object as far as syncrepl is concerned.
+      fs.writeFileSync(ldifFile, stripOperationalAttrs(exportData.ldif), { encoding: 'utf8', mode: 0o600 });
+      const argv = ldapAddArgs({ bindDN: adminDn, ldapCred, ldifFile, ldapUrl: conf.ldap && conf.ldap.url });
+      await execFileAsync(argv[0], argv.slice(1), { maxBuffer: 4 * 1024 * 1024, timeout: 120000 });
+    } catch (e) {
+      // `ldapadd -c` exits non-zero even when the only failures were entries
+      // this node already had, which on a resync is all of them. Classify
+      // before reporting.
+      const summary = summarizeLdapAddResult(e.stderr);
+      ldapNote = summary.note || ('skipped/failed: ' + e.message);
+    } finally {
+      // fs.promises, not the callback-style fs.unlink this used to call: the
+      // latter throws ERR_INVALID_ARG_TYPE synchronously when handed no
+      // callback, which the catch above then reported as "LDAP import
+      // skipped/failed" on EVERY join and resync -- even though ldapadd had
+      // already succeeded a line earlier. In a finally so a FAILED ldapadd
+      // doesn't leave the dump on disk either.
+      await fs.promises.unlink(ldifFile).catch(() => {});
+    }
   }
 
   // 3. Adopt the master's agent-signing key, if it sent one (MULTI_SITE_SPEC.md
@@ -1395,7 +1452,7 @@ router.post('/join', async (req, res, next) => {
 
     let adopted;
     try {
-      adopted = await adoptFromMaster({ masterUrl, joinKey });
+      adopted = await adoptFromMaster({ masterUrl, joinKey, seedLdap: true });
     } catch (e) {
       return res.status(e.httpStatus || 502).json({ status: 'error', message: e.message });
     }

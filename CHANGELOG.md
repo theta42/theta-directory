@@ -1,3 +1,19 @@
+## [2.27.0] - 2026-08-24
+
+### Fixed
+- **CRITICAL: joining a spoke destroyed group memberships on the MASTER.** Confirmed on a live pair — `god_admin` lost its real member and `app_sso_service_account` lost two, reset to the spoke's bootstrap defaults, and the master's entire `ou=people` was torn down and re-added underneath logged-in sessions.
+
+  Two mechanisms, both flowing from the same mistake — the spoke **re-created** the master's entries instead of **copying** them:
+
+  - `ldapadd` cannot modify an entry that already exists. Every DN `docker-entrypoint.sh` seeds on first boot — the base DN, `ou=people`, `ou=groups`, `cn=admin`, and the five global groups `god_admin`, `app_sso_admin`, `app_sso_invite`, `app_sso_oauth_admin`, `app_sso_service_account` — was therefore **skipped**, so the master's version of those entries never reached the spoke. The import reported this as success: *"imported (N entries already present, skipped)"*.
+  - Every entry that *did* import got a fresh `entryUUID` and a brand-new `entryCSN`. Multi-provider replication was then switched on, and syncrepl orders by CSN — so the spoke's minutes-old entries were **newer** than the master's and propagated **backwards**. The master's own audit log records the moment: a `delete: member` alongside a `replace: entryUUID`, applied on `conn=-1` (internal, not a client).
+
+  A join now seeds the local directory **offline**: slapd is stopped, the bootstrap tree is replaced by the master's `slapcat` dump with its operational attributes intact, and slapd is restarted. That is how an OpenLDAP replica has always been meant to be brought up — a replica is a copy, and `entryUUID`/`entryCSN` are the identity and ordering syncrepl depends on, so only `slapadd` can write them. Seeding from the dump verbatim also removes the skip problem for free: there is nothing left to collide with.
+
+  A seeding failure now **throws** rather than becoming a note. Everything after it — registering the spoke, taking a ServerID, enabling replication — is what turns a wrong local tree into damage on the master, so a join whose directory did not seed cleanly stops there instead of reporting success. The previous database is moved aside rather than deleted and is restored, with slapd restarted, if anything goes wrong; the one state this must never leave behind is a node with no directory.
+
+  A **resync** is unchanged and still additive — replication owns the tree by then, and re-seeding would discard everything since the join, including entries replicated in from other sites.
+
 ## [2.26.1] - 2026-08-24
 
 ### Fixed
