@@ -164,6 +164,11 @@ router.post('/mesh/enroll', async (req, res, next) => {
 			const patch = {};
 			if (existing.publicKey !== publicKey) patch.publicKey = publicKey;
 			if (Object.keys(patch).length) await existing.update(patch);
+			// Re-push on every enrolment, not only when the key rotated. A
+			// reconnecting agent is the one moment we know it is listening,
+			// and the config it holds may be from a previous directory, a
+			// previous exit, or nothing at all.
+			await meshClients.pushConfigToAgent(existing);
 			return res.json({
 				status: 'ok',
 				rotated: !!patch.publicKey,
@@ -179,6 +184,20 @@ router.post('/mesh/enroll', async (req, res, next) => {
 		const { client } = await meshClients.enroll({
 			uid, name, siteId, publicKey, source: 'agent', agentId: agent.id
 		});
+
+		// Hand the device its peer config immediately.
+		//
+		// Nothing did this before: a config went out only when somebody
+		// CHANGED an exit, in the web UI, by hand. So a freshly enrolled agent
+		// got an address, got a peer built for it at the gateway, and then sat
+		// there with no config -- fully enrolled on both sides and unable to
+		// bring up a tunnel. Two of the three devices on the reference
+		// deployment had been in that state since the day they were installed.
+		//
+		// Best-effort: the enrolment itself has succeeded and must be reported
+		// as such. The agent re-enrols on every reconnect, which re-pushes.
+		await meshClients.pushConfigToAgent(client);
+
 		res.status(201).json({
 			status: 'ok',
 			client: {

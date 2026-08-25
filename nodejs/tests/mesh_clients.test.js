@@ -132,6 +132,68 @@ describe('config push on exit change', () => {
 		});
 		await expect(clients.pushConfigToAgent(client)).resolves.toBe(false);
 	});
+
+	// The agent decides whether the tunnel should be UP from its own site id
+	// and the exit it is on (theta-agent home_detect.go). Sending both with
+	// the config is what lets a config be delivered ahead of the moment it is
+	// needed instead of forcing the tunnel up on arrival.
+	test('the push carries the site and exit the decision depends on', async () => {
+		const sent = [];
+		jest.resetModules();
+		jest.doMock('../utils/agent_manager', () => ({
+			sendCommand: async (agent, type, payload) => { sent.push({ type, payload }); }
+		}), { virtual: false });
+		jest.doMock('../utils/mesh_roster', () => ({
+			bySiteId: async () => ({
+				siteId: 2, slug: 'site-home', gatewayPublicKey: 'k', gatewayEndpoint: 'gw:51820',
+				lan168: '192.168.1.0/24', lan172: '172.16.0.0/24', dnsHost: '192.168.1.1'
+			})
+		}));
+		jest.doMock('../models/agent', () => ({ Agent: { list: async () => [{ id: 'agent-1' }] } }));
+
+		const fresh = require('../utils/mesh_clients');
+		const pushed = await fresh.pushConfigToAgent({
+			id: 'c1', name: 'laptop', siteId: 2, assignedIp: '10.2.128.5',
+			exitSiteId: 7, agentId: 'agent-1'
+		});
+
+		expect(pushed).toBe(true);
+		expect(sent).toHaveLength(1);
+		expect(sent[0].type).toBe('wireguard_apply');
+		expect(sent[0].payload.siteId).toBe(2);
+		expect(sent[0].payload.exitSiteId).toBe(7);
+		expect(sent[0].payload.config).toContain('10.2.128.5/32');
+		jest.dontMock('../utils/agent_manager');
+		jest.dontMock('../utils/mesh_roster');
+		jest.dontMock('../models/agent');
+		jest.resetModules();
+	});
+
+	test('no exit is sent as null, not omitted', async () => {
+		const sent = [];
+		jest.resetModules();
+		jest.doMock('../utils/agent_manager', () => ({
+			sendCommand: async (agent, type, payload) => { sent.push(payload); }
+		}));
+		jest.doMock('../utils/mesh_roster', () => ({
+			bySiteId: async () => ({
+				siteId: 2, slug: 'site-home', gatewayPublicKey: 'k', gatewayEndpoint: 'gw:51820',
+				lan168: '192.168.1.0/24', lan172: '172.16.0.0/24'
+			})
+		}));
+		jest.doMock('../models/agent', () => ({ Agent: { list: async () => [{ id: 'agent-1' }] } }));
+
+		const fresh = require('../utils/mesh_clients');
+		await fresh.pushConfigToAgent({
+			id: 'c1', name: 'laptop', siteId: 2, assignedIp: '10.2.128.5',
+			exitSiteId: null, agentId: 'agent-1'
+		});
+		expect(sent[0]).toHaveProperty('exitSiteId', null);
+		jest.dontMock('../utils/agent_manager');
+		jest.dontMock('../utils/mesh_roster');
+		jest.dontMock('../models/agent');
+		jest.resetModules();
+	});
 });
 
 describe('exit selection', () => {
