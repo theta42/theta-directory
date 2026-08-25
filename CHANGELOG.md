@@ -1,3 +1,17 @@
+## [2.29.0] - 2026-08-25
+
+### Changed
+- **`managed` and `discovery_sources` now reach non-admin and machine callers.** Both were undeclared in `@simpleworkjs/directory-schema`'s `METADATA_KEYS`, and the non-admin path of `projectResource()` keeps only the declared public allowlist — so every response to a non-admin user or a service token had both fields removed.
+
+  The consumer that broke on it is jump-host: its `isCatalogHost` excludes resources the SSO merely *discovered* and nobody promoted, and it decides that from exactly these two fields. Receiving neither, it computed `autoDiscovered === false` for every resource and returned `true` for all of them — so the admin host view listed unpromoted Proxmox guests and UniFi clients as though they were catalog content. `/api/discovery/access/:uid` was unaffected, because this service applies the same catalog rule server-side before answering.
+
+  Requires `@simpleworkjs/directory-schema` ≥ 1.2.0. Neither key is sensitive — `managed` says an operator put the resource in the catalog, `discovery_sources` names the plugin that found it — and both are only ever returned for resources the caller can already reach.
+
+  v1.2.0 also declares the fourteen admin-only keys this service's reconcilers and discovery plugins write (`serviceName`, `dockerContainer`, `kernel`, `cpu`, `ram_total_gb`, `disk_total_gb`, `public_ip`, `interfaces`, `node`, `status`, `agentId`, `hostId`, `sourceId`, `last_seen`). No behaviour change from those — the admin path already passed them through — but an undeclared key is invisible to every non-admin caller, which is what produced this bug and the one v1.1.0 fixed.
+
+### Fixed
+- The lockfile's own `version` field had been stale since 2.25.0; it is regenerated in step with `package.json` now.
+
 ## [2.28.0] - 2026-08-25
 
 ### Fixed
