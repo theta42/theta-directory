@@ -18,12 +18,31 @@
 const router = require('express').Router();
 const { Resource, ResourceGroup } = require('../models/resource');
 const { withGroups } = require('../utils/user_groups');
+const { accessibleResources } = require('../services/access_projection');
 const {
 	envelope,
 	projectResource,
 	projectResources,
 	isDirectoryAdmin,
 } = require('@simpleworkjs/directory-schema');
+
+
+// The whole edge list, for the access projection's site walk. One query per
+// request rather than one per resource.
+async function allEdges() {
+	const { ResourceEdge } = require('../models/resource');
+	return ResourceEdge.list().catch(() => []);
+}
+
+// The agents that are still enrolled. A host resource keeps its
+// metadata.agentId after the agent is revoked or deleted, and access must not
+// outlive the enrolment -- so the projection is given the live set rather than
+// trusting the field.
+async function activeAgentIds() {
+	const { Agent } = require('../models/agent');
+	const rows = await Agent.list().catch(() => []);
+	return new Set(rows.filter(a => !a.revoked).map(a => a.id));
+}
 
 // Resolve the caller's groups once per request and hand back the projection
 // flag. Every handler needs both, and both are wrong if taken off req.user raw.
@@ -84,12 +103,8 @@ router.get('/me', async (req, res, next) => {
 				for (const rg of rgs) ids.add(rg.resourceId);
 			}
 			const all = await Resource.list();
-			accessible = all.filter(r => {
-				const isAuto = r.metadata?.discovery_sources?.length > 0 && !r.metadata.discovery_sources.includes('manual');
-				const isManaged = r.metadata?.managed === true;
-				if (isAuto && !isManaged) return false;
-				return ids.has(r.id) || (r.metadata && r.metadata.isPublic);
-			});
+			accessible = accessibleResources(all, await allEdges(),
+				{ groupIds: ids, memberOf: user.groups, activeAgentIds: await activeAgentIds() });
 		}
 		// resolvedAddress is the whole point of /me ("how do I reach it") and a
 		// service inherits it from its host, so it must be computed here rather
@@ -120,15 +135,14 @@ router.get(['/access/:uid', '/access/:uid/:slug'], async (req, res, next) => {
 			for (const rg of rgs) ids.add(rg.resourceId);
 		}
 		
-		let all = await Resource.list();
-		if (req.params.slug) all = all.filter(r => r.slug === req.params.slug);
-
-		let accessible = all.filter(r => {
-			const isAuto = r.metadata?.discovery_sources?.length > 0 && !r.metadata.discovery_sources.includes('manual');
-			const isManaged = r.metadata?.managed === true;
-			if (isAuto && !isManaged) return false;
-			return ids.has(r.id) || (r.metadata && r.metadata.isPublic);
-		});
+		// The whole catalog, not just the requested slug: a service inherits
+		// access from its host, so filtering to one slug BEFORE the projection
+		// would hide the host the decision depends on and answer "no access"
+		// for a service the user can plainly reach.
+		const all = await Resource.list();
+		let accessible = accessibleResources(all, await allEdges(),
+			{ groupIds: ids, memberOf: groups, activeAgentIds: await activeAgentIds() });
+		if (req.params.slug) accessible = accessible.filter(r => r.slug === req.params.slug);
 		
 		accessible = await Resource.withResolvedAddress(accessible);
 		res.json(envelope(projectResources(accessible, { fullMetadata })));
@@ -141,6 +155,7 @@ router.post('/sync', async (req, res, next) => {
 	try {
 		const { isDirectoryAdmin } = require('@simpleworkjs/directory-schema');
 		const { withGroups } = require('../utils/user_groups');
+const { accessibleResources } = require('../services/access_projection');
 		const user = await withGroups(req.user);
 		if (!isDirectoryAdmin(user) && !user.isMachine) {
 			return res.status(403).json(envelope({ error: 'Only admins or machines can sync discovery' }));

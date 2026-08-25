@@ -246,6 +246,29 @@ router.put('/nodes/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+
+// Drop the agent binding a host resource carries.
+//
+// metadata.agentId is what tells the rest of the Directory "this machine is
+// under management by that agent" -- the access projection reads it to decide
+// whether an agent-enrolled host is reachable without a per-host grant, and the
+// driver registry uses it to pick the agent driver. Leaving it behind on revoke
+// or delete leaves the resource claiming a binding that no longer exists.
+async function unbindAgentFromResources(agent) {
+  try {
+    const { Resource } = require('../models/resource');
+    const all = await Resource.list().catch(() => []);
+    for (const r of all) {
+      if (!r.metadata || r.metadata.agentId !== agent.id) continue;
+      const metadata = { ...r.metadata };
+      delete metadata.agentId;
+      await r.update({ metadata }).catch(() => {});
+    }
+  } catch (err) {
+    console.error(`[api_agent] could not unbind agent ${agent.id} from its resources:`, err.message);
+  }
+}
+
 // Revoke: the token stops authenticating immediately and any live socket is
 // dropped, so revocation takes effect without waiting for a reconnect.
 router.post('/nodes/:id/revoke', async (req, res, next) => {
@@ -253,6 +276,7 @@ router.post('/nodes/:id/revoke', async (req, res, next) => {
     const agent = await Agent.get(req.params.id);
     if (!agent) return res.status(404).json({ status: 'error', message: 'agent not found' });
     await agent.update({ revoked: true });
+    await unbindAgentFromResources(agent);
     agentManager.disconnect(agent.id, 4003, 'Enrollment revoked');
     logAgentAudit('revoke', { actor: req.user.uid, agentId: agent.id, agentName: agent.name });
     replicateOnFinish(res, 'agent-revoked');
@@ -281,6 +305,7 @@ router.delete('/nodes/:id', async (req, res, next) => {
     const agent = await Agent.get(req.params.id);
     if (!agent) return res.status(404).json({ status: 'error', message: 'agent not found' });
     agentManager.disconnect(agent.id, 4003, 'Enrollment deleted');
+    await unbindAgentFromResources(agent);
     await agent.delete();
     logAgentAudit('delete', { actor: req.user.uid, agentId: agent.id, agentName: agent.name });
     replicateOnFinish(res, 'agent-deleted');

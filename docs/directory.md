@@ -29,6 +29,32 @@ When you create a new **Host** or **Service** in the Directory via the web UI (o
 
 For example, if you create a Service named "Emby" with the slug `app_emby`, the system will create the LDAP groups `app_emby_access` and `app_emby_admin`. You can then assign users to these groups, and they will immediately see the service populate on their "My Services" dashboard.
 
+### Two exceptions, by design
+
+**A service registered by theta-agent gets no groups of its own.** When you run
+`theta-agent register systemd emby-server` on a host, the Directory creates a
+`service` resource under that host — but a systemd unit is not an access
+boundary. Whoever administers the machine administers its units. One
+`svc-<host>-systemd-<unit>_access` pair per unit per host is sprawl with no
+decision behind it, so these resources inherit access from the host that runs
+them instead, and the Directory hides the **Associated LDAP Groups** tab for
+them. Their Access column reads *via host*.
+
+This applies only to services an **agent** registered. A service resource you
+created by hand — the stack's own `sso-manager-<site>`, an OAuth-linked app —
+is something you chose to model, and keeps its groups.
+
+**A host running theta-agent is reachable without a per-host grant**, for users
+whose groups already cover hosts at that site (`god_admin`,
+`{site}_super_admin`, or the `{site}_hosts_access` / `{site}_hosts_admin`
+aggregate — see [groups](groups.html)). Installing the agent requires root on
+the machine *and* a join key from this Directory, so it is already under
+management. The `<slug>_access` / `<slug>_admin` groups are still created and
+still work for granting access to anyone else.
+
+Access does not outlive the enrolment: revoking or deleting an agent clears the
+binding and removes the host from every access projection immediately.
+
 ## Resource Metadata
 
 Resources carry a flexible `metadata` JSON object that can store essential context for your applications. The UI natively supports the following metadata fields:
@@ -93,6 +119,28 @@ ancestors — otherwise searching for something inside a folded subtree would
 silently return nothing. Clearing the box restores your saved shape.
 
 <a href="images/directory.png" target="_blank"><img src="images/directory.png" alt="Directory & inventory list view" width="80%"></a>
+
+### Live status and control
+
+Hosts carry a coloured dot in the tree for their agent (green healthy, amber
+high load, red enrolled-but-offline, grey no agent). **Services registered by an
+agent carry the same dot for the service itself**: green active, red inactive,
+grey when the host agent is offline or has not reported the service yet, and a
+darker grey when the unit is no longer present on the host at all. A service's
+state is only as current as the agent reporting it, so an offline agent greys
+the service out rather than leaving a stale green.
+
+Opening a registered service shows **Live status & metrics** — sub-state, CPU,
+memory, restart count, uptime, and for timers and cron entries the next/last run
+— plus **Start / Restart / Stop** (and **Reload** for systemd units). The
+buttons dispatch over the agent's signed command channel; `stop` and `restart`
+are confirmed first and marked high-risk, `start` is not. They are disabled with
+the reason in the tooltip when the agent is not connected, rather than appearing
+and vanishing as it reconnects.
+
+Only subtypes with a real lifecycle are offered controls: `systemd`, `docker`,
+`podman`, `openrc`. A timer, a cron entry or a VM has no `systemctl start`, so
+no button is shown rather than one that can only fail.
 
 ## Slug conventions
 
