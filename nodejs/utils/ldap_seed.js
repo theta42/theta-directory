@@ -67,6 +67,7 @@ const io = {
   rename: (a, b) => fs.promises.rename(a, b),
   mkdir: (p) => fs.promises.mkdir(p, { recursive: true }),
   rm: (p) => fs.promises.rm(p, { recursive: true, force: true }),
+  copyFile: (a, b) => fs.promises.copyFile(a, b),
   writeFile: (p, d, o) => fs.promises.writeFile(p, d, o),
   kill: (pid, sig) => process.kill(pid, sig),
   spawnDetached: null, // set below; kept on io so tests can replace it
@@ -160,14 +161,47 @@ function isMdbFile(name) {
   return name === 'data.mdb' || name === 'lock.mdb';
 }
 
+// moveFile renames, falling back to copy+unlink when the two paths are on
+// different filesystems.
+//
+// rename(2) cannot cross a mount boundary -- it returns EXDEV -- and every
+// caller here is moving a file that may sit on a Docker volume. This is not
+// theoretical: seeding failed on the first real spoke join with
+//
+//   EXDEV: cross-device link not permitted,
+//   rename '/var/lib/ldap/data.mdb' -> '/tmp/ldap-preseed-<uuid>/data.mdb'
+//
+// because /var/lib/ldap is a volume and /tmp is the container's overlay. The
+// stash now lives inside the data directory (see below) so the fallback should
+// never fire, but a data directory assembled from several mounts is somebody
+// else's legitimate choice and must not break the join.
+async function moveFile(from, to) {
+  try {
+    await io.rename(from, to);
+  } catch (e) {
+    if (e.code !== 'EXDEV') throw e;
+    await io.copyFile(from, to);
+    await io.rm(from);
+  }
+}
+
+// moveDatabaseAside stashes the existing database INSIDE the data directory.
+//
+// os.tmpdir() was the obvious choice and the wrong one: the data directory is
+// a mount of its own in every deployment we ship, so the rename was guaranteed
+// to fail with EXDEV before it had moved a single file. A stash that is a child
+// of the directory being emptied is on that directory's filesystem by
+// construction, whatever it is mounted from. The leading dot and the mdb-only
+// filter keep it invisible to slapd, which opens data.mdb and lock.mdb by name
+// and ignores everything else in olcDbDirectory.
 async function moveDatabaseAside(dataDir) {
-  const stash = path.join(os.tmpdir(), `ldap-preseed-${crypto.randomUUID()}`);
+  const stash = path.join(dataDir, `.ldap-preseed-${crypto.randomUUID()}`);
   await io.mkdir(stash);
   const moved = [];
   const names = await io.readdir(dataDir);
   for (const name of names) {
     if (!isMdbFile(name)) continue;
-    await io.rename(path.join(dataDir, name), path.join(stash, name));
+    await moveFile(path.join(dataDir, name), path.join(stash, name));
     moved.push(name);
   }
   return { stash, moved };
@@ -178,7 +212,7 @@ async function restoreDatabase(dataDir, backup) {
     // Clear whatever slapadd managed to write before failing, or the rename
     // lands on top of a half-built database.
     await io.rm(path.join(dataDir, name)).catch(() => {});
-    await io.rename(path.join(backup.stash, name), path.join(dataDir, name)).catch(() => {});
+    await moveFile(path.join(backup.stash, name), path.join(dataDir, name)).catch(() => {});
   }
 }
 
@@ -280,6 +314,7 @@ module.exports = {
   stopSlapd,
   waitForSlapd,
   moveDatabaseAside,
+  moveFile,
   restoreDatabase,
   countEntries,
   isMdbFile,

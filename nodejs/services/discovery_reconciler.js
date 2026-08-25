@@ -349,8 +349,15 @@ class DiscoveryReconciler {
 
     if (autoPromote) {
       const { Group } = require('../models/group_ldap');
+      const { templateFor } = require('./subtype_templates');
       for (const res of resources) {
         if (!res._actualId || res.metadata?.managed !== true) continue;
+        // A service an agent registered has no groups of its own: a systemd
+        // unit is not an access boundary, and one
+        // `svc-<host>-systemd-<unit>_access` pair per unit per host is sprawl
+        // with no decision behind it. Access follows the host
+        // (services/access_projection.js).
+        if (!templateFor(res).ownGroups) continue;
         const accessGroup = `${res.slug}_access`;
         const adminGroup = `${res.slug}_admin`;
         try {

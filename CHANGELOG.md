@@ -1,3 +1,45 @@
+## [2.28.0] - 2026-08-25
+
+### Fixed
+- **CRITICAL: spoke joins failed outright — the v2.27.0 seeding could never run.**
+
+  ```
+  [site-join] FAILED: join failed (502): LDAP replica seeding failed and the
+  previous directory was restored: EXDEV: cross-device link not permitted,
+  rename '/var/lib/ldap/data.mdb' -> '/tmp/ldap-preseed-<uuid>/data.mdb'
+  ```
+
+  The existing database was stashed in `os.tmpdir()` before `slapadd` rebuilt the tree. `/var/lib/ldap` is a volume in every deployment we ship and `/tmp` is the container's overlay, so `rename(2)` crossed a mount boundary and returned `EXDEV` before moving a single file. The restore-and-rethrow path did its job — no spoke was damaged — but no spoke could join either.
+
+  Worth noting why hand-testing would not have caught it: `mv(1)` falls back to copy+unlink across filesystems, so the same operation typed at a shell succeeds. Node's `fs.rename` does not.
+
+  The stash is now a dot-prefixed directory **inside** the data directory, which is on that directory's filesystem by construction, whatever it is mounted from. `moveFile` also falls back to copy+unlink on `EXDEV`, so a data directory assembled from several mounts still works. Covered by tests against a real filesystem, not only the mocked one — the bug was in the interaction with it.
+
+- **A service registered by the agent had no live status and no controls.** Every call to `AgentManager.getAgentForResource()` in `theta_agent_driver.js` was made **without `await`**. It is `async`, so `!agent.isOnline` was evaluated on a Promise and was therefore always true: `getMetrics` reported the agent offline unconditionally, `execAction` answered "Agent not connected" unconditionally, and the live-status panel — which has existed for some time — could never render anything. `supports()` had the same bug inverted, comparing a Promise against `null` and so claiming every resource in the catalog.
+
+- **Service control targeted a name that is not a unit on any host.** `execAction` resolved the target as `params.serviceName || metadata.systemdService || resource.slug`, skipping `metadata.serviceName` — the generic field the agent reconciler actually writes. So it fell through to the slug, `svc-<host>-<subtype>-<unit>`, and every start/stop/restart acted on nothing. `getLogs` had the same gap.
+
+### Added
+- **Live status and control for registered services.** A service registered through the agent now carries the same coloured status dot as a host in the resource tree — green active, red inactive, grey when the reporting agent is offline or has not yet reported it, darker grey when the unit is gone from the host. A service is only as current as the agent reporting it, so an offline agent greys the service out rather than leaving a stale green.
+
+  The detail panel gains **Start / Restart / Stop**, plus **Reload** for systemd units. Dispatched over the agent's signed command channel; `stop` and `restart` are confirmed and marked high-risk, `start` is not. Disabled with the reason in the tooltip when the agent is down, rather than appearing and vanishing as it reconnects. Only subtypes with a real lifecycle are offered controls (`systemd`, `docker`, `podman`, `openrc`) — a timer or a cron entry has no `systemctl start`, and a button that can only fail is worse than no button. The subtype is sent with the command so the agent runs `docker restart` for a container rather than `systemctl restart`.
+
+- **A host running theta-agent is a jump target automatically.** Only the stack host was offered, because nothing ever gave an agent-enrolled host the groups the access projection keys on — so every other agent host had to be granted access one LDAP group at a time. Installing the agent requires root on the machine *and* a join key from this Directory: the machine is already under management, and a second grant added nothing.
+
+  A host with a live agent is now reachable by any user whose groups already cover hosts at that site — `god_admin`, `{site}_super_admin`, or the `{site}_hosts_access` / `{site}_hosts_admin` aggregate, evaluated by the existing `utils/groups.js` model rather than a new rule. Narrow on purpose: hosts only, only subtypes that are a machine you log into (an iLO/BMC is never offered), and only while the agent is **still enrolled**. Hosts without an agent are unchanged.
+
+- **Services registered by an agent no longer get LDAP groups of their own.** A systemd unit is not an access boundary — whoever administers the host administers its units — and one `svc-<host>-systemd-<unit>_access` pair per unit per host is sprawl with no decision behind it. These resources inherit access from their host; the Directory hides the Associated LDAP Groups tab for them and their Access column reads *via host*. A service resource created by hand (the stack's own `sso-manager-<site>`, an OAuth-linked app) is something an operator modelled and keeps its groups.
+
+- **`services/subtype_templates.js`** — one table answering what a resource of a given kind/subType gets automatically (`sshCapable`, `ownGroups`, `inheritsHost`), replacing the same two questions asked ad-hoc at whichever call site noticed first.
+
+- **`services/access_projection.js`** — `/me` and `/access/:uid` had two copies of the access filter and are required to agree: `/me` is what a human sees in the Directory, `/access/:uid` is what jump-host offers them as a target, and a resource visible in one but not the other is a bug either way round. One implementation now, unit-tested directly.
+
+### Security
+- **Access no longer outlives an enrolment.** `metadata.agentId` was never cleared when an agent was revoked or deleted, so the new "an agent host is reachable" rule would have kept granting access through a dead binding. Revoke and delete now unbind the agent from its resources, and the projection is handed the set of agents that are still enrolled rather than trusting the field. Given no such set it grants nothing through that rule — a security predicate must not default to permissive when its input is missing.
+
+### Documentation
+- `docs/directory.md` documents the two group-model exceptions and the live status/control panel.
+
 ## [2.27.0] - 2026-08-24
 
 ### Fixed

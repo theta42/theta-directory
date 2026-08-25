@@ -16,17 +16,47 @@ class ThetaAgentDriver extends BaseDriver {
     ]);
   }
 
+  // supports() is the synchronous predicate DriverRegistry calls while picking
+  // a driver, so it can only answer from the resource itself.
+  //
+  // It used to end with `AgentManager.getAgentForResource(resource.id) !== null`
+  // -- an ASYNC call with no await, so the comparison was against a Promise,
+  // which is never null. This driver therefore claimed every resource in the
+  // catalog. It happens to be harmless today (resolveDriver awaits the agent
+  // lookup itself and never consults this method for the agent driver), but a
+  // predicate that always says yes is a trap for the next caller.
   supports(resource) {
     if (!resource) return false;
     const subType = (resource.metadata && resource.metadata.subType) || '';
     if (this.supportedSubtypes.has(subType.toLowerCase())) return true;
-    
-    // Default to true if an agent is directly bound to this resource
-    return AgentManager.getAgentForResource(resource.id) !== null;
+    // A resource an agent is bound to carries the binding in its own metadata;
+    // resolveDriver does the authoritative (awaited) lookup.
+    return Boolean(resource.metadata && resource.metadata.agentId);
+  }
+
+  // The unit/container/process name to act on for a service resource.
+  //
+  // `serviceName` is the generic field the agent reconciler writes for every
+  // subtype (agent_manager.js reconcileServicesFromTelemetry); systemdService
+  // and dockerContainer are the legacy per-subtype fields kept for resources
+  // created before it existed. Falling through to `resource.slug` -- which is
+  // what this used to do first -- targets a name like
+  // `svc-lxc-213-systemd-emby-server`, which is not a unit on any host, so
+  // every start/stop/restart silently acted on nothing. The resource NAME is a
+  // better last resort than its slug, because the reconciler sets it to the
+  // real unit name.
+  static serviceTarget(resource, params = {}) {
+    const meta = (resource && resource.metadata) || {};
+    return params.serviceName
+      || meta.serviceName
+      || meta.systemdService
+      || meta.dockerContainer
+      || (resource && resource.name)
+      || (resource && resource.slug);
   }
 
   async getMetrics(resource) {
-    const agent = AgentManager.getAgentForResource(resource.id);
+    const agent = await AgentManager.getAgentForResource(resource.id);
     if (!agent || !agent.isOnline) {
       return {
         status: 'offline',
@@ -99,7 +129,7 @@ class ThetaAgentDriver extends BaseDriver {
   }
 
   async execAction(resource, action, params = {}) {
-    const agent = AgentManager.getAgentForResource(resource.id);
+    const agent = await AgentManager.getAgentForResource(resource.id);
     if (!agent || !agent.isOnline) {
       return { status: 'error', driver: this.name, message: 'Agent not connected' };
     }
@@ -121,12 +151,34 @@ class ThetaAgentDriver extends BaseDriver {
       return { status: 'ok', driver: this.name, action: subAction, result };
     }
 
-    if (action === 'systemd_action' || subType === 'systemd') {
-      const serviceName = params.serviceName || (resource.metadata && resource.metadata.systemdService) || resource.slug;
-      const subAction = params.subAction || action; // start, stop, restart, reload
+    // Service lifecycle. `service_action` is the name the Directory UI sends;
+    // `systemd_action` stays accepted because that is the wire command the
+    // agent has always implemented and older callers use it directly.
+    if (['service_action', 'systemd_action', 'start', 'stop', 'restart', 'reload'].includes(action)
+        || ThetaAgentDriver.CONTROLLABLE_SUBTYPES.has(subType)) {
+      const subAction = params.subAction
+        || (['systemd_action', 'service_action'].includes(action) ? null : action);
+      if (!ThetaAgentDriver.SERVICE_ACTIONS.has(subAction)) {
+        return {
+          status: 'error', driver: this.name,
+          message: `Unsupported service action '${subAction || action}' -- use ${[...ThetaAgentDriver.SERVICE_ACTIONS].join(', ')}`
+        };
+      }
+      if (!ThetaAgentDriver.CONTROLLABLE_SUBTYPES.has(subType)) {
+        // A timer, a cron entry or a VM does not start and stop through
+        // systemctl the way a unit does; saying so beats dispatching a command
+        // that will fail on the host.
+        return {
+          status: 'error', driver: this.name,
+          message: `'${subType || 'unknown'}' services cannot be controlled from here`
+        };
+      }
+      const serviceName = ThetaAgentDriver.serviceTarget(resource, params);
       const result = await AgentManager.sendCommand(agent.id, 'systemd_action', {
         service: serviceName,
+        subtype: subType,
         action: subAction,
+        // stop and restart interrupt something that is running; start does not.
         isHighRisk: ['stop', 'restart'].includes(subAction)
       });
       return { status: 'ok', driver: this.name, service: serviceName, action: subAction, result };
@@ -142,13 +194,13 @@ class ThetaAgentDriver extends BaseDriver {
   }
 
   async getLogs(resource, lines = 100) {
-    const agent = AgentManager.getAgentForResource(resource.id);
+    const agent = await AgentManager.getAgentForResource(resource.id);
     if (!agent || !agent.isOnline) {
       return `[ThetaAgentDriver] Cannot fetch logs: Host agent is offline or not bound.`;
     }
 
     const subType = ((resource.metadata && resource.metadata.subType) || '').toLowerCase();
-    const serviceName = (resource.metadata && resource.metadata.systemdService) || resource.slug;
+    const serviceName = ThetaAgentDriver.serviceTarget(resource);
 
     if (subType === 'systemd') {
       return `[journalctl -u ${serviceName} -n ${lines}]\nFetching real-time journal logs from host agent...`;
@@ -160,5 +212,13 @@ class ThetaAgentDriver extends BaseDriver {
     return `[ThetaAgentDriver] Logs for ${resource.name} (${subType}): Log streaming active.`;
   }
 }
+
+// Which service subtypes have a start/stop/restart that means something, and
+// which verbs are allowed. Both are allowlists on purpose: the agent's
+// ServiceControl runs `systemctl <action> <service>`, so an unconstrained
+// action string is an argument-injection surface, and the UI must not offer a
+// button for a subtype where pressing it can only fail.
+ThetaAgentDriver.CONTROLLABLE_SUBTYPES = new Set(['systemd', 'docker', 'podman', 'openrc']);
+ThetaAgentDriver.SERVICE_ACTIONS = new Set(['start', 'stop', 'restart', 'reload']);
 
 module.exports = ThetaAgentDriver;

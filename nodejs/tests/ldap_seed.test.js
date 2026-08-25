@@ -7,6 +7,7 @@
 // its identity attributes intact, and a failure must never leave this node
 // without a directory.
 
+const os = require('os');
 const path = require('path');
 const seed = require('../utils/ldap_seed');
 const io = seed.__io;
@@ -146,6 +147,56 @@ describe('seedFromMasterLdif happy path', () => {
     } finally { h.restore(); }
   });
 
+  test('stashes the old database inside the data directory, not in /tmp', async () => {
+    // Regression. The stash used to be os.tmpdir(), and the data directory is
+    // a volume mount in every deployment we ship -- so rename(2) crossed a
+    // filesystem boundary and the very first real spoke join died with
+    // "EXDEV: cross-device link not permitted, rename '/var/lib/ldap/data.mdb'
+    // -> '/tmp/ldap-preseed-<uuid>/data.mdb'" before moving a single file.
+    // A stash under the data directory is on its filesystem by construction.
+    const h = harness();
+    try {
+      await seed.seedFromMasterLdif(DUMP, { baseDn: 'dc=theta42,dc=com' });
+      const aside = h.calls.renamed.filter(([from]) => path.dirname(String(from)) === '/var/lib/ldap');
+      expect(aside).toHaveLength(2);
+      for (const [, to] of aside) {
+        expect(String(to).startsWith('/var/lib/ldap/')).toBe(true);
+        expect(String(to).startsWith(os.tmpdir() + path.sep)).toBe(false);
+        // Dot-prefixed so it stays out of the way of anything listing the
+        // directory; slapd only ever opens data.mdb and lock.mdb by name.
+        expect(path.basename(path.dirname(String(to)))).toMatch(/^\.ldap-preseed-/);
+      }
+    } finally { h.restore(); }
+  });
+
+  test('falls back to copy+unlink when a move does cross a filesystem', async () => {
+    // A data directory assembled from several mounts is somebody's legitimate
+    // choice; EXDEV must not fail the join.
+    const copied = [];
+    const h = harness({
+      rename: async () => { throw Object.assign(new Error('EXDEV'), { code: 'EXDEV' }); },
+      copyFile: async (a, b) => { copied.push([a, b]); },
+    });
+    try {
+      await seed.seedFromMasterLdif(DUMP, { baseDn: 'dc=theta42,dc=com' });
+      expect(copied.map(([from]) => path.basename(from)).sort()).toEqual(['data.mdb', 'lock.mdb']);
+      // And the source is unlinked, or the "moved" file is still in place and
+      // slapadd would be writing alongside the old database.
+      for (const [from] of copied) expect(h.calls.removed).toContain(from);
+    } finally { h.restore(); }
+  });
+
+  test('a move failure that is not EXDEV is not papered over', async () => {
+    const h = harness({
+      rename: async () => { throw Object.assign(new Error('EACCES'), { code: 'EACCES' }); },
+      copyFile: async () => { throw new Error('copyFile should not be reached'); },
+    });
+    try {
+      await expect(seed.seedFromMasterLdif(DUMP, { baseDn: 'dc=theta42,dc=com' }))
+        .rejects.toThrow(/EACCES/);
+    } finally { h.restore(); }
+  });
+
   test('the dump is written 0600 -- it carries every password hash', async () => {
     let mode = null;
     const h = harness({
@@ -170,8 +221,10 @@ describe('seedFromMasterLdif failure handling', () => {
       await expect(seed.seedFromMasterLdif(DUMP, { baseDn: 'dc=theta42,dc=com' }))
         .rejects.toThrow(/previous directory was restored/);
 
-      // Moved aside, then moved back.
-      const back = h.calls.renamed.filter(([, to]) => String(to).startsWith('/var/lib/ldap/'));
+      // Moved aside, then moved back. Matched on the parent directory rather
+      // than a prefix: the stash is now a CHILD of the data directory, so a
+      // prefix test would also match the moves that put the files there.
+      const back = h.calls.renamed.filter(([, to]) => path.dirname(String(to)) === '/var/lib/ldap');
       expect(back.map(([, to]) => path.basename(to)).sort()).toEqual(['data.mdb', 'lock.mdb']);
 
       // The one state this must never leave behind is a node with no directory.
@@ -215,5 +268,74 @@ describe('discovery helpers', () => {
   test('counts entries for the audit note', () => {
     expect(seed.countEntries(DUMP)).toBe(2);
     expect(seed.countEntries('')).toBe(0);
+  });
+});
+
+// The unit tests above drive a mocked io. These use the REAL filesystem, because
+// the bug they cover was in the interaction with it: fs.rename returns EXDEV
+// across a mount, and -- unlike the mv(1) an operator would reach for while
+// testing by hand, which silently falls back to copy+unlink -- Node does not.
+describe('moveDatabaseAside/restoreDatabase against a real filesystem', () => {
+  const fs = require('fs');
+  const realOs = require('os');
+
+  function realDataDir() {
+    const dir = fs.mkdtempSync(path.join(realOs.tmpdir(), 'ldapseed-'));
+    fs.writeFileSync(path.join(dir, 'data.mdb'), 'DATA');
+    fs.writeFileSync(path.join(dir, 'lock.mdb'), 'LOCK');
+    fs.writeFileSync(path.join(dir, 'slapd.log'), 'LOG');
+    fs.writeFileSync(path.join(dir, 'auditlog.ldif'), 'AUDIT');
+    return dir;
+  }
+
+  test('round-trips the database and leaves the logs where they were', async () => {
+    const dir = realDataDir();
+    try {
+      const backup = await seed.moveDatabaseAside(dir);
+      // The stash must be inside the data directory -- that is what makes the
+      // rename same-filesystem whatever the directory is mounted from.
+      expect(path.dirname(backup.stash)).toBe(dir);
+      expect(fs.existsSync(path.join(dir, 'data.mdb'))).toBe(false);
+      expect(fs.existsSync(path.join(backup.stash, 'data.mdb'))).toBe(true);
+      // Logs are the record of what happened; losing them at the moment
+      // something goes wrong is the worst possible time.
+      expect(fs.readFileSync(path.join(dir, 'slapd.log'), 'utf8')).toBe('LOG');
+      expect(fs.readFileSync(path.join(dir, 'auditlog.ldif'), 'utf8')).toBe('AUDIT');
+
+      await seed.restoreDatabase(dir, backup);
+      expect(fs.readFileSync(path.join(dir, 'data.mdb'), 'utf8')).toBe('DATA');
+      expect(fs.readFileSync(path.join(dir, 'lock.mdb'), 'utf8')).toBe('LOCK');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('restore replaces whatever a failed slapadd left behind', async () => {
+    const dir = realDataDir();
+    try {
+      const backup = await seed.moveDatabaseAside(dir);
+      fs.writeFileSync(path.join(dir, 'data.mdb'), 'HALF-BUILT');
+      await seed.restoreDatabase(dir, backup);
+      expect(fs.readFileSync(path.join(dir, 'data.mdb'), 'utf8')).toBe('DATA');
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('moveFile copies across a filesystem boundary rather than failing', async () => {
+    // Simulated by making rename report EXDEV; the fallback itself runs for
+    // real against the filesystem.
+    const dir = realDataDir();
+    const saved = seed.__io.rename;
+    seed.__io.rename = async () => { throw Object.assign(new Error('EXDEV'), { code: 'EXDEV' }); };
+    try {
+      const dest = path.join(dir, 'moved.mdb');
+      await seed.moveFile(path.join(dir, 'data.mdb'), dest);
+      expect(fs.readFileSync(dest, 'utf8')).toBe('DATA');
+      expect(fs.existsSync(path.join(dir, 'data.mdb'))).toBe(false);
+    } finally {
+      seed.__io.rename = saved;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

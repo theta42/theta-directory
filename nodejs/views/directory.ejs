@@ -96,7 +96,7 @@
                 <td class="ps-3">
                   {{{indentHtml}}}
                   {{{caretHtml}}}
-                  {{#isHost}}<span class="d-inline-block rounded-circle me-1" style="width:10px;height:10px;background:{{agentColor}};" title="{{agentStatusTitle}}"></span>{{/isHost}}
+                  {{#hasStatusDot}}<span class="d-inline-block rounded-circle me-1" style="width:10px;height:10px;background:{{agentColor}};" title="{{agentStatusTitle}}"></span>{{/hasStatusDot}}
                   <a href="#" class="text-reset text-decoration-none me-1" onclick="openEditModal('{{id}}'); return false;" title="{{name}}">
                     <strong>{{displayName}}</strong>
                   </a>
@@ -658,6 +658,13 @@
       url: id ? {path: '/directory/' + resourcesById[id].slug} : null,
     });
     $('#sw-modal-tab-groups-btn, #sw-modal-tab-children-btn, #sw-modal-tab-secrets-btn').closest('li').toggle(!!id);
+    // Services an agent registered are gated by their host, not by groups of
+    // their own -- offering the tab invites operators to create a
+    // `svc-<host>-systemd-<unit>_access` group per unit per host, which is
+    // sprawl with no decision behind it.
+    if (id && inheritsHostAccess(resourcesById[id])) {
+      $('#sw-modal-tab-groups-btn').closest('li').hide();
+    }
   }
 
   function refreshChildrenUI(resourceId) {
@@ -812,6 +819,7 @@
 
   function attachAgentStatus(n) {
     n.isHost = true;
+    n.hasStatusDot = true;
     const name = (n.name || '').toLowerCase();
     const slug = (n.slug || '').replace(/^host_/, '').toLowerCase();
     const a = agentsByResource[n.id] || agentsByHost[name] || (slug && agentsByHost[slug]);
@@ -830,6 +838,85 @@
     const high = (t.cpu_usage_percent > 80) || (t.ram_usage_percent > 80) || (t.disk_usage_percent > 90);
     n.agentColor = high ? '#ffc107' : '#198754';
     n.agentStatusTitle = high ? 'Connected — high load' : 'Connected — healthy';
+  }
+
+  // Mirrors services/subtype_templates.js: a service an AGENT registered gets
+  // no groups of its own and inherits access from its host. A hand-created
+  // service resource (the stack's own sso-manager-<site>, an OAuth-linked app)
+  // is a catalog entry an operator modelled and keeps its groups.
+  const AGENT_SERVICE_SUBTYPES = new Set([
+    'systemd', 'docker', 'podman', 'process', 'openrc', 'systemd-timer', 'cron'
+  ]);
+  function inheritsHostAccess(r) {
+    if (!r || (r.kind !== 'service' && r.kind !== 'container')) return false;
+    const meta = r.metadata || {};
+    return Boolean(meta.agentId) && AGENT_SERVICE_SUBTYPES.has(String(meta.subType || '').toLowerCase());
+  }
+
+  // The unit/container name to act on for a service resource. Mirrors
+  // drivers/theta_agent_driver.js's serviceTarget() -- `serviceName` is the
+  // generic field the agent reconciler writes; the per-subtype fields are for
+  // resources created before it existed. NOT the slug: that is
+  // `svc-<host>-<subtype>-<name>`, which is not a unit on any host.
+  function serviceTargetName(r) {
+    const meta = (r && r.metadata) || {};
+    return meta.serviceName || meta.systemdService || meta.dockerContainer || (r && r.name) || '';
+  }
+
+  // Find the live ServiceMetric the agent reported for a service resource.
+  // Services carry their host's agentId in metadata (agent_manager.js
+  // reconcileServicesFromTelemetry), so the lookup does not need the tree.
+  function liveServiceMetric(r) {
+    const meta = (r && r.metadata) || {};
+    const a = meta.agentId ? agentsById[meta.agentId] : null;
+    if (!a) return { agent: null, svc: null };
+    const list = ((a.lastTelemetry || {}).services) || [];
+    const want = serviceTargetName(r);
+    const subType = meta.subType || 'systemd';
+    const svc = list.find(s => s && s.name === want && (!s.subtype || s.subtype === subType))
+      || list.find(s => s && s.name === want)
+      || null;
+    return { agent: a, svc };
+  }
+
+  // The same status dot hosts get, for a registered service. A service is only
+  // as reachable as the agent that reports it, so an offline agent greys the
+  // service out rather than leaving it showing its last known state as if it
+  // were current.
+  function attachServiceStatus(n) {
+    const { agent, svc } = liveServiceMetric(n);
+    if (!agent) {
+      // Stack services (kind: 'service', no agent) are catalog entries rather
+      // than things an agent watches; no dot is more honest than a grey one.
+      if (!(n.metadata && n.metadata.agentId)) return;
+      n.hasStatusDot = true;
+      n.agentColor = '#adb5bd';
+      n.agentStatusTitle = agentsUnavailable ? 'Agent service unreachable' : 'Reporting agent not found';
+      return;
+    }
+    n.hasStatusDot = true;
+    if (!agent.isOnline) {
+      n.agentColor = '#adb5bd';
+      n.agentStatusTitle = 'Host agent offline — service state unknown';
+      return;
+    }
+    if (!svc) {
+      n.agentColor = '#adb5bd';
+      n.agentStatusTitle = 'Registered, but the agent has not reported it yet';
+      return;
+    }
+    if (svc.load_state === 'not-found') {
+      n.agentColor = '#6c757d';
+      n.agentStatusTitle = 'Not present on the host any more';
+      return;
+    }
+    if (svc.active) {
+      n.agentColor = '#198754';
+      n.agentStatusTitle = 'Active' + (svc.substate ? ' (' + svc.substate + ')' : '');
+      return;
+    }
+    n.agentColor = '#dc3545';
+    n.agentStatusTitle = 'Inactive' + (svc.substate ? ' (' + svc.substate + ')' : '');
   }
 
   // Agent tab body for the resource modal.
@@ -1144,6 +1231,13 @@
   function accessCellHtml(resourceId) {
     const summary = accessSummary[resourceId];
     if (!summary || !summary.groups.length) {
+      // A service an agent registered has no groups on purpose: a systemd unit
+      // is not an access boundary, so access follows the host that runs it.
+      // Saying "no groups" there reads as a misconfiguration when it is the
+      // design.
+      if (inheritsHostAccess(resourcesById[resourceId])) {
+        return '<span class="badge bg-light text-dark border" title="Access follows the host that runs this service">via host</span>';
+      }
       return '<span class="badge bg-light text-dark border" title="No LDAP group gates this resource">no groups</span>';
     }
     const dangling = summary.groups.filter(g => !g.exists);
@@ -1267,6 +1361,7 @@
          n.childCount = n.children.length;
          n.accessHtml = accessCellHtml(n.id);
          if (n.kind === 'host') attachAgentStatus(n);
+         else if (n.kind === 'service') attachServiceStatus(n);
          finalRenderList.push(n);
          if (n.children.length > 0) {
            flatten(n.children, depth + 1);
@@ -1944,8 +2039,83 @@
             ${row('Uptime', fmtDur(svc.uptime_seconds))}
           </div>
           ${extra}
+          ${serviceControlsHtml(r, svc, m)}
         </div>
       </div>`;
+  }
+
+  // Subtypes whose start/stop/restart means something on the host. Mirrors
+  // ThetaAgentDriver.CONTROLLABLE_SUBTYPES -- a timer, a cron entry or a VM has
+  // no systemctl lifecycle, and offering a button that can only fail is worse
+  // than offering none.
+  const CONTROLLABLE_SERVICE_SUBTYPES = new Set(['systemd', 'docker', 'podman', 'openrc']);
+
+  // Start / stop / restart for a registered service, over the agent's signed
+  // command channel. Disabled (with the reason in the tooltip) rather than
+  // hidden when the agent is offline, so the buttons do not appear and vanish
+  // as an agent reconnects.
+  function serviceControlsHtml(r, svc, m) {
+    const subType = ((r.metadata || {}).subType || 'systemd').toLowerCase();
+    if (!CONTROLLABLE_SERVICE_SUBTYPES.has(subType)) return '';
+
+    const offline = !m || m.status !== 'online';
+    const active = svc.active !== false;
+    const reason = offline ? 'The host agent is not connected' : '';
+
+    const btn = (label, action, cls, icon, disabled, why) =>
+      `<button type="button" class="btn btn-sm ${cls} me-1 mb-1" ${disabled ? 'disabled' : ''}
+         title="${esc(why || label)}"
+         onclick="serviceAction('${r.id}', '${action}')"><i class="fa-solid ${icon} me-1"></i>${esc(label)}</button>`;
+
+    // reload is systemd-only; containers have no equivalent and the driver
+    // refuses it rather than quietly restarting instead.
+    const reloadBtn = subType === 'systemd'
+      ? btn('Reload', 'reload', 'btn-outline-secondary', 'fa-rotate', offline || !active,
+            offline ? reason : (active ? 'Re-read the unit\'s configuration' : 'Not running'))
+      : '';
+
+    return `
+      <hr class="my-3">
+      <div class="d-flex align-items-center flex-wrap">
+        ${btn('Start', 'start', 'btn-success', 'fa-play', offline || active,
+              offline ? reason : (active ? 'Already running' : 'Start this service'))}
+        ${btn('Restart', 'restart', 'btn-warning', 'fa-arrows-rotate', offline,
+              offline ? reason : 'Stop and start this service')}
+        ${btn('Stop', 'stop', 'btn-outline-danger', 'fa-stop', offline || !active,
+              offline ? reason : (active ? 'Stop this service' : 'Already stopped'))}
+        ${reloadBtn}
+        <span class="text-muted small ms-2">${esc(serviceTargetName(r))}${offline ? ' — agent offline' : ''}</span>
+      </div>`;
+  }
+
+  // Send a lifecycle action to a service, through the same generic
+  // driver-action endpoint the iLO power buttons use. stop and restart
+  // interrupt something that is running, so they are confirmed; start is not.
+  async function serviceAction(resourceId, action) {
+    const r = resourcesById[resourceId];
+    const target = serviceTargetName(r) || (r && r.name) || 'this service';
+    if (action === 'stop' || action === 'restart') {
+      const confirmed = await app.messages.confirm(
+        `${action === 'stop' ? 'Stop' : 'Restart'} ${target} on its host?`, $('#res-modal'), 'warning');
+      if (!confirmed) return;
+    }
+    try {
+      app.messages.action(`Sending '${action}' to ${target}...`, $('#res-modal'), 'info');
+      const res = await app.api.post(`directory-admin/resources/${resourceId}/driver-action`,
+        { action: 'service_action', subAction: action });
+      const result = res && res.result;
+      if (result && result.status === 'error') throw new Error(result.message);
+      // The agent answers with the command's own stderr in `error` even when
+      // the frame itself succeeded -- surfacing that is the difference between
+      // "dispatched" and "worked".
+      const inner = result && result.result;
+      if (inner && inner.error) throw new Error(inner.error);
+      app.messages.action(`'${action}' completed on ${target}.`, $('#res-modal'), 'success');
+      // systemd takes a moment to settle; re-read rather than guess.
+      setTimeout(function(){ loadServiceStatus(resourceId); }, 1500);
+    } catch (err) {
+      app.messages.action(err.message || `Could not ${action} ${target}`, $('#res-modal'), 'danger');
+    }
   }
 
   // Render an iLO host's live power/health state (kind === 'host', subType
