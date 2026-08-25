@@ -112,6 +112,8 @@
 						<div class="form-text small" id="site-dns-note">
 							Pushed to devices translated into its mapped address, so it resolves from anywhere —
 							the real LAN address only works while physically on that network.
+							Leave blank and the site&rsquo;s gateway fills in the resolver it detects; anything you
+							set here wins and is never overwritten.
 						</div>
 					</div>
 					<div class="col-12"><hr class="my-1"><div class="small fw-semibold text-muted">INTERNET EXIT</div></div>
@@ -255,7 +257,12 @@ function renderSites(data) {
 			+ '<td>' + (s.exitOpen
 				? '<span class="badge text-bg-success">' + esc([s.city, s.country].filter(Boolean).join(', ') || 'yes') + '</span>'
 				: '<span class="text-muted small">no</span>') + '</td>'
-			+ '<td><code class="small">' + esc(s.lan168 || '—') + '</code></td>'
+			+ '<td><code class="small">' + esc(s.lan168 || '—') + '</code><br>' + (s.dnsHost
+				? '<code class="small text-muted">DNS ' + esc(s.dnsHost) + '</code>'
+				// A site with no resolver pushes no DNS line at all, so devices
+				// on the tunnel keep using whatever network they are physically
+				// on -- and internal names do not resolve. Invisible until now.
+				: '<span class="badge text-bg-warning-subtle text-warning-emphasis border border-warning-subtle" title="Devices on this site\'s tunnel get no DNS server and cannot resolve internal names.">no DNS</span>') + '</td>'
 			+ '<td class="text-end">' + (meshState.isAdmin
 				? '<button class="btn btn-sm btn-outline-primary" onclick="openSiteModal(' + s.siteId + ')"><i class="fa-solid fa-pen"></i></button>' : '') + '</td>'
 			+ '</tr>';

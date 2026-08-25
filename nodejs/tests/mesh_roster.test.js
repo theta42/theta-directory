@@ -193,3 +193,52 @@ describe('the hub', () => {
 		});
 	});
 });
+
+describe('the resolver a gateway detects', () => {
+	// Every site shipped with dnsHost null, so every client config went out
+	// with no `DNS =` line at all: a device on the tunnel resolved against
+	// whatever network it was physically sitting on, which resolves no
+	// internal name. The gateway now offers what it found.
+	test('is taken when the site has none', async () => {
+		const site = await roster.publishLocalSite({
+			gatewayPublicKey: GW_KEY, dnsHostDetected: '192.168.1.1'
+		});
+		expect(site.dnsHost).toBe('192.168.1.1');
+	});
+
+	// The critical half. reconcileMesh runs on a timer, so a gateway that
+	// published its guess as `dnsHost` would overwrite the admin's answer
+	// every few minutes -- worse than having no default at all.
+	test('never overwrites one an admin has set', async () => {
+		await roster.publishLocalSite({ gatewayPublicKey: GW_KEY, dnsHost: '192.168.1.53' });
+		const site = await roster.publishLocalSite({
+			gatewayPublicKey: GW_KEY, dnsHostDetected: '192.168.1.1'
+		});
+		expect(site.dnsHost).toBe('192.168.1.53');
+	});
+
+	test('an explicit dnsHost in the same publish still wins', async () => {
+		const site = await roster.publishLocalSite({
+			gatewayPublicKey: GW_KEY, dnsHost: '192.168.1.53', dnsHostDetected: '192.168.1.1'
+		});
+		expect(site.dnsHost).toBe('192.168.1.53');
+	});
+
+	test('a gateway that detected nothing leaves the site alone', async () => {
+		await roster.publishLocalSite({ gatewayPublicKey: GW_KEY, dnsHost: '192.168.1.53' });
+		const site = await roster.publishLocalSite({ gatewayPublicKey: GW_KEY, dnsHostDetected: null });
+		expect(site.dnsHost).toBe('192.168.1.53');
+	});
+
+	// An admin clearing the field is a decision, not an absence -- but the
+	// next detection may fill it again, which is the documented behaviour of
+	// "leave blank and the gateway fills it in".
+	test('clearing it lets the next detection fill it back in', async () => {
+		await roster.publishLocalSite({ gatewayPublicKey: GW_KEY, dnsHost: '192.168.1.53' });
+		await roster.publishLocalSite({ gatewayPublicKey: GW_KEY, dnsHost: '' });
+		const site = await roster.publishLocalSite({
+			gatewayPublicKey: GW_KEY, dnsHostDetected: '192.168.1.1'
+		});
+		expect(site.dnsHost).toBe('192.168.1.1');
+	});
+});

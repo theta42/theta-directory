@@ -191,8 +191,18 @@ async function pushConfigToAgent(client) {
 		if (!agent) return false;
 
 		// privateKey null: the agent fills in the key it generated at enrolment.
+		//
+		// siteId/exitSiteId ride along because they are what the agent's
+		// auto-VPN reads to decide whether the tunnel should be UP right now
+		// (theta-agent home_detect.go). Sending them with the config means the
+		// agent never has to make that call on a cached answer -- and lets a
+		// config be delivered ahead of the moment it is needed, rather than
+		// forcing the tunnel up the instant it arrives.
 		await agentManager.sendCommand(agent, 'wireguard_apply', {
-			config: renderClientConf({ client, site, privateKey: null })
+			config: renderClientConf({ client, site, privateKey: null }),
+			siteId: Number(client.siteId),
+			exitSiteId: client.exitSiteId === null || client.exitSiteId === undefined
+				? null : Number(client.exitSiteId)
 		}, true);
 		return true;
 	} catch (e) {

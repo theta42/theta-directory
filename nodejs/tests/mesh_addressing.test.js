@@ -105,11 +105,37 @@ test('a resolver outside the mapped LANs leaves DNS unset', () => {
 	expect(!renderClientConf({ client, site: odd, privateKey: 'k' }).includes('DNS =')).toBeTruthy();
 });
 
-test('a client with no exit routes only the mesh', () => {
+test('a manual/QR client with no exit routes only the mesh', () => {
+	// `client` has no agentId: a phone handed a config once, with nothing on
+	// it managing the tunnel. Split tunnel is right there -- a config that
+	// captured all its traffic the moment it was scanned would be a surprise.
 	expect(allowedIpsFor({ hasExit: false })).toEqual(['10.0.0.0/8', '172.24.0.0/16']);
 	const conf = renderClientConf({ client, site, privateKey: 'k' });
 	expect(conf.includes('AllowedIPs = 10.0.0.0/8, 172.24.0.0/16')).toBeTruthy();
 	expect(!conf.includes('0.0.0.0/0')).toBeTruthy();
+});
+
+// The regression: an agent-managed laptop with no exit selected -- which is
+// EVERY device's starting state -- brought up a tunnel that carried the mesh
+// ranges and left everything else on the network it was sitting on. Auto-VPN
+// fired, the tray went blue, and nothing was protected.
+test('an agent-managed device is full tunnel even with no exit selected', () => {
+	expect(allowedIpsFor({ hasExit: false, agentManaged: true })).toEqual(['0.0.0.0/0', '::/0']);
+	const laptop = { ...client, agentId: 'agent-1' };
+	const conf = renderClientConf({ client: laptop, site, privateKey: null });
+	expect(conf.includes('AllowedIPs = 0.0.0.0/0, ::/0')).toBeTruthy();
+	expect(!conf.includes('10.0.0.0/8, 172.24.0.0/16')).toBeTruthy();
+});
+
+test('an agent-managed device gets the same routes whichever exit it is on', () => {
+	const laptop = { ...client, agentId: 'agent-1' };
+	const none = renderClientConf({ client: laptop, site, privateKey: null });
+	const own = renderClientConf({ client: { ...laptop, exitSiteId: 2 }, site, privateKey: null });
+	const remote = renderClientConf({ client: { ...laptop, exitSiteId: 7 }, site, privateKey: null });
+	// The gateway decides where the traffic leaves; the device is not
+	// reconfigured for it. WHETHER the tunnel is up is the agent's call.
+	expect(own).toBe(none);
+	expect(remote).toBe(none);
 });
 
 test('a client with an exit routes everything and is told nothing about which exit', () => {

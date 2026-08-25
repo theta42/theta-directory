@@ -51,14 +51,28 @@ function resolverFor(site) {
 /**
  * What a client is allowed to route through the tunnel.
  *
- * - With no exit: just the mesh. Normal internet traffic keeps using whatever
- *   local connection the device already has (split tunnel).
- * - With an exit: everything. The gateway then decides, per client, which exit
- *   interface carries it -- the client is not told which exit it is using and
- *   does not need reconfiguring when that changes.
+ * Two kinds of device, two answers:
+ *
+ * AGENT-MANAGED (a laptop running theta-agent). Always full tunnel. The point
+ * of the mesh on a laptop is "leave the house, the tunnel comes up, the site
+ * carries my traffic" -- and that has to hold with NO exit selected, which is
+ * every device's starting state. Split-tunnelling those devices meant an away
+ * laptop brought up a tunnel that carried mesh ranges only and left everything
+ * else on the coffee shop's network: auto-VPN fired, the tray went blue, and
+ * nothing was protected. With no exit the gateway simply egresses at the
+ * device's own site, which is exactly "as if I were home".
+ *
+ * The agent decides WHEN the tunnel is up (home/away plus the chosen exit), so
+ * full tunnel here does not mean traffic is captured while sitting at home.
+ *
+ * MANUAL / QR (a phone handed a config once). Unchanged, and exit-dependent:
+ * no exit means reach internal services and leave the rest alone. Nothing on
+ * that device manages the tunnel, so a config that silently captured all its
+ * traffic the moment it was scanned would be a surprise -- and every config
+ * already in circulation would change meaning under it.
  */
-function allowedIpsFor({ hasExit }) {
-	if (hasExit) return ['0.0.0.0/0', '::/0'];
+function allowedIpsFor({ hasExit, agentManaged = false }) {
+	if (hasExit || agentManaged) return ['0.0.0.0/0', '::/0'];
 	return ['10.0.0.0/8', '172.24.0.0/16'];
 }
 
@@ -73,6 +87,8 @@ function allowedIpsFor({ hasExit }) {
  */
 function renderClientConf({ client, site, privateKey }) {
 	const hasExit = client.exitSiteId !== null && client.exitSiteId !== undefined && client.exitSiteId !== '';
+	// An agent is on the far end iff there is an agent to send commands to.
+	const agentManaged = Boolean(client.agentId);
 	const dns = resolverFor(site);
 
 	const lines = [
@@ -91,7 +107,7 @@ function renderClientConf({ client, site, privateKey }) {
 	lines.push(`# ${site.slug || 'site ' + site.siteId} gateway`);
 	lines.push('[Peer]');
 	lines.push(`PublicKey = ${site.gatewayPublicKey}`);
-	lines.push(`AllowedIPs = ${allowedIpsFor({ hasExit }).join(', ')}`);
+	lines.push(`AllowedIPs = ${allowedIpsFor({ hasExit, agentManaged }).join(', ')}`);
 	if (site.gatewayEndpoint) lines.push(`Endpoint = ${site.gatewayEndpoint}`);
 	// Clients are behind NAT essentially always; without a keepalive the
 	// gateway loses the return path as soon as the NAT mapping expires and the

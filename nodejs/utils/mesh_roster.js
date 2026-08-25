@@ -117,6 +117,16 @@ async function publishLocalSite(patch = {}) {
 		if (patch[key] !== undefined) fields[key] = patch[key];
 	}
 
+	// dnsHostDetected is a SUGGESTION, not a publish: the gateway sends what it
+	// found on the site LAN, and it is taken only while nobody has said
+	// otherwise. It has to be a separate field from dnsHost because reconcile
+	// runs on a timer -- a gateway that published its guess as dnsHost would
+	// overwrite the admin's answer every few minutes, which is worse than
+	// having no default at all.
+	if (patch.dnsHostDetected && fields.dnsHost === undefined && !(existing && existing.dnsHost)) {
+		fields.dnsHost = patch.dnsHostDetected;
+	}
+
 	if (existing) {
 		await existing.update(fields);
 		await pushSelfToMaster(existing);

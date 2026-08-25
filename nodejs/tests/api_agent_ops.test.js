@@ -81,6 +81,7 @@ describe('Agent ops — POST /api/v1/agent/secrets', () => {
 
 const { MeshClient } = require('../models/mesh_client');
 const meshRoster = require('../utils/mesh_roster');
+const meshClients = require('../utils/mesh_clients');
 
 describe('Agent ops — mesh identity', () => {
 	const PUBKEY = 'YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=';
@@ -151,6 +152,76 @@ describe('Agent ops — mesh identity', () => {
 			expect(JSON.stringify(res.body)).not.toContain('privateKey');
 		} finally {
 			spy.mockRestore();
+		}
+	});
+
+	// Nothing pushed a config at enrolment: one went out only when somebody
+	// CHANGED an exit, in the web UI, by hand. So a freshly enrolled agent got
+	// an address, got a peer built for it at the gateway, and then sat there
+	// with no config -- fully enrolled on both sides and unable to bring up a
+	// tunnel. Two of the three devices on the reference deployment had been in
+	// that state since the day they were installed.
+	test('enrolment hands the device its peer config straight away', async () => {
+		const { token } = await enrollAgent();
+		const siteSpy = jest.spyOn(meshRoster, 'localSiteId').mockReturnValue(2);
+		const pushSpy = jest.spyOn(meshClients, 'pushConfigToAgent').mockResolvedValue(true);
+		try {
+			const res = await request(app)
+				.post('/api/v1/agent/mesh/enroll')
+				.set('Authorization', `Bearer ${token}`)
+				.send({ publicKey: PUBKEY });
+			if (res.status !== 201 && res.status !== 200) return; // no mesh tables in this env
+			expect(pushSpy).toHaveBeenCalledTimes(1);
+			expect(pushSpy.mock.calls[0][0].publicKey).toBe(PUBKEY);
+		} finally {
+			pushSpy.mockRestore();
+			siteSpy.mockRestore();
+		}
+	});
+
+	// A reconnecting agent is the one moment we know it is listening, and the
+	// config it holds may be from a previous directory, a previous exit, or
+	// nothing at all.
+	test('re-enrolment re-pushes even when nothing changed', async () => {
+		const { token } = await enrollAgent();
+		const siteSpy = jest.spyOn(meshRoster, 'localSiteId').mockReturnValue(2);
+		const pushSpy = jest.spyOn(meshClients, 'pushConfigToAgent').mockResolvedValue(true);
+		try {
+			const first = await request(app)
+				.post('/api/v1/agent/mesh/enroll')
+				.set('Authorization', `Bearer ${token}`)
+				.send({ publicKey: PUBKEY });
+			if (first.status !== 201 && first.status !== 200) return;
+			const again = await request(app)
+				.post('/api/v1/agent/mesh/enroll')
+				.set('Authorization', `Bearer ${token}`)
+				.send({ publicKey: PUBKEY });
+			expect(again.status).toBe(200);
+			expect(again.body.rotated).toBe(false);
+			expect(pushSpy).toHaveBeenCalledTimes(2);
+		} finally {
+			pushSpy.mockRestore();
+			siteSpy.mockRestore();
+		}
+	});
+
+	// Enrolment itself succeeded; a device that cannot be reached right now
+	// re-enrols on its next reconnect, which re-pushes.
+	test('a push failure does not fail the enrolment', async () => {
+		const { token } = await enrollAgent();
+		const siteSpy = jest.spyOn(meshRoster, 'localSiteId').mockReturnValue(2);
+		const pushSpy = jest.spyOn(meshClients, 'pushConfigToAgent').mockResolvedValue(false);
+		try {
+			const res = await request(app)
+				.post('/api/v1/agent/mesh/enroll')
+				.set('Authorization', `Bearer ${token}`)
+				.send({ publicKey: PUBKEY });
+			if (res.status !== 201 && res.status !== 200) return;
+			expect(res.body.status).toBe('ok');
+			expect(res.body.client.assignedIp).toBeTruthy();
+		} finally {
+			pushSpy.mockRestore();
+			siteSpy.mockRestore();
 		}
 	});
 });

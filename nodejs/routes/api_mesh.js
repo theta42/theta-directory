@@ -97,9 +97,9 @@ router.get('/roster', middleware.auth, async (req, res, next) => {
 // requireAdmin lets it through while keeping everyone else out.
 router.put('/self', middleware.auth, requireAdmin, async (req, res, next) => {
 	try {
-		const { gatewayPublicKey, gatewayEndpoint, gatewayExitPublicKey, exitOpen, country, city, lan168, lan172, dnsHost, name, slug } = req.body || {};
+		const { gatewayPublicKey, gatewayEndpoint, gatewayExitPublicKey, exitOpen, country, city, lan168, lan172, dnsHost, dnsHostDetected, name, slug } = req.body || {};
 		const site = await roster.publishLocalSite({
-			gatewayPublicKey, gatewayEndpoint, gatewayExitPublicKey, exitOpen, country, city, lan168, lan172, dnsHost, name, slug
+			gatewayPublicKey, gatewayEndpoint, gatewayExitPublicKey, exitOpen, country, city, lan168, lan172, dnsHost, dnsHostDetected, name, slug
 		});
 		res.json({ status: 'ok', site: site.toPublic() });
 	} catch (e) { next(e); }

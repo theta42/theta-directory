@@ -1,3 +1,18 @@
+## [2.30.0] - 2026-08-25
+
+### Fixed
+- **A freshly enrolled agent never received a peer config.** `POST /api/v1/agent/mesh/enroll` created the device row, allocated its address and let the gateway build a peer for it — and then stopped. The only thing that ever pushed a config was *changing an exit*, in the web UI, by hand (`PUT /api/mesh/clients/:id/exit`). So an agent enrolled itself, appeared in the mesh view, had a live peer waiting for it at the gateway, and held no config it could bring up. On the reference deployment two of the three enrolled devices had been in that state since the day they were installed. Enrolment now hands the device its config, and re-enrolment (which happens on every reconnect) re-pushes — a reconnect is the one moment the agent is known to be listening, and what it holds may be from a previous directory or a previous exit. Best-effort: a device that cannot be reached does not fail its own enrolment.
+
+- **An agent-managed device with no exit selected got a split tunnel, so an away laptop was not protected.** `AllowedIPs` was `10.0.0.0/8, 172.24.0.0/16` whenever `exitSiteId` was null — which is every device's starting state. Auto-VPN fired on leaving the house, the tray went blue, and the tunnel carried the mesh ranges while everything else stayed on the network the laptop was sitting on. Devices with an agent on the far end are now always full tunnel; with no exit the gateway simply egresses at the device's own site, which is exactly "as if I were home". The agent decides *when* the tunnel is up, so this does not capture traffic at home.
+
+  Manual/QR devices are unchanged and still exit-dependent — nothing on a phone manages the tunnel, so a config that captured all its traffic the moment it was scanned would be a surprise, and every config already in circulation would change meaning under it.
+
+- **No site had a DNS resolver, so no client config carried one.** `dnsHost` was configurable from the first release and left null on every site, because nothing ever suggested a value. `resolverFor()` correctly returned null, `renderClientConf` correctly omitted `DNS =` — and a device with the tunnel up went on resolving against whatever network it was physically sitting on. No internal name resolved, and every lookup went to a coffee-shop DHCP server while the user believed their traffic was protected. Gateways now publish the resolver they detect as `dnsHostDetected`, which is taken **only while an admin has not set one**: reconcile runs on a timer, so a gateway publishing its guess as `dnsHost` would overwrite the admin's answer every few minutes.
+
+### Added
+- **`siteId` / `exitSiteId` on the `wireguard_apply` push.** The agent decides whether the tunnel should be up from its own site and the exit it is on; sending both with the config means it never has to ask, and lets a config be delivered ahead of the moment it is needed rather than forcing the tunnel up on arrival. Requires theta-agent ≥ v2.15.0; older agents ignore the extra fields.
+- **The mesh site table flags a site with no resolver.** Devices on that site's tunnel get no DNS server and cannot resolve internal names — true since the first release and invisible until now.
+
 ## [2.29.0] - 2026-08-25
 
 ### Changed
