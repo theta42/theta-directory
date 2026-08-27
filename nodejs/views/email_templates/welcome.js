@@ -15,12 +15,7 @@ module.exports = {
 </p>
 
 <p>
-	You can manage your account at https://sso.theta42.com
-</p>
-
-<p>
-	You account is ready to be used now, test it by SSHing into the {{ name }}
-	jump host \`ssh {{user.uid}}@718it.biz\`
+	You can manage your account at <a href="{{ ssoUrl }}">{{ ssoUrl }}</a>
 </p>
 
 <p>

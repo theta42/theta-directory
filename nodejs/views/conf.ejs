@@ -8,6 +8,7 @@
 
 	$(document).ready(function() {
 		loadConf();
+		loadBranding();
 		loadProxyConf();
 		loadTos();
 		loadMessagingPlugins();
@@ -45,6 +46,51 @@
 			}
 		} catch (error) {
 			app.messages.toast('Failed to load configuration: ' + (error.message || 'Unknown error'), 'danger');
+		}
+	}
+
+	function updateLogoPreview() {
+		const url = $('#branding-logo').val().trim();
+		const $img = $('#branding-logo-preview');
+		if (url) {
+			$img.attr('src', url).show();
+			$img.on('error', function() { $(this).hide(); });
+		} else {
+			$img.hide();
+		}
+	}
+
+	$('#branding-logo').on('input', updateLogoPreview);
+
+	async function loadBranding() {
+		try {
+			const data = await app.api.get('conf/branding');
+			$('#branding-name').val(data.name || '');
+			$('#branding-logo').val(data.logo || '');
+			$('#branding-icon').val(data.icon || '');
+			updateLogoPreview();
+		} catch (error) {
+			app.messages.toast('Failed to load branding: ' + (error.message || 'Unknown error'), 'danger');
+		}
+	}
+
+	async function saveBranding() {
+		const btn = $('#btn-save-branding');
+		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
+
+		const payload = {
+			name: $('#branding-name').val().trim(),
+			logo: $('#branding-logo').val().trim(),
+			icon: $('#branding-icon').val().trim(),
+		};
+
+		try {
+			await app.api.post('conf/branding', payload);
+			app.messages.toast('Branding saved! Spokes will sync on next replication.', 'success');
+		} catch (error) {
+			app.messages.toast('Failed to save branding: ' + error.message, 'danger');
+		} finally {
+			btn.prop('disabled', false).html('<i class="fas fa-save me-1"></i> Save Branding');
 		}
 	}
 
@@ -372,12 +418,17 @@
 			<div class="card shadow">
 				<!-- Header with Sub-Nav Tabs matching directory.ejs -->
 				<div class="card-header d-flex flex-wrap justify-content-between align-items-center gap-2">
-					<ul class="nav nav-tabs card-header-tabs" id="confTabs" role="tablist">
-						<li class="nav-item" role="presentation">
-							<button class="nav-link active" id="oauth-tab" data-bs-toggle="tab" data-bs-target="#pane-oauth" type="button" role="tab">
-								<i class="fas fa-key text-success me-1"></i> OAuth & JWT
-							</button>
-						</li>
+				<ul class="nav nav-tabs card-header-tabs" id="confTabs" role="tablist">
+					<li class="nav-item" role="presentation">
+						<button class="nav-link active" id="branding-tab" data-bs-toggle="tab" data-bs-target="#pane-branding" type="button" role="tab">
+							<i class="fas fa-palette text-primary me-1"></i> Branding
+						</button>
+					</li>
+					<li class="nav-item" role="presentation">
+						<button class="nav-link" id="oauth-tab" data-bs-toggle="tab" data-bs-target="#pane-oauth" type="button" role="tab">
+							<i class="fas fa-key text-success me-1"></i> OAuth & JWT
+						</button>
+					</li>
 						<li class="nav-item" role="presentation">
 							<button class="nav-link" id="smtp-tab" data-bs-toggle="tab" data-bs-target="#pane-smtp" type="button" role="tab">
 								<i class="fas fa-envelope text-primary me-1"></i> Email (SMTP)
@@ -412,9 +463,39 @@
 
 				<div class="card-body p-4">
 					<div class="tab-content" id="confTabContent">
-						
+
+						<!-- Branding Tab -->
+						<div class="tab-pane fade show active" id="pane-branding" role="tabpanel">
+							<h5 class="fw-bold mb-3"><i class="fas fa-palette text-primary me-2"></i> White-Label Branding</h5>
+							<p class="text-muted small">Customize the application name, logo, and icon shown in the navbar, emails, agent tray, and across the UI. Stored in the directory and replicated to all sites automatically.</p>
+							<div class="row">
+								<div class="col-md-8 mb-3">
+									<label class="form-label fw-semibold">Application Name</label>
+									<input type="text" class="form-control" id="branding-name" placeholder="e.g. My SSO Portal">
+									<div class="form-text">Shown in the navbar, page titles, emails, and error pages.</div>
+								</div>
+								<div class="col-md-4 mb-3">
+									<label class="form-label fw-semibold">Preview</label>
+									<div class="border rounded p-3 bg-light text-center">
+										<img id="branding-logo-preview" src="" alt="Logo preview" style="max-height: 40px; display: inline;">
+									</div>
+								</div>
+							</div>
+							<div class="mb-3">
+								<label class="form-label fw-semibold">Logo URL</label>
+								<input type="text" class="form-control" id="branding-logo" placeholder="/static/img/logo.svg or https://example.com/logo.png">
+								<div class="form-text">Path or URL for the navbar logo and favicon. Use an SVG for best results.</div>
+							</div>
+							<div class="mb-3">
+								<label class="form-label fw-semibold">Icon URL (optional)</label>
+								<input type="text" class="form-control" id="branding-icon" placeholder="/static/img/icon.png">
+								<div class="form-text">Small icon for browser tabs and bookmarks. Falls back to the logo if empty.</div>
+							</div>
+							<button id="btn-save-branding" class="btn btn-primary" onclick="saveBranding()"><i class="fas fa-save me-1"></i> Save Branding</button>
+						</div>
+
 						<!-- OAuth & JWT Tab -->
-						<div class="tab-pane fade show active" id="pane-oauth" role="tabpanel">
+						<div class="tab-pane fade" id="pane-oauth" role="tabpanel">
 							<h5 class="fw-bold mb-3"><i class="fas fa-key text-success me-2"></i> OAuth 2.0 & JWT Settings</h5>
 							<p class="text-muted small">Configure OIDC issuer URLs, token lifetimes, and JWT signing keys. Stored in OpenBao.</p>
 							<div class="mb-3">

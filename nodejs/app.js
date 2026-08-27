@@ -132,6 +132,8 @@ app.use('/api/update-check', middleware.auth, require('./routes/update_check'));
 app.use('/api/tos', middleware.auth, require('./routes/tos'));
 app.use('/api/metrics', middleware.auth, require('./routes/api_metrics'));
 app.use('/api/conf', middleware.auth, require('./routes/api_conf'));
+// Directory-driven branding (stored on site resource metadata, replicates to spokes).
+app.use('/api/conf/branding', middleware.auth, require('./routes/api_conf_branding'));
 // Self-service API tokens (PATs) — owner-scoped, no admin group required.
 app.use('/api/api-token', middleware.auth, require('./routes/api_token'));
 

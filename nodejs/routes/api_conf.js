@@ -34,6 +34,9 @@ function maskSecrets(obj) {
 
 router.get('/', async (req, res) => {
   const editable = maskSecrets({
+    name: conf.name || '',
+    logo: conf.logo || '',
+    icon: conf.icon || '',
     smtp: conf.smtp || {},
     discovery: conf.discovery || {},
     oauth: conf.oauth || {},

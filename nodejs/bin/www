@@ -51,6 +51,10 @@ models.initORM().then(() => {
   // unaffected; nothing in sso captures a secret at require time.)
   return require('@simpleworkjs/bao-conf').init({ path: 'sso-manager', conf });
 }).then(() => {
+  // Overlay directory branding (site resource metadata) over conf. Replicates
+  // to spokes via catalog export/import — no new replication needed.
+  return require('../utils/dir_branding').applyDirBranding();
+}).then(() => {
   server.listen(port);
   server.on('error', onError);
   server.on('listening', onListening);

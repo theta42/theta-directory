@@ -22,7 +22,7 @@ module.exports = {
 	tosUrl: '/tos',
 
 	// --- header / nav -------------------------------------------------------
-	faviconUrl: conf.logo,
+	faviconUrl: conf.icon || conf.logo,
 	// Where the current-user chip links. null renders it as a plain span (for
 	// apps with no profile page).
 	profileUrl: '/profile',
@@ -31,7 +31,7 @@ module.exports = {
 	// Admin-only "a newer release is available" banner, backed by
 	// GET /api/update-check. Apps without that endpoint set false.
 	updateCheck: true,
-	updateLabel: 'SSO Manager',
+	updateLabel: conf.name || 'SSO Manager',
 
 	// Nav items, in order. `groups` is an OR-list of group CNs that may see the
 	// item; an empty list means "always visible". Gating is done client-side by

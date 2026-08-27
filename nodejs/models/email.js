@@ -60,6 +60,7 @@ Mail.send = function(to, subject, message, from){
 
 Mail.sendTemplate = async function(to, template, context, from){
 	context.name = conf.name;
+	context.ssoUrl = conf.ssoUrl || conf.oauth?.issuer || '';
 	template = require(`../views/email_templates/${template}`);
 	await Mail.send(
 		to,
