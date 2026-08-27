@@ -1,6 +1,6 @@
 {
   "name": "t42-theta-directory",
-  "version": "2.31.0",
+  "version": "2.32.0",
   "description": "A very simple LDAP management and SSO system",
   "author": [
     {

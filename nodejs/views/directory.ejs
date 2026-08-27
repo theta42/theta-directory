@@ -2841,28 +2841,59 @@
   // stores a hash and cannot show it again.
   var pendingEnrollment = null;
 
-  // Download-binaries tab: fill in this Directory's artifact URLs and flag
-  // anything setup.sh did not stage (the Windows setup exe is fetched from
-  // GitHub at bring-up time, so it can legitimately be absent).
+  // Download-binaries tab: list every artifact the Directory stages for agent
+  // installs (the pinned theta-agent release's SHA256SUMS set) with version,
+  // size, and staging state. The list comes from GET /api/agent/artifacts, not
+  // a hardcoded array, so a release that gains an artifact shows up here
+  // without a code change.
+  function fmtAgentSize(bytes) {
+    if (bytes == null) return '';
+    if (bytes < 1024) return bytes + ' B';
+    const units = ['KiB', 'MiB', 'GiB'];
+    let v = bytes / 1024, u = 0;
+    while (v >= 1024 && u < units.length - 1) { v /= 1024; u++; }
+    return (v >= 10 ? v.toFixed(0) : v.toFixed(1)) + ' ' + units[u];
+  }
   function populateAgentDownloadTab(origin) {
     const base = String(origin || window.location.origin).replace(/\/+$/, '') + '/resources/theta-agent';
-    $('#agent-download-status').empty();
-    [['install', 'install.sh'],
-     ['winsetup', 'theta-agent-windows-amd64-setup.exe'],
-     ['sums', 'SHA256SUMS']].forEach(([key, file]) => {
-      const url = base + '/' + file;
-      $('#agent-dl-url-' + key).text(url);
-      // The URL text alone is not a download -- give the row a real link, and
-      // point it at the same origin so `download` is honoured (cross-origin
-      // hrefs are treated as plain navigations by every current browser).
-      $('#agent-dl-link-' + key).attr({ href: url, download: file }).removeClass('disabled');
-      fetch(url, { method: 'HEAD' }).then(res => {
-        if (res.ok) return;
-        $('#agent-dl-link-' + key).addClass('disabled').removeAttr('href');
-        $('#agent-download-status').append(
-          '<div class="text-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i><code>' + file +
-          '</code> is not staged on this Directory — re-run <code>setup.sh</code> to stage it.</div>');
-      }).catch(() => {});
+    const $status = $('#agent-download-status').empty();
+    const $tbody = $('#agent-download-table').empty();
+    app.api.get('agent/artifacts', function(err, res) {
+      if (err) {
+        $tbody.html('<tr><td colspan="5" class="small text-muted">Could not load the staged artifact list (' + esc(err.message || err) + ').</td></tr>');
+        return;
+      }
+      const data = (res && res.artifacts) ? res : ((res && res.results) || {});
+      const version = data.version;
+      const artifacts = data.artifacts || [];
+      if (version) {
+        $status.append('<div class="text-success mb-1"><i class="fa-solid fa-circle-check me-1"></i>Staged theta-agent release: <strong>v' + esc(version) + '</strong>.</div>');
+      }
+      artifacts.forEach(function(a, i) {
+        const url = base + '/' + encodeURIComponent(a.file);
+        const staged = !!a.staged;
+        const urlId = 'agent-dl-url-' + i;
+        const copyId = 'agent-dl-copy-' + i;
+        const $tr = $('<tr>' + (staged ? '' : ' class="table-secondary"') + '</tr>');
+        $tr.append('<td class="small fw-bold"><code>' + esc(a.file) + '</code></td>');
+        $tr.append('<td class="small text-muted">' + esc(a.purpose) + '</td>');
+        $tr.append('<td class="small text-muted text-nowrap">' +
+          (a.size != null ? fmtAgentSize(a.size) : (staged ? '&mdash;' : '<span class="badge bg-secondary">not staged</span>')) +
+          '</td>');
+        $tr.append('<td><code class="small text-wrap" id="' + urlId + '" style="user-select: all;">' + esc(url) + '</code></td>');
+        // The URL text alone is not a download -- give the row a real link,
+        // and point it at the same origin so `download` is honoured
+        // (cross-origin hrefs are treated as plain navigations by browsers).
+        const downloadBtn = staged
+          ? '<a class="btn btn-sm btn-primary me-1" href="' + esc(url) + '" download="' + esc(a.file) + '" role="button"><i class="fa-solid fa-download me-1"></i> Download</a>'
+          : '<button class="btn btn-sm btn-primary me-1 disabled" role="button"><i class="fa-solid fa-download me-1"></i> Download</button>';
+        $tr.append('<td class="text-end text-nowrap">' + downloadBtn +
+          '<button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand(\'' + urlId + '\', \'' + copyId + '\')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>');
+        $tbody.append($tr);
+      });
+      if (!artifacts.length) {
+        $tbody.html('<tr><td colspan="5" class="small text-muted">No artifacts catalogued.</td></tr>');
+      }
     });
   }
 
@@ -3149,36 +3180,18 @@
                   <tr>
                     <th class="small">Artifact</th>
                     <th class="small">Purpose</th>
-                    <th class="small" style="width:45%">URL</th>
+                    <th class="small">Size</th>
+                    <th class="small" style="width:40%">URL</th>
                     <th></th>
                   </tr>
                 </thead>
-                <tbody id="agent-download-table">
-                  <tr>
-                    <td class="small fw-bold"><code>install.sh</code></td>
-                    <td class="small text-muted">Linux bootstrap (fetches the agent binary from GitHub Releases)</td>
-                    <td><code class="small text-wrap" id="agent-dl-url-install" style="user-select: all;"></code></td>
-                    <td class="text-end text-nowrap"><a id="agent-dl-link-install" class="btn btn-sm btn-primary me-1 disabled" role="button"><i class="fa-solid fa-download me-1"></i> Download</a><button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand('agent-dl-url-install', 'agent-dl-copy-install')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>
-                  </tr>
-                  <tr>
-                    <td class="small fw-bold"><code>theta-agent-windows-amd64-setup.exe</code></td>
-                    <td class="small text-muted">Windows installer (fully offline: agent, tray, WireGuard, credential provider)</td>
-                    <td><code class="small text-wrap" id="agent-dl-url-winsetup" style="user-select: all;"></code></td>
-                    <td class="text-end text-nowrap"><a id="agent-dl-link-winsetup" class="btn btn-sm btn-primary me-1 disabled" role="button"><i class="fa-solid fa-download me-1"></i> Download</a><button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand('agent-dl-url-winsetup', 'agent-dl-copy-winsetup')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>
-                  </tr>
-                  <tr>
-                    <td class="small fw-bold"><code>SHA256SUMS</code></td>
-                    <td class="small text-muted">Checksums for the staged artifacts — verify before running</td>
-                    <td><code class="small text-wrap" id="agent-dl-url-sums" style="user-select: all;"></code></td>
-                    <td class="text-end text-nowrap"><a id="agent-dl-link-sums" class="btn btn-sm btn-primary me-1 disabled" role="button"><i class="fa-solid fa-download me-1"></i> Download</a><button class="btn btn-sm btn-outline-primary" onclick="copyAgentCommand('agent-dl-url-sums', 'agent-dl-copy-sums')"><i class="fa-solid fa-copy me-1"></i> Copy</button></td>
-                  </tr>
-                </tbody>
+                <tbody id="agent-download-table"></tbody>
               </table>
               <div id="agent-download-status" class="small mb-2"></div>
               <p class="small text-muted mb-0">
-                Other release artifacts (raw Linux binaries, tray, session helper, ARM builds) are on
-                <a href="https://github.com/theta42/theta-agent/releases/latest" target="_blank" rel="noopener noreferrer">
-                  GitHub Releases <i class="fa-solid fa-arrow-up-right-from-square fa-xs ms-1"></i></a>.
+                Versioned release artifacts (the installer name carries the version) and checksums are staged by
+                <code>setup.sh</code> from the suite's pinned theta-agent release; anything not staged is shown
+                greyed out — re-run <code>setup.sh</code> to stage it.
               </p>
             </div>
           </div>
