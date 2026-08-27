@@ -1,4 +1,15 @@
-## [2.30.0] - 2026-08-25
+## [2.31.0] - 2026-08-27
+
+### Added
+- **White-label branding stored in the directory and replicated to all sites.** Branding (name, logo, icon) lives on the master Site resource's metadata (`metadata.branding`) and replicates to spokes via the existing catalog export/import — no new replication mechanism. Editable from the Configuration → Branding tab; stored in the directory, not OpenBao, because it is not secret. Applied to `conf` at boot via a new `dir_branding` overlay step.
+- **Branding pushed to agents.** The directory sends `organization_name` in the WebSocket `config` frame on every agent connection. Agents display it in the tray and Windows logon tile.
+
+### Changed
+- **Branding no longer saved to OpenBao.** The Branding tab now writes to `/api/conf/branding` (directory) instead of `/api/conf` (OpenBao). Existing OpenBao branding is overridden by directory branding at boot.
+- **Footer uses configured logo/name** instead of hardcoded theta42 references.
+- **Login page shows configured logo/name.**
+- **Email templates use configured SSO URL** (`conf.ssoUrl`, falls back to `oauth.issuer`) instead of hardcoded `sso.theta42.com`.
+- **CSS transitions scoped to interactive elements** instead of the `*` selector (which caused layout thrash).
 
 ### Fixed
 - **A freshly enrolled agent never received a peer config.** `POST /api/v1/agent/mesh/enroll` created the device row, allocated its address and let the gateway build a peer for it — and then stopped. The only thing that ever pushed a config was *changing an exit*, in the web UI, by hand (`PUT /api/mesh/clients/:id/exit`). So an agent enrolled itself, appeared in the mesh view, had a live peer waiting for it at the gateway, and held no config it could bring up. On the reference deployment two of the three enrolled devices had been in that state since the day they were installed. Enrolment now hands the device its config, and re-enrolment (which happens on every reconnect) re-pushes — a reconnect is the one moment the agent is known to be listening, and what it holds may be from a previous directory or a previous exit. Best-effort: a device that cannot be reached does not fail its own enrolment.

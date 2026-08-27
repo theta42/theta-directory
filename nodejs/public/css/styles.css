@@ -43,18 +43,12 @@ div.card:not(:last-child){
 	position: fixed;
 }*/
 
-*{
-	transition: all .4s ease;
-}
-
-a:hover, button:hover, div.form-group:hover, header nav a{
-	color: inherit;
-	transition: all .4s ease;
-	background-color: inherit;
-	-ms-transform: scale(1.05);
-	-webkit-transform: scale(1.05); 
-	transform: scale(1.05); /* Standard syntax */
-	z-index: 999999;
+/* Smooth transitions for interactive elements only (not '*' which hits
+   every element and causes layout thrash). */
+a, button, .nav-link, .form-control, .form-select, .card, .badge, .alert{
+	transition: color .15s ease-in-out, background-color .15s ease-in-out,
+		border-color .15s ease-in-out, box-shadow .15s ease-in-out,
+		transform .15s ease-in-out;
 }
 
 /* ── Reusable tag / token input (app.ui.tagInput / groupSelect) ────────────── */

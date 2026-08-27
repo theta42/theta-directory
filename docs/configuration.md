@@ -56,6 +56,36 @@ almost certainly OpenBao (or a live UI edit) winning the merge.
 | `app_name=My SSO` | `conf.name` | string |
 | `app_redis__host=redis.local` | `conf.redis.host` | string (external Redis) |
 
+## White-label branding
+
+The application name, logo, and icon are editable from the **Branding** tab of
+the admin Configuration page. They are stored on the master Site resource's
+metadata (`metadata.branding`) and **replicate to all spokes automatically**
+via the existing catalog export/import — no new replication mechanism needed.
+
+At boot, the directory branding is overlaid onto `conf` (same pattern as
+bao-conf), so `conf.name`, `conf.logo`, and `conf.icon` reflect the directory
+values. The branding is also pushed to enrolled agents via the WebSocket config
+frame, so the agent tray and Windows logon tile show the organization name.
+
+| Field | Conf key | Where it shows |
+|-------|----------|----------------|
+| Application Name | `conf.name` | Navbar, page titles, emails, error pages, agent tray, Windows logon tile |
+| Logo URL | `conf.logo` | Navbar brand, footer, favicon (if no icon set) |
+| Icon URL | `conf.icon` | Browser tab favicon |
+
+For standalone deployments (no multi-site), branding can also be set via
+`app_*` env vars or `conf/secrets.js`:
+
+| Env var | Sets |
+|---------|------|
+| `app_name=My Portal` | `conf.name` |
+| `app_logo=/static/img/logo.svg` | `conf.logo` |
+| `app_icon=/static/img/icon.png` | `conf.icon` |
+
+The public SSO URL used in email templates (`conf.ssoUrl`) falls back to
+`conf.oauth.issuer` if unset.
+
 ## The `app_*` env layer requires conf >= 1.1.0
 
 The `app_*` environment-variable override layer was added in

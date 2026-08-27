@@ -669,6 +669,10 @@ refresh_expired_interval = 300
         payload.public_key = await agentManager.publicKeyBase64();
       }
       Object.assign(payload, await homeDetectHints());
+      // White-label branding for the agent (tray + Windows logon tile).
+      if (conf.name && conf.name !== 'SSO Manager') {
+        payload.organization_name = conf.name;
+      }
       ws.send(JSON.stringify({ type: 'config', payload }));
     } catch (e) {}
   });
