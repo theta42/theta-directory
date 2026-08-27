@@ -76,3 +76,36 @@ describe('proxmox Interfaces', () => {
 		expect(i.primaryMac()).toBe('aa:bb:cc:00:00:01');
 	});
 });
+
+// guestSlug builds a guest's identity from its hostname + primary MAC, so two
+// clusters with the same vmid (lxc-101, lxc-213 — the collision that confused
+// the live directory) can never collide: the MAC differs. A MAC-less guest
+// falls back to name+vmid, still unique within a node.
+describe('proxmox guestSlug', () => {
+	const { guestSlug } = require('../plugins/discovery/proxmox');
+
+	test('uses hostname + MAC when both are known', () => {
+		expect(guestSlug('lxc', 'emby', 101, 'AA:BB:CC:00:00:01'))
+			.toBe('lxc-emby-aabbcc000001');
+	});
+
+	test('two clusters with the same vmid and name get different slugs', () => {
+		const a = guestSlug('lxc', 'emby', 101, 'AA:BB:CC:00:00:01');
+		const b = guestSlug('lxc', 'emby', 101, 'AA:BB:CC:00:00:02');
+		expect(a).not.toBe(b);
+	});
+
+	test('falls back to name+vmid when the MAC is missing', () => {
+		expect(guestSlug('vm', 'win98', 121, null)).toBe('vm-win98-121');
+		expect(guestSlug('vm', 'win98', 121, '')).toBe('vm-win98-121');
+	});
+
+	test('sanitizes names and MACs', () => {
+		expect(guestSlug('lxc', 'My Container!', 5, 'AA:BB:CC:00:00:01'))
+			.toBe('lxc-my-container-aabbcc000001');
+	});
+
+	test('a nameless guest still gets a stable slug', () => {
+		expect(guestSlug('vm', '', 105, 'AA:BB:CC:00:00:03')).toBe('vm-guest-105-aabbcc000003');
+	});
+});

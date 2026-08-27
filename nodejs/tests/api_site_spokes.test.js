@@ -205,3 +205,29 @@ test('agent report saves newly enrolled agent and updates last_seen', async () =
 	expect(res.status).toBe(200);
 	expect(res.body.status).toBe('ok');
 });
+
+test('ping reports the suite version for spoke parity checks', async () => {
+	mockJoinKeys.set('stj_ping', { keyPrefix: 'stj_ping' });
+	const prev = process.env.THETA_SUITE_VERSION;
+	delete process.env.THETA_SUITE_VERSION;
+	try {
+		let res = await router()
+			.post('/api/site/ping')
+			.set('Authorization', 'Bearer stj_ping')
+			.send({});
+		expect(res.status).toBe(200);
+		expect(res.body.status).toBe('ok');
+		expect(res.body.suiteVersion).toBeNull();
+
+		process.env.THETA_SUITE_VERSION = 'v3.31.0';
+		res = await router()
+			.post('/api/site/ping')
+			.set('Authorization', 'Bearer stj_ping')
+			.send({});
+		expect(res.status).toBe(200);
+		expect(res.body.suiteVersion).toBe('v3.31.0');
+	} finally {
+		if (prev === undefined) delete process.env.THETA_SUITE_VERSION;
+		else process.env.THETA_SUITE_VERSION = prev;
+	}
+});
