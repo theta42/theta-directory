@@ -1,6 +1,8 @@
 'use strict';
 
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
 const middleware = require('../middleware/auth');
 const permission = require('../utils/permission');
 const agentManager = require('../utils/agent_manager');
@@ -370,20 +372,75 @@ router.post('/join-keys/:id/revoke', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-router.delete('/join-keys/:id', async (req, res, next) => {
+// --- Staged artifacts ---
+// The Download modal's artifact table is generated from what setup.sh staged
+// into public/resources/theta-agent/ (bind-mounted from ./config/resources),
+// not from a hardcoded list: the release gains artifacts and the UI follows
+// without a code change. The artifact set is the pinned theta-agent release's
+// SHA256SUMS contents, plus the stable Windows-installer alias install.sh
+// copies it to. Staging states are surfaced so the modal can flag anything a
+// fresh setup has not fetched yet (offline host, partial mirror).
+//
+// The release version is read from the versioned Windows installer name
+// (theta-agent-<version>-windows-amd64-setup.exe) — the only artifact that
+// carries the version; the agent/tray/helper binaries keep the stable names
+// the agent's self-update fetches.
+const AGENT_ARTIFACTS_DIR = path.join(__dirname, '..', 'public', 'resources', 'theta-agent');
+
+const AGENT_ARTIFACTS = [
+  { id: 'install', file: 'install.sh', purpose: 'Linux bootstrap script — fetches and configures the agent binary' },
+  { id: 'winsetup', file: 'theta-agent-windows-amd64-setup.exe', purpose: 'Windows installer (agent, tray, WireGuard, credential provider)' },
+  { id: 'sums', file: 'SHA256SUMS', purpose: 'Checksums for every staged artifact — verify before running' },
+  { id: 'linux-amd64', file: 'theta-agent-linux-amd64', purpose: 'Linux agent binary (x86-64)' },
+  { id: 'linux-arm64', file: 'theta-agent-linux-arm64', purpose: 'Linux agent binary (ARM 64-bit)' },
+  { id: 'linux-armv7', file: 'theta-agent-linux-armv7', purpose: 'Linux agent binary (ARM 32-bit)' },
+  { id: 'win-amd64', file: 'theta-agent-windows-amd64.exe', purpose: 'Windows agent binary (x86-64, no installer)' },
+  { id: 'win-arm64', file: 'theta-agent-windows-arm64.exe', purpose: 'Windows agent binary (ARM 64-bit, no installer)' },
+  { id: 'tray-linux-amd64', file: 'theta-agent-tray-linux-amd64', purpose: 'Linux desktop tray companion (x86-64)' },
+  { id: 'tray-linux-arm64', file: 'theta-agent-tray-linux-arm64', purpose: 'Linux desktop tray companion (ARM 64-bit)' },
+  { id: 'tray-win-amd64', file: 'theta-agent-tray-windows-amd64.exe', purpose: 'Windows tray companion (x86-64)' },
+  { id: 'tray-win-arm64', file: 'theta-agent-tray-windows-arm64.exe', purpose: 'Windows tray companion (ARM 64-bit)' },
+  { id: 'helper-win-amd64', file: 'theta-agent-helper-windows-amd64.exe', purpose: 'Windows session helper (x86-64)' },
+  { id: 'helper-win-arm64', file: 'theta-agent-helper-windows-arm64.exe', purpose: 'Windows session helper (ARM 64-bit)' }
+];
+
+function stagedAgentState() {
   try {
-    const key = await AgentJoinKey.get(req.params.id);
-    if (!key) return res.status(404).json({ status: 'error', message: 'join key not found' });
-    await key.delete();
-    logAgentAudit('join_key_deleted', { actor: req.user.uid, label: key.label, keyPrefix: key.keyPrefix });
-    replicateOnFinish(res, 'agent-join-key-deleted');
-    res.json({ status: 'ok' });
+    return new Set(fs.readdirSync(AGENT_ARTIFACTS_DIR));
+  } catch (err) {
+    return new Set();
+  }
+}
+
+function stagedAgentVersion(names) {
+  const m = /^theta-agent-([0-9]+\.[0-9]+\.[0-9]+)-windows-amd64-setup\.exe$/.exec(Array.from(names).find((n) => /^theta-agent-[0-9]+\.[0-9]+\.[0-9]+-windows-amd64-setup\.exe$/.test(n)) || '');
+  return m ? m[1] : null;
+}
+
+// Every catalog entry is reported so the table can show what is missing; a
+// file is staged only when it exists on disk. Size is the on-disk byte count
+// (null when not staged or unreadable).
+router.get('/artifacts', async (req, res, next) => {
+  try {
+    const names = stagedAgentState();
+    const artifacts = AGENT_ARTIFACTS.map((entry) => {
+      const staged = names.has(entry.file);
+      let size = null;
+      if (staged) {
+        try {
+          const st = fs.statSync(path.join(AGENT_ARTIFACTS_DIR, entry.file));
+          if (st.isFile()) size = st.size;
+        } catch (err) { /* file vanished between readdir and stat */ }
+      }
+      return { id: entry.id, file: entry.file, purpose: entry.purpose, staged, size };
+    });
+    res.json({ status: 'ok', version: stagedAgentVersion(names), artifacts });
   } catch (err) { next(err); }
 });
 
 // --- Commands ---
 // Addressed by agent id, not by token: a token is a credential and has no
-// business travelling in a URL, being logged, or sitting in browser history.
+// business travelling in a URL, being logged, or sitting in a browser history.
 router.post('/nodes/:id/command', async (req, res, next) => {
   const { command, payload, isHighRisk } = req.body || {};
   if (!command) {

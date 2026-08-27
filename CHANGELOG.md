@@ -1,3 +1,8 @@
+## [2.32.0] - 2026-08-27
+
+### Added
+- **Install Agent → Download binaries tab lists every staged theta-agent artifact.** The table is now generated from `GET /api/agent/artifacts` (the pinned release's `SHA256SUMS` set plus the stable installer alias) instead of a hardcoded three rows, showing name, purpose, size, staging state, and version from the versioned installer name. Missing artifacts render greyed out; the GitHub fallback footer was dropped since every release artifact is now served by the Directory.
+
 ## [2.31.0] - 2026-08-27
 
 ### Added
@@ -1583,8 +1588,6 @@ First tagged release. Establishes the `vX.Y.Z` tag convention that the in-app up
 - Admin-only in-app banner that checks GitHub releases every 24h and surfaces available updates.
 - Unix/POSIX and LDAP bind-only service account support, distinct from real-person accounts.
 - Merged OAuth Apps + LDAP Info into a single Integrations page.
-
-## [Unreleased]
 
 ## [1.14.0] - 2026-08-01
 
