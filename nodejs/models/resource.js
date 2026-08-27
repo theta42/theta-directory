@@ -218,7 +218,11 @@ class ResourceEdge extends Model {
     id: { type: 'uuid', primaryKey: true },
     parent: { type: 'hasOne', model: 'Resource' }, // Creates parentId
     child: { type: 'hasOne', model: 'Resource' }, // Creates childId
-    relation: { type: 'string', isRequired: true }
+    relation: { type: 'string', isRequired: true },
+    // Which discovery source created this edge (e.g. 'proxmox'). Null for
+    // manual edges. The reconciler uses it to reparent and prune: a resource
+    // must never keep a parent its source no longer reports.
+    source: { type: 'string' }
   };
 }
 

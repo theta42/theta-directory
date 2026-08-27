@@ -1,3 +1,14 @@
+## [2.33.0] - 2026-08-27
+### Fixed
+- **Discovery slugs no longer collide across clusters.** Proxmox guest slugs were `lxc-<vmid>`/`vm-<vmid>` — vmid is only unique per-node, so two clusters both reporting vmid 101/213 merged into the same rows and double-parented the whole tree. Slugs are now built from the guest hostname + primary MAC (`lxc-emby-aabbcc000001`), unique across clusters and stable across vmid renames; MAC-less guests fall back to name+vmid.
+- **Name/slug matching no longer merges MAC/IP-bearing resources.** A resource with a MAC or IP that failed MAC/IP matching is never merged by name — the exact path that let `lxc-101` from one cluster absorb `lxc-101` from another.
+- **Discovery edges are reparented and pruned.** A resource can no longer keep a parent its source stopped reporting: payload edges replace stale discovery-created parents (fixing hosts double-parented under both a site and a hypervisor node), and edges a source created on earlier runs but no longer reports are deleted. Edges carry a `source` field; manual edges are never touched.
+- **Agent-discovered hosts get a MAC-based identity.** The agent reports its primary NIC MAC; the directory uses it for the host slug and metadata, so a host survives hostname changes and IP churn without forking a new row.
+
+
+### Changed
+- **`/api/site/ping` reports the suite version** (`suiteVersion`, from `THETA_SUITE_VERSION` injected by setup.sh) so a spoke can keep its checkout matched to the master's. Absent on masters older than theta-suite v3.32.0.
+
 ## [2.32.0] - 2026-08-27
 
 ### Added

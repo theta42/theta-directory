@@ -113,17 +113,25 @@ class DiscoveryReconciler {
       };
       const candidates = allRes.filter(kindCompatible);
 
-      // 1. Attempt matching by MAC (highest precision)
-      if (res.metadata.interfaces && res.metadata.interfaces.length > 0) {
-        const macs = res.metadata.interfaces.map(i => normalizeMac(i.mac)).filter(m => m.length === 12);
-        if (macs.length > 0) {
-          existing = candidates.find(r =>
-            r.metadata && (
-              (r.metadata.macAddress && macs.includes(normalizeMac(r.metadata.macAddress))) ||
-              (r.metadata.interfaces && r.metadata.interfaces.some(i => macs.includes(normalizeMac(i.mac))))
-            )
-          );
+      // 1. Attempt matching by MAC (highest precision). A single `macAddress`
+      // field (the agent's discovery payload) counts as much as an interfaces
+      // array (Proxmox): both are the same stable identity.
+      const incomingMacs = [];
+      if (res.metadata.macAddress) incomingMacs.push(normalizeMac(res.metadata.macAddress));
+      if (res.metadata.interfaces) {
+        for (const i of res.metadata.interfaces) {
+          const m = normalizeMac(i.mac);
+          if (m.length === 12) incomingMacs.push(m);
         }
+      }
+      const uniqueMacs = [...new Set(incomingMacs.filter(m => m.length === 12))];
+      if (uniqueMacs.length > 0) {
+        existing = candidates.find(r =>
+          r.metadata && (
+            (r.metadata.macAddress && uniqueMacs.includes(normalizeMac(r.metadata.macAddress))) ||
+            (r.metadata.interfaces && r.metadata.interfaces.some(i => uniqueMacs.includes(normalizeMac(i.mac))))
+          )
+        );
       }
 
       // 2. Fallback matching by IP address
@@ -150,8 +158,15 @@ class DiscoveryReconciler {
         });
       }
 
-      // 3. Fallback matching by Slug, Name, or Base Hostname
-      if (!existing && (res.slug || res.name)) {
+      // 3. Fallback matching by Slug, Name, or Base Hostname -- only for a
+      // resource that carries NO MAC or IP identity. A resource WITH a MAC/IP
+      // that failed rules 1-2 must not merge by name: that is exactly how two
+      // clusters' lxc-101 collided (same vmid, different guests -- the slug
+      // matched, the machines did not). Name matching is for name-only sources
+      // (manual entries, some plugins) where there is nothing else to go on.
+      const hasMac = !!res.metadata.macAddress || (res.metadata.interfaces || []).some(i => i.mac);
+      const hasIp = !!res.metadata.ip || (res.metadata.interfaces || []).some(i => i.ip);
+      if (!existing && !hasMac && !hasIp && (res.slug || res.name)) {
         const inputName = normalizeHost(res.name || res.slug);
         existing = candidates.find(r => {
           if (res.slug && r.slug === res.slug) return true;
@@ -255,13 +270,22 @@ class DiscoveryReconciler {
     
     // Now process edges. `allRes` above is already current -- rows created in
     // the loop were pushed onto it -- so no second full read is needed.
-    const existingEdges = await ResourceEdge.list();
+    let existingEdges = await ResourceEdge.list();
 
     // Children that came out of the edge loop with a real parent. The site
     // fallback below uses this rather than "appeared as a childSlug in the
     // payload": a resource whose intended edge was dropped still needs a home,
     // and giving it the site is strictly better than leaving it at the root.
     const parentedSlugs = new Set();
+
+    // Every (parent, child, relation) this run actually created -- payload
+    // edges plus the site-fallback edges below. Edges this source created on
+    // earlier runs that are NOT in this set are stale (the resource moved, or
+    // the plugin stopped reporting it) and get pruned, so a resource can never
+    // keep a parent it no longer has. Only edge-declaring sources prune: a
+    // source whose payload carries no edges (theta-agent discovery) does not
+    // manage edges and must not delete them.
+    const currentEdgeKeys = new Set();
 
     for (const edge of edges) {
       // Find parent ID. It might be in the current payload (mapped to _actualId) or in DB by slug
@@ -317,17 +341,30 @@ class DiscoveryReconciler {
 
       const edgeExists = existingEdges.find(e => e.parentId === parentId && e.childId === childId && e.relation === edge.relation);
       if (!edgeExists) {
+        // Reparent: if the child already sits under a discovery-created parent
+        // (site fallback from an earlier run, or another source's view), the
+        // payload's edge is authoritative -- remove the stale one so a
+        // resource never has two parents. Manual edges (no source) are never
+        // touched. This is what fixed `host_theta-suite-718it` sitting under
+        // both the site and the hypervisor node.
+        const prior = existingEdges.find(e => e.childId === childId && e.relation === edge.relation && e.source);
+        if (prior) {
+          await prior.delete().catch(() => {});
+          existingEdges = existingEdges.filter(e => e.id !== prior.id);
+        }
         const created = await ResourceEdge.create({
           id: crypto.randomUUID(),
           parentId,
           childId,
-          relation: edge.relation
+          relation: edge.relation,
+          source: sourceName
         });
         // Keep the in-memory edge list current so the cycle check above sees
         // edges added earlier in this same payload.
         existingEdges.push(created);
       }
       parentedSlugs.add(edge.childSlug);
+      currentEdgeKeys.add(`${parentId}|${childId}|${edge.relation}`);
     }
     
     if (targetSite) {
@@ -339,11 +376,29 @@ class DiscoveryReconciler {
               id: crypto.randomUUID(),
               parentId: targetSite.id,
               childId: res._actualId,
-              relation: 'hosts'
+              relation: 'hosts',
+              source: sourceName
             }).catch(() => null);
             if (created) existingEdges.push(created);
           }
+          currentEdgeKeys.add(`${targetSite.id}|${res._actualId}|hosts`);
         }
+      }
+    }
+
+    // Prune this source's stale edges: any edge this source created on an
+    // earlier run that this run did not re-create is gone from the payload
+    // (the resource moved under a new parent, or the plugin stopped reporting
+    // it) and must not linger -- a stale edge is how a resource kept a parent
+    // it no longer had. Only runs that declared edges prune; a source whose
+    // payload carries no edges (theta-agent discovery) does not manage edges.
+    if (edges.length > 0) {
+      const stale = existingEdges.filter(e => e.source === sourceName && !currentEdgeKeys.has(`${e.parentId}|${e.childId}|${e.relation}`));
+      for (const e of stale) {
+        await e.delete().catch(() => {});
+      }
+      if (stale.length > 0) {
+        console.log(`[DiscoveryReconciler] ${sourceName}: pruned ${stale.length} stale edge(s)`);
       }
     }
 

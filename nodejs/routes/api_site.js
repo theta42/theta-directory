@@ -220,6 +220,11 @@ router.post('/ping', async (req, res, next) => {
       siteSlug: siteConfig.get().siteSlug,
       baseDn: baseDnFrom(conf),
       ldapAdminPass: (conf.ldap && conf.ldap.bindPassword) || '',
+      // The theta-suite version this directory runs (THETA_SUITE_VERSION,
+      // injected by setup.sh). Spokes use it to keep their checkout matched
+      // to the master's; absent on masters older than theta-suite v3.32.0,
+      // which cannot enforce parity.
+      suiteVersion: process.env.THETA_SUITE_VERSION || null,
       ts: Math.floor(Date.now() / 1000)
     });
   } catch (e) { next(e); }

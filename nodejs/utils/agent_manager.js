@@ -436,6 +436,7 @@ class AgentManager {
         disk_total_gb: discovery.disk_total_gb || undefined,
         ip: (discovery.ip_addresses || [])[0] || undefined,
         public_ip: discovery.public_ip || undefined,
+        macAddress: discovery.mac_address || undefined,
         agentId: agent.id,
         last_seen: Date.now()
       };
@@ -458,7 +459,14 @@ class AgentManager {
       const { DiscoveryReconciler } = require('../services/discovery_reconciler');
       const { ResourceEdge } = require('../models/resource');
 
-      const hostSlug = `host-${discovery.hostname.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`;
+      // Stable identity: MAC when the agent reports one (survives hostname
+      // changes and IP churn), else hostname. The reconciler matches on MAC
+      // first, so a re-discovered host merges into its own row instead of
+      // forking a new one.
+      const macPart = String(discovery.mac_address || '').toLowerCase().replace(/[^a-f0-9]/g, '');
+      const hostSlug = macPart.length === 12
+        ? `host-${macPart}`
+        : `host-${discovery.hostname.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`;
       // Find target site based on location or IP
       const sites = await Resource.list({ where: { kind: 'site' } });
       let targetSite = null;

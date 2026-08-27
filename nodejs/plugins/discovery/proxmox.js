@@ -81,6 +81,22 @@ class Interfaces {
   }
 }
 
+
+// A guest's slug is built from its hostname (the guest name) and its primary
+// MAC, so it is stable across renames of the Proxmox vmid and unique across
+// clusters (vmid alone is only unique per-node, which is how two clusters
+// collided on lxc-101/lxc-213). MAC-less guests (stopped, no config) fall
+// back to name+vmid, which is still unique within a node.
+function guestSlug(prefix, name, vmid, mac) {
+	const clean = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+	const namePart = clean(name) || `guest-${vmid}`;
+	if (mac) {
+		const macPart = String(mac).toLowerCase().replace(/[^a-f0-9]/g, '');
+		if (macPart.length === 12) return `${prefix}-${namePart}-${macPart}`;
+	}
+	return `${prefix}-${namePart}-${vmid}`;
+}
+
 module.exports = {
   // Plugin manifest — see nodejs/services/plugin_registry.js. `configSchema`
   // drives the admin UI form and validation; fields flagged `secret:true` are
@@ -253,7 +269,6 @@ module.exports = {
       const vms = resVms.ok ? ((await resVms.json()).data || []) : [];
 
       for (const vm of vms) {
-        const vmSlug = `vm-${vm.vmid}`;
         const isTemplate = vm.template === 1;
         
         const ifaces = new Interfaces();
@@ -298,6 +313,7 @@ module.exports = {
         } catch(e) {}
 
         const interfaces = ifaces.toArray();
+        const vmSlug = guestSlug('vm', vm.name, vm.vmid, ifaces.primaryMac());
 
         resources.push({
           kind: isTemplate ? 'template' : 'host',
@@ -324,7 +340,6 @@ module.exports = {
       const lxcs = resLxcs.ok ? ((await resLxcs.json()).data || []) : [];
 
       for (const lxc of lxcs) {
-        const lxcSlug = `lxc-${lxc.vmid}`;
         const isTemplate = lxc.template === 1;
         
         const ifaces = new Interfaces();
@@ -366,6 +381,7 @@ module.exports = {
         }
 
         const interfaces = ifaces.toArray();
+        const lxcSlug = guestSlug('lxc', lxc.name, lxc.vmid, ifaces.primaryMac());
 
         resources.push({
           kind: isTemplate ? 'template' : 'host',
@@ -396,5 +412,6 @@ module.exports = {
   run: async (config) => module.exports.discover(config),
 
   // Exported for unit tests only -- not part of the plugin contract.
-  _Interfaces: Interfaces
+  _Interfaces: Interfaces,
+  guestSlug
 };
