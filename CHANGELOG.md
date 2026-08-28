@@ -1,3 +1,12 @@
+## [2.34.0] - $(date +%Y-%m-%d)
+### Added
+- **Resource Graph Redesign:** Implemented a fully abstract Resource Graph architecture.
+- **Virtual LDAP Groups:** Added support for synthesizing Virtual LDAP Groups (e.g. `_access` and `_admin`) dynamically based on inherited tree access via `POST /api/v1/ldap/search` intercept, removing physical `ResourceGroup` rows sprawl.
+- **Port-forward Service Subtype:** Added `port-forward` to `SubtypeTemplate` models and created `GET /api/discovery/port-forwards` for the firewall consumer.
+- **Asynchronous State Evaluation:** Added a new background job `EVAL_STATES` running via BullMQ that asynchronously applies `status_rules` to evaluate resource telemetry and sets `metadata.status`.
+- **Dynamic UI Editing:** Replaced the Agent tab with a live Status tab. Resources now open in View mode by default, and Edit mode dynamically renders input fields based on the resource's `SubtypeTemplate` schema.
+- **Spoke Write-Through Proxy:** Verified that spoke writes are transparently forwarded to the master.
+
 ## [2.33.0] - 2026-08-27
 ### Fixed
 - **Discovery slugs no longer collide across clusters.** Proxmox guest slugs were `lxc-<vmid>`/`vm-<vmid>` — vmid is only unique per-node, so two clusters both reporting vmid 101/213 merged into the same rows and double-parented the whole tree. Slugs are now built from the guest hostname + primary MAC (`lxc-emby-aabbcc000001`), unique across clusters and stable across vmid renames; MAC-less guests fall back to name+vmid.

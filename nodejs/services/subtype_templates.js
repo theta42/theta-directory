@@ -40,6 +40,7 @@ const NEVER_SSH_SUBTYPES = new Set(['ilo', 'bmc', 'idrac', 'switch', 'ap', 'prin
 // A service resource whose lifecycle an agent reports. These inherit access
 // from the host that runs them and have no groups of their own.
 const AGENT_SERVICE_SUBTYPES = new Set([
+  'port-forward',
   'systemd', 'docker', 'podman', 'process', 'openrc', 'systemd-timer', 'cron'
 ]);
 

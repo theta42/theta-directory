@@ -1,4 +1,4 @@
-﻿<%- include('top') %>
+<%- include('top') %>
 
 <style>
   /* The caret's rotation is driven by a class on the BUTTON, not by swapping
@@ -409,7 +409,55 @@
         </select>
       </div>
     </div>
-
+    
+    <div class="row mb-3">
+      <div class="col-12 d-flex justify-content-end mb-2">
+        <div class="btn-group" role="group">
+          <input type="radio" class="btn-check" name="btnradio" id="btnradio1" autocomplete="off" checked onchange="toggleEditMode(false)">
+          <label class="btn btn-outline-secondary btn-sm" for="btnradio1">View</label>
+          <input type="radio" class="btn-check" name="btnradio" id="btnradio2" autocomplete="off" onchange="toggleEditMode(true)">
+          <label class="btn btn-outline-primary btn-sm" for="btnradio2">Edit</label>
+        </div>
+      </div>
+    </div>
+    <div id="dynamic-form-fields"></div>
+    <script>
+      function toggleEditMode(isEdit) {
+        $('#edit-resource-form input, #edit-resource-form select, #edit-resource-form textarea').prop('disabled', !isEdit);
+        if(isEdit) {
+          $('.modal-footer .btn-primary').show();
+        } else {
+          $('.modal-footer .btn-primary').hide();
+        }
+        // Always allow switching mode
+        $('input[name="btnradio"]').prop('disabled', false);
+      }
+      
+      // Simple dynamic renderer based on SubtypeTemplate
+      async function renderDynamicFields(subType, metadata = {}) {
+        if (!subType) return $('#dynamic-form-fields').html('');
+        const res = await fetch('/api/subtype-templates/' + subType, { headers: { 'Authorization': 'Bearer ' + app.auth.getToken() }});
+        const data = await res.json();
+        if (data && data.template && data.template.schema && data.template.schema.properties) {
+          let html = '<hr><h6 class="text-muted">Template Specific Fields</h6><div class="row">';
+          for (const [key, prop] of Object.entries(data.template.schema.properties)) {
+            const val = metadata[key] !== undefined ? metadata[key] : '';
+            html += \`<div class="col-6 mb-3">
+              <label class="form-label">\${key}</label>
+              <input type="\${prop.type === 'number' ? 'number' : 'text'}" class="form-control shadow-sm dynamic-field" data-key="\${key}" placeholder="\${prop.description || ''}" value="\${esc(String(val))}">
+            </div>\`;
+          }
+          html += '</div>';
+          $('#dynamic-form-fields').html(html);
+        } else {
+          $('#dynamic-form-fields').html('');
+        }
+      }
+      // Call renderDynamicFields when subtype changes
+      $('#res-subtype-template').on('change', function() {
+        renderDynamicFields($(this).val());
+      });
+    </script>
     <div class="row mb-3" id="host-details-container" style="display: none;">
       <div class="col-4">
         <label class="form-label">VMID</label>
@@ -649,7 +697,7 @@
         {id: 'groups', label: 'Associated LDAP Groups', bodyHtml: groupsTabHtml},
         {id: 'children', label: 'Children', bodyHtml: childrenTabHtml},
         {id: 'secrets', label: 'Secrets & OpenBao', bodyHtml: secretsTabHtml},
-        {id: 'agent', label: 'Agent', bodyHtml: agentTabHtml(resourcesById[id] && resourcesById[id].agent)},
+        {id: 'status', label: 'Status', bodyHtml: statusTabHtml(resourcesById[id])},
       ],
       footer: {
         metaHtml: id ? app.modal.formatAudit(resourcesById[id], {formatDate: function(ms){ return moment(ms).format('YYYY-MM-DD HH:mm'); }}) : '',
@@ -665,6 +713,12 @@
     if (id && inheritsHostAccess(resourcesById[id])) {
       $('#sw-modal-tab-groups-btn').closest('li').hide();
     }
+    
+    // Default to View Mode and load dynamic fields based on subtype
+    setTimeout(() => {
+      toggleEditMode(false);
+      renderDynamicFields($('#res-subtype').val(), id ? resourcesById[id].metadata : {});
+    }, 100);
   }
 
   function refreshChildrenUI(resourceId) {
@@ -919,10 +973,29 @@
     n.agentStatusTitle = 'Inactive' + (svc.substate ? ' (' + svc.substate + ')' : '');
   }
 
-  // Agent tab body for the resource modal.
-  function agentTabHtml(agent) {
+  // Status tab body for the resource modal.
+  function statusTabHtml(resource) {
+    if (!resource) return '';
+    const agent = resource.agent;
+    const md = resource.metadata || {};
+    
+    let statusHeader = '';
+    if (md.status) {
+      let badgeClass = 'bg-secondary';
+      if (md.status === 'ok') badgeClass = 'bg-success';
+      if (md.status === 'warning') badgeClass = 'bg-warning text-dark';
+      if (md.status === 'critical' || md.status === 'error') badgeClass = 'bg-danger';
+      statusHeader = `<div class="alert alert-light border mb-3 d-flex align-items-center">
+        <div class="me-3 fs-3"><span class="badge ${badgeClass}">${esc(md.status).toUpperCase()}</span></div>
+        <div>
+          <h6 class="mb-1 fw-bold">Computed Status</h6>
+          <p class="mb-0 small text-muted">${esc(md.status_message || 'Telemetry evaluation passing')}</p>
+        </div>
+      </div>`;
+    }
+
     if (!agent) {
-      return '<div class="p-3 text-center text-muted"><i class="fa-solid fa-microchip fa-3x mb-3"></i><h6>No theta-agent connected</h6><p class="small">Install the agent on this host to see live telemetry and issue control commands.</p></div>';
+      return statusHeader + '<div class="p-3 text-center text-muted"><i class="fa-solid fa-microchip fa-3x mb-3"></i><h6>No telemetry available</h6><p class="small">Install the theta-agent or configure a plugin to populate telemetry.</p></div>';
     }
     const d = agent.lastDiscovery || {};
     const t = agent.lastTelemetry || {};
@@ -1022,7 +1095,7 @@
       loggedUsersHtml = `<div class="small text-muted p-2"><i class="fa-solid fa-user-slash me-1"></i>No active logged-in user sessions.</div>`;
     }
 
-    return `<div class="p-3">
+    return statusHeader + `<div class="p-3">
       <div class="mb-3 d-flex justify-content-between align-items-center">
         <h5 class="mb-0">
           ${esc(agent.name || agent.hostname || 'unknown')} ${online}
@@ -2496,6 +2569,20 @@
         isCurrentSite: $('#res-is-current-site').is(':checked')
       }
     };
+    
+    // Add dynamic fields
+    $('.dynamic-field').each(function() {
+      const key = $(this).data('key');
+      let val = $(this).val();
+      if ($(this).attr('type') === 'number') {
+        val = val === '' ? undefined : Number(val);
+      } else {
+        val = val === '' ? undefined : val;
+      }
+      if (val !== undefined) {
+        data.metadata[key] = val;
+      }
+    });
     
     if (data.kind === 'oauth') {
       data.redirect_uris = $('#res-redirect-uris').val().split('\n').map(x => x.trim()).filter(Boolean);

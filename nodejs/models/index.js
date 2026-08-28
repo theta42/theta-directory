@@ -29,6 +29,8 @@ const { SiteJoinKey } = require('./site_join_key');
 const { SiteSpoke } = require('./site_spoke');
 const { MeshSite } = require('./mesh_site');
 const { MeshClient, MeshExitGrant } = require('./mesh_client');
+const { SubtypeTemplate } = require('./subtype_template');
+
 async function initORM() {
   const ormConf = conf.orm || {
     dialect: 'sqlite',
@@ -56,7 +58,7 @@ async function initORM() {
       models: [
         Resource, ResourceEdge, ResourceGroup, AccessRequest, Webhook, PluginInstance,
         SharedSecret, SharedSecretGrant, VaultAppToken, Agent, AgentJoinKey, SiteJoinKey, SiteSpoke,
-        MeshSite, MeshClient, MeshExitGrant,
+        MeshSite, MeshClient, MeshExitGrant, SubtypeTemplate,
         Token, AuthToken, InviteToken, ImpersonationToken, PasswordResetToken, OtpToken, ServiceToken,
         ApiToken
       ]

@@ -27,6 +27,8 @@ const { createLdapClient } = require('@simpleworkjs/ldap');
 const conf = require('@simpleworkjs/conf').ldap;
 const { Agent } = require('../models/agent');
 const { ApiToken } = require('../models/api_token');
+const { interceptVirtualGroups, postFilterEntries } = require('../utils/virtual_groups');
+
 
 const router = express.Router();
 const ldap = createLdapClient(conf);
@@ -89,14 +91,18 @@ router.post('/search', async (req, res, next) => {
     const { base_dn, scope, filter, attributes } = req.body || {};
     if (!filter) return res.status(400).json({ status: 'error', message: 'filter is required' });
 
-    const entries = await ldap.withClient(async (client) => {
+    const { modifiedFilter, virtualGroups } = interceptVirtualGroups(String(filter));
+
+    let entries = await ldap.withClient(async (client) => {
       const { searchEntries } = await client.search(base_dn || conf.userBase, {
         scope: scope || 'sub',
-        filter: String(filter),
+        filter: modifiedFilter,
         attributes: Array.isArray(attributes) && attributes.length ? attributes : undefined,
       });
       return searchEntries;
     });
+
+    entries = postFilterEntries(entries, virtualGroups);
 
     return res.json({ status: 'ok', entries });
   } catch (err) { next(err); }

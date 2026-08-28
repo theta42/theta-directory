@@ -43,6 +43,29 @@ class Agent extends Model {
 	// Enroll a new agent and return { agent, token }. The caller is responsible
 	// for showing `token` to the operator once and never storing it.
 	static async enroll({ name, resourceId, enrolledBy, description }) {
+		let serviceId = null;
+		if (resourceId) {
+			const { Resource, ResourceEdge } = require('./resource');
+			const host = await Resource.get(resourceId).catch(() => null);
+			if (host && host.kind === 'host') {
+				const service = await Resource.create({
+					id: crypto.randomUUID(),
+					kind: 'service',
+					name: 'Theta Agent',
+					slug: `svc-${host.slug.replace(/^host-/, '')}-theta-agent`,
+					metadata: { subType: 'theta-agent', managed: true },
+					created_on: Math.floor(Date.now() / 1000)
+				});
+				await ResourceEdge.create({
+					id: crypto.randomUUID(),
+					parentId: host.id,
+					childId: service.id,
+					relation: 'hosts'
+				});
+				serviceId = service.id;
+			}
+		}
+
 		const token = this.generateToken();
 		const agent = await this.create({
 			id: crypto.randomUUID(),
@@ -50,7 +73,7 @@ class Agent extends Model {
 			description: description || null,
 			tokenHash: this.hashToken(token),
 			tokenPrefix: token.slice(0, 8),
-			resourceId: resourceId || null,
+			resourceId: serviceId || null,
 			revoked: false,
 			enrolled_by: enrolledBy || null,
 			enrolled_on: Math.floor(Date.now() / 1000)
