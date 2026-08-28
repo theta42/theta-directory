@@ -52,6 +52,32 @@ async function callerView(req) {
 }
 
 // GET /api/discovery/resources[?kind=&group=&parent=]
+
+// GET /api/discovery/port-forwards
+// Answers the firewall consumer with port-forward services and their host/site.
+router.get('/port-forwards', async (req, res, next) => {
+	try {
+		const { fullMetadata } = await callerView(req);
+		const allResources = await Resource.list();
+		const portForwards = allResources.filter(r => r.kind === 'service' && r.metadata && r.metadata.subType === 'port-forward');
+		
+		const results = [];
+		for (const pf of portForwards) {
+			const ancestors = await Resource.findAllAncestors(pf.id);
+			const host = ancestors.find(a => a.kind === 'host');
+			const site = ancestors.find(a => a.kind === 'site');
+			
+			const projectedPf = projectResource(pf, { fullMetadata });
+			projectedPf.host = host ? projectResource(host, { fullMetadata }) : null;
+			projectedPf.site = site ? projectResource(site, { fullMetadata }) : null;
+			
+			results.push(projectedPf);
+		}
+		
+		res.json(envelope(results));
+	} catch (err) { next(err); }
+});
+
 router.get('/resources', async (req, res, next) => {
 	try {
 		const { fullMetadata } = await callerView(req);

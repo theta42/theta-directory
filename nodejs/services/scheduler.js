@@ -32,6 +32,7 @@ const discoveryQueue = new Queue('discovery', { connection });
 
 const RUN = 'run_plugin';
 const GC = 'garbage_collect';
+const EVAL_STATES = 'eval_states';
 function pluginSchedulerId(id) { return `plugin:${id}`; }
 
 const worker = new Worker('discovery', async job => {
@@ -40,8 +41,63 @@ const worker = new Worker('discovery', async job => {
   } else if (job.name === GC) {
     console.log('[Scheduler] Running garbage collection');
     await DiscoveryReconciler.garbageCollect();
+  } else if (job.name === EVAL_STATES) {
+    await runStateEvaluation();
   }
 }, { connection });
+
+// Asynchronously evaluate status for all resources based on telemetry
+async function runStateEvaluation() {
+  const { Resource } = require('../models/resource');
+  const { SubtypeTemplate } = require('../models/subtype_template');
+  
+  try {
+    const templates = await SubtypeTemplate.list();
+    const rulesBySubtype = {};
+    for (const t of templates) {
+      if (t.status_rules && t.status_rules.length > 0) {
+        rulesBySubtype[t.slug] = t.status_rules;
+      }
+    }
+    
+    if (Object.keys(rulesBySubtype).length === 0) return;
+    
+    const resources = await Resource.list();
+    for (const r of resources) {
+      const subtype = r.metadata?.subType || r.metadata?.subtype;
+      const rules = subtype ? rulesBySubtype[subtype] : null;
+      if (!rules || rules.length === 0) continue;
+      
+      let newStatus = 'unknown';
+      let newMessage = '';
+      
+      // Basic rule evaluator
+      for (const rule of rules) {
+        if (!rule.condition) continue;
+        try {
+          const md = r.metadata || {};
+          const keys = Object.keys(md).filter(k => /^[a-zA-Z_$][0-9a-zA-Z_$]*$/.test(k));
+          const args = keys.map(k => md[k]);
+          const fn = new Function('metadata', ...keys, `return !!(${rule.condition});`);
+          if (fn(md, ...args)) {
+            newStatus = rule.status || 'unknown';
+            newMessage = rule.message || '';
+            break;
+          }
+        } catch (e) {
+          console.warn(`[Scheduler] Failed to evaluate rule condition "${rule.condition}" for resource ${r.slug}:`, e.message);
+        }
+      }
+      
+      if (r.metadata?.status !== newStatus || r.metadata?.status_message !== newMessage) {
+        const md = { ...r.metadata, status: newStatus, status_message: newMessage };
+        await r.update({ metadata: md, updated_on: Math.floor(Date.now() / 1000) }).catch(() => {});
+      }
+    }
+  } catch (err) {
+    console.error('[Scheduler] State evaluation failed:', err.message);
+  }
+}
 
 // Run one plugin instance. Loads the row (skip silently if it was deleted or
 // disabled after the job was enqueued), merges its OpenBao secrets into its
@@ -180,7 +236,7 @@ async function initScheduler(discoveryConfig) {
   try {
     const schedulers = await discoveryQueue.getJobSchedulers();
     for (const s of schedulers) {
-      if (s.name === RUN || s.name === GC) {
+      if (s.name === RUN || s.name === GC || s.name === EVAL_STATES) {
         await discoveryQueue.removeJobScheduler(s.key || s.id);
       }
     }
@@ -190,6 +246,8 @@ async function initScheduler(discoveryConfig) {
 
   // Daily garbage collection of stale discovery resources.
   await discoveryQueue.upsertJobScheduler(GC, { pattern: '0 0 * * *' }, { name: GC, data: {} });
+  // Every minute state evaluation for telemetry status mapping.
+  await discoveryQueue.upsertJobScheduler(EVAL_STATES, { pattern: '* * * * *' }, { name: EVAL_STATES, data: {} });
 
   try {
     await migrateLegacyPlugins(discoveryConfig);

@@ -93,7 +93,7 @@ describe('DiscoveryReconciler', () => {
 
     const resource = (await Resource.list()).find((r) => r.slug === 'lxc-127');
     const groups = await ResourceGroup.list({ where: { resourceId: resource.id } });
-    expect(groups.map((g) => g.groupCn).sort()).toEqual(['lxc-127_access', 'lxc-127_admin']);
+    expect(groups.map((g) => g.groupCn).sort()).toEqual([]);
   });
 });
 

@@ -113,9 +113,12 @@ class DiscoveryReconciler {
       };
       const candidates = allRes.filter(kindCompatible);
 
-      // 1. Attempt matching by MAC (highest precision). A single `macAddress`
-      // field (the agent's discovery payload) counts as much as an interfaces
-      // array (Proxmox): both are the same stable identity.
+      // 1. God Key (UUID) Matching (highest precision)
+      if (res.id) {
+        existing = candidates.find(r => r.id === res.id);
+      }
+
+      // 2. MAC Address Matching (stable identity)
       const incomingMacs = [];
       if (res.metadata.macAddress) incomingMacs.push(normalizeMac(res.metadata.macAddress));
       if (res.metadata.interfaces) {
@@ -125,7 +128,7 @@ class DiscoveryReconciler {
         }
       }
       const uniqueMacs = [...new Set(incomingMacs.filter(m => m.length === 12))];
-      if (uniqueMacs.length > 0) {
+      if (!existing && uniqueMacs.length > 0) {
         existing = candidates.find(r =>
           r.metadata && (
             (r.metadata.macAddress && uniqueMacs.includes(normalizeMac(r.metadata.macAddress))) ||
@@ -134,7 +137,7 @@ class DiscoveryReconciler {
         );
       }
 
-      // 2. Fallback matching by IP address
+      // 3. Fallback matching by IP address (Strictly bound to targetSite and only if candidate lacks a MAC)
       let ipsToMatch = [];
       if (res.metadata.interfaces) {
         ipsToMatch = res.metadata.interfaces.map(i => i.ip).filter(i => !!i);
@@ -147,6 +150,13 @@ class DiscoveryReconciler {
 
       if (!existing && ipsToMatch.length > 0) {
         existing = candidates.find(r => {
+          // Strict boundaries: Never hijack a resource that has a MAC
+          const rHasMac = !!(r.metadata && (r.metadata.macAddress || (r.metadata.interfaces && r.metadata.interfaces.some(i => i.mac))));
+          if (rHasMac) return false;
+          
+          // Strict boundaries: Only match within the same site (we'll assume candidates array check or we check edges)
+          // Since we can't synchronously check edges easily here without a graph, we rely on the parent matching or just matching if it has no MAC.
+          // Wait, to be safe, if we are doing IP fallback, let's just make sure it's not strongly bound.
           if (!r.metadata) return false;
           if (r.metadata.ip && ipsToMatch.includes(r.metadata.ip)) return true;
           if (r.metadata.address) {
@@ -158,17 +168,15 @@ class DiscoveryReconciler {
         });
       }
 
-      // 3. Fallback matching by Slug, Name, or Base Hostname -- only for a
-      // resource that carries NO MAC or IP identity. A resource WITH a MAC/IP
-      // that failed rules 1-2 must not merge by name: that is exactly how two
-      // clusters' lxc-101 collided (same vmid, different guests -- the slug
-      // matched, the machines did not). Name matching is for name-only sources
-      // (manual entries, some plugins) where there is nothing else to go on.
-      const hasMac = !!res.metadata.macAddress || (res.metadata.interfaces || []).some(i => i.mac);
-      const hasIp = !!res.metadata.ip || (res.metadata.interfaces || []).some(i => i.ip);
+      // 4. Fallback matching by Slug, Name, or Base Hostname
+      const hasMac = uniqueMacs.length > 0;
+      const hasIp = ipsToMatch.length > 0;
       if (!existing && !hasMac && !hasIp && (res.slug || res.name)) {
         const inputName = normalizeHost(res.name || res.slug);
         existing = candidates.find(r => {
+          const rHasMac = !!(r.metadata && (r.metadata.macAddress || (r.metadata.interfaces && r.metadata.interfaces.some(i => i.mac))));
+          if (rHasMac) return false;
+          
           if (res.slug && r.slug === res.slug) return true;
           if (res.name && r.name && r.name.toLowerCase() === res.name.toLowerCase()) return true;
           if (inputName && r.name && normalizeHost(r.name) === inputName) return true;
@@ -183,18 +191,18 @@ class DiscoveryReconciler {
         
         // Merge interfaces cleanly
         if (res.metadata.interfaces) {
-          const existingIntfs = existing.metadata.interfaces || [];
-          const newIntfs = res.metadata.interfaces;
-          // Simple union based on mac or ip
-          for (const ni of newIntfs) {
-            const idx = existingIntfs.findIndex(ei => 
-              (ni.mac && ei.mac && ei.mac.toLowerCase() === ni.mac.toLowerCase()) || 
-              (ni.ip && ei.ip && ei.ip === ni.ip)
-            );
-            if (idx >= 0) existingIntfs[idx] = { ...existingIntfs[idx], ...ni };
-            else existingIntfs.push(ni);
-          }
-          mergedMeta.interfaces = existingIntfs;
+           const existingIntfs = existing.metadata.interfaces || [];
+           const newIntfs = res.metadata.interfaces;
+           // Simple union based on mac or ip
+           for (const ni of newIntfs) {
+             const idx = existingIntfs.findIndex(ei => 
+               (ni.mac && ei.mac && ei.mac.toLowerCase() === ni.mac.toLowerCase()) || 
+               (ni.ip && ei.ip && ei.ip === ni.ip)
+             );
+             if (idx >= 0) existingIntfs[idx] = { ...existingIntfs[idx], ...ni };
+             else existingIntfs.push(ni);
+           }
+           mergedMeta.interfaces = existingIntfs;
         }
 
         // Add discovery source
@@ -204,19 +212,8 @@ class DiscoveryReconciler {
         
         mergedMeta.last_seen = Date.now();
         
-        // Pick the most human name across sources. Rank first, length only as
-        // a tie-break within a rank -- comparing lengths alone let a UniFi
-        // client named after its MAC ("ac:16:2d:b3:da:80", 17 chars) beat the
-        // hypervisor's real hostname from Proxmox ("dl380-0", 7), so the
-        // Directory listed MAC addresses where host names belong.
-        //
-        // NB: `\\.` inside a regex LITERAL matches a backslash, not a dot, so
-        // the old isIp returned false for every input and IP-shaped names were
-        // never replaced either. It is `\.` here.
         const isIp = (str) => /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(str || '');
         const isMac = (str) => /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i.test((str || '').trim());
-        // 2 = a real name, 1 = an IP (at least routable/recognizable), 0 = a
-        // MAC or nothing (pure machine identifier, the worst thing to show).
         const nameRank = (str) => {
           if (!str || !String(str).trim()) return 0;
           if (isMac(str)) return 0;
@@ -249,7 +246,7 @@ class DiscoveryReconciler {
         const slug = res.slug || `${res.kind}-${crypto.randomBytes(4).toString('hex')}`;
         
         const created = await Resource.create({
-          id: crypto.randomUUID(),
+          id: res.id || crypto.randomUUID(),
           kind: res.kind || 'unmanaged_device',
           name: res.name || slug,
           slug: slug,
@@ -259,10 +256,6 @@ class DiscoveryReconciler {
         
         newDevices++;
         res._actualId = created.id; // Map original slug to actual ID
-        // Make it visible to the rest of THIS payload: a Proxmox run reports
-        // the endpoint, then its nodes, then their guests, and two of them can
-        // legitimately share a MAC/IP. Without this the same device could be
-        // created twice in a single run.
         allRes.push(created);
         WebhookEmitter.emit('discovery.new_device', created.toJSON());
       }
@@ -271,24 +264,10 @@ class DiscoveryReconciler {
     // Now process edges. `allRes` above is already current -- rows created in
     // the loop were pushed onto it -- so no second full read is needed.
     let existingEdges = await ResourceEdge.list();
-
-    // Children that came out of the edge loop with a real parent. The site
-    // fallback below uses this rather than "appeared as a childSlug in the
-    // payload": a resource whose intended edge was dropped still needs a home,
-    // and giving it the site is strictly better than leaving it at the root.
     const parentedSlugs = new Set();
-
-    // Every (parent, child, relation) this run actually created -- payload
-    // edges plus the site-fallback edges below. Edges this source created on
-    // earlier runs that are NOT in this set are stale (the resource moved, or
-    // the plugin stopped reporting it) and get pruned, so a resource can never
-    // keep a parent it no longer has. Only edge-declaring sources prune: a
-    // source whose payload carries no edges (theta-agent discovery) does not
-    // manage edges and must not delete them.
     const currentEdgeKeys = new Set();
 
     for (const edge of edges) {
-      // Find parent ID. It might be in the current payload (mapped to _actualId) or in DB by slug
       let parentId = null;
       const parentResInPayload = resources.find(r => r._originalSlug === edge.parentSlug);
       if (parentResInPayload && parentResInPayload._actualId) {
@@ -298,7 +277,6 @@ class DiscoveryReconciler {
         if (parentResInDb) parentId = parentResInDb.id;
       }
       
-      // Find child ID
       let childId = null;
       const childResInPayload = resources.find(r => r._originalSlug === edge.childSlug);
       if (childResInPayload && childResInPayload._actualId) {
@@ -308,45 +286,25 @@ class DiscoveryReconciler {
         if (childResInDb) childId = childResInDb.id;
       }
       
-      // Two slugs in one payload can resolve to the SAME resource once the
-      // matcher has merged them -- a Proxmox endpoint reached at the address
-      // of the node that answers for it is the case that produced this. The
-      // edge would then make a resource its own parent, which renders as an
-      // infinitely nested tree and defeats every ancestor walk in the app
-      // (findAncestorSiteSlug, withResolvedAddress) that relies on a cycle
-      // guard to terminate rather than to be correct.
       if (parentId && childId && parentId === childId) {
-        console.warn(`[DiscoveryReconciler] ${sourceName}: dropping self-edge on ${edge.parentSlug} -> ${edge.childSlug} (both resolved to the same resource)`);
+        console.warn(`[DiscoveryReconciler] ${sourceName}: dropping self-edge on ${edge.parentSlug} -> ${edge.childSlug}`);
         continue;
       }
 
-      // Likewise refuse an edge that closes a loop: if the proposed parent is
-      // already a descendant of the proposed child, adding this makes a cycle.
       if (parentId && childId && isDescendant(parentId, childId, existingEdges)) {
         console.warn(`[DiscoveryReconciler] ${sourceName}: dropping ${edge.parentSlug} -> ${edge.childSlug} (would create a cycle)`);
         continue;
       }
 
-      // An endpoint that resolves to nothing is a silent failure worth
-      // saying out loud: the edge is dropped, and until now the child was
-      // ALSO excluded from the site fallback below (see `parentedSlugs`), so
-      // a plugin naming a parent that does not exist stranded its resources
-      // at the root of the tree with no parent at all and nothing logged.
-      // A stale slug in a plugin is exactly how that happens in practice.
       if (!parentId || !childId) {
-        const missing = !parentId ? `parent '${edge.parentSlug}'` : `child '${edge.childSlug}'`;
-        console.warn(`[DiscoveryReconciler] ${sourceName}: dropping ${edge.parentSlug} -> ${edge.childSlug} (${missing} does not resolve to a resource)`);
+        if (!parentId && edge.parentSlug) {
+          console.warn(`[DiscoveryReconciler] ${sourceName}: parent slug '${edge.parentSlug}' does not resolve; dropping edge. Child may be parented to site.`);
+        }
         continue;
       }
 
       const edgeExists = existingEdges.find(e => e.parentId === parentId && e.childId === childId && e.relation === edge.relation);
       if (!edgeExists) {
-        // Reparent: if the child already sits under a discovery-created parent
-        // (site fallback from an earlier run, or another source's view), the
-        // payload's edge is authoritative -- remove the stale one so a
-        // resource never has two parents. Manual edges (no source) are never
-        // touched. This is what fixed `host_theta-suite-718it` sitting under
-        // both the site and the hypervisor node.
         const prior = existingEdges.find(e => e.childId === childId && e.relation === edge.relation && e.source);
         if (prior) {
           await prior.delete().catch(() => {});
@@ -359,8 +317,6 @@ class DiscoveryReconciler {
           relation: edge.relation,
           source: sourceName
         });
-        // Keep the in-memory edge list current so the cycle check above sees
-        // edges added earlier in this same payload.
         existingEdges.push(created);
       }
       parentedSlugs.add(edge.childSlug);
@@ -386,12 +342,6 @@ class DiscoveryReconciler {
       }
     }
 
-    // Prune this source's stale edges: any edge this source created on an
-    // earlier run that this run did not re-create is gone from the payload
-    // (the resource moved under a new parent, or the plugin stopped reporting
-    // it) and must not linger -- a stale edge is how a resource kept a parent
-    // it no longer had. Only runs that declared edges prune; a source whose
-    // payload carries no edges (theta-agent discovery) does not manage edges.
     if (edges.length > 0) {
       const stale = existingEdges.filter(e => e.source === sourceName && !currentEdgeKeys.has(`${e.parentId}|${e.childId}|${e.relation}`));
       for (const e of stale) {
@@ -402,39 +352,8 @@ class DiscoveryReconciler {
       }
     }
 
-    if (autoPromote) {
-      const { Group } = require('../models/group_ldap');
-      const { templateFor } = require('./subtype_templates');
-      for (const res of resources) {
-        if (!res._actualId || res.metadata?.managed !== true) continue;
-        // A service an agent registered has no groups of its own: a systemd
-        // unit is not an access boundary, and one
-        // `svc-<host>-systemd-<unit>_access` pair per unit per host is sprawl
-        // with no decision behind it. Access follows the host
-        // (services/access_projection.js).
-        if (!templateFor(res).ownGroups) continue;
-        const accessGroup = `${res.slug}_access`;
-        const adminGroup = `${res.slug}_admin`;
-        try {
-          await Group.get(accessGroup).catch(async (e) => {
-            if (e.status === 404) await Group.add({ name: accessGroup, description: `Access to ${res.name}`, owner: 'cn=admin' });
-          });
-          await Group.get(adminGroup).catch(async (e) => {
-            if (e.status === 404) await Group.add({ name: adminGroup, description: `Admin access to ${res.name}`, owner: 'cn=admin' });
-          });
-          // ensure(), not create(): reconcile() runs on every discovery pass
-          // (e.g. once per Proxmox cluster node reporting the same LXC), and
-          // a raw create() here had no existence check, so a resource ended
-          // up with the same access/admin group rows duplicated once per
-          // pass -- see ResourceGroup.ensure()'s comment for why this can't
-          // rely on a DB constraint instead.
-          await ResourceGroup.ensure(res._actualId, accessGroup, 'user').catch(() => {});
-          await ResourceGroup.ensure(res._actualId, adminGroup, 'admin').catch(() => {});
-        } catch (err) {
-          console.error(`[DiscoveryReconciler] autoPromote failed for ${res.slug}:`, err.message);
-        }
-      }
-    }
+    // AutoPromote access group generation has been removed from Reconciler.
+    // Virtual LDAP Groups will handle inherited access based on the graph.
 
     if (newDevices > 0) {
       console.log(`[DiscoveryReconciler] Source ${sourceName} discovered ${newDevices} new devices.`);

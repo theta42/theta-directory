@@ -111,6 +111,7 @@ app.use('/api/notification', middleware.auth, require('./routes/notification'));
 // that decided who received them live (routes/activity.js).
 app.use('/api/activity', middleware.auth, require('./routes/activity'));
 app.use('/api/discovery', middleware.auth, require('./routes/discovery'));
+app.use('/api/subtype-templates', middleware.auth, require('./routes/api_subtype_template'));
 app.use('/api/directory-admin', middleware.auth, require('./routes/api_directory_admin'));
 // Directory migration (docs/ldif-import.md). Admin-gated inside the router.
 app.use('/api/ldif-import', middleware.auth, require('./routes/api_ldif_import'));

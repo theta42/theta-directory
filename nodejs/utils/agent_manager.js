@@ -244,12 +244,9 @@ class AgentManager {
       const slug = `svc-${hostRes.slug.replace(/^host-/, '')}-${subtype}-${name.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`;
 
       // Match on subtype+name so units/containers/processes of the same name
-      // don't collide. A generic `serviceName` field is authoritative; the
-      // legacy `systemdService`/`dockerContainer` keys are also matched so
-      // resources created before the generic field keep reconciling in place.
+      // don't collide. A generic `serviceName` field is authoritative.
       let serviceRes = (await Resource.list({ where: { kind: 'service' } }).catch(() => []))
-        .find(r => r.metadata && r.metadata.subType === subtype && r.metadata.hostId === hostRes.id &&
-          (r.metadata.serviceName === name || r.metadata.systemdService === name || r.metadata.dockerContainer === name));
+        .find(r => r.metadata && r.metadata.subType === subtype && r.metadata.hostId === hostRes.id && r.metadata.serviceName === name);
 
       if (!serviceRes) {
         const metadata = {
@@ -269,12 +266,6 @@ class AgentManager {
           metadata: metadata,
           created_on: Math.floor(Date.now() / 1000)
         }).catch(() => null);
-      } else {
-        // Backfill the generic field on legacy rows so lookups stay uniform.
-        const md = serviceRes.metadata || {};
-        if (!md.serviceName) {
-          await serviceRes.update({ metadata: { ...md, serviceName: name } }).catch(() => {});
-        }
       }
 
       if (serviceRes) {
@@ -319,7 +310,7 @@ class AgentManager {
     const services = await Resource.list({ where: { kind: 'service' } }).catch(() => []);
     const target = services.find(r =>
       r.metadata &&
-      (r.metadata.serviceName === name || r.metadata.systemdService === name || r.metadata.dockerContainer === name) &&
+      r.metadata.serviceName === name &&
       (!hostRes || r.metadata.hostId === hostRes.id)
     );
 
@@ -427,8 +418,8 @@ class AgentManager {
   // than inventing a second matcher here.
   async applyDiscoveryToDirectory(agent, discovery) {
     try {
-      const { Resource } = require('../models/resource');
-      const metadata = {
+      const { Resource, ResourceEdge } = require('../models/resource');
+      const hostMetadata = {
         os: discovery.os || undefined,
         kernel: discovery.kernel || undefined,
         cpu: discovery.cpu || undefined,
@@ -437,45 +428,52 @@ class AgentManager {
         ip: (discovery.ip_addresses || [])[0] || undefined,
         public_ip: discovery.public_ip || undefined,
         macAddress: discovery.mac_address || undefined,
-        agentId: agent.id,
         last_seen: Date.now()
       };
-      // Drop undefined so a field the agent could not determine never
-      // overwrites a good value already in the directory.
-      for (const k of Object.keys(metadata)) if (metadata[k] === undefined) delete metadata[k];
+      for (const k of Object.keys(hostMetadata)) if (hostMetadata[k] === undefined) delete hostMetadata[k];
+
+      let hostRes = null;
+      let serviceRes = null;
 
       if (agent.resourceId) {
-        const resource = await Resource.get(agent.resourceId);
-        if (!resource) return;
-        const merged = { ...(resource.metadata || {}), ...metadata };
+        serviceRes = await Resource.get(agent.resourceId).catch(() => null);
+        if (serviceRes && serviceRes.kind === 'service') {
+          await serviceRes.update({ 
+            metadata: { ...serviceRes.metadata, last_seen: Date.now() },
+            updated_on: Math.floor(Date.now() / 1000)
+          });
+          const edges = await ResourceEdge.list({ where: { childId: serviceRes.id } }).catch(() => []);
+          for (const edge of edges) {
+            const parent = await Resource.get(edge.parentId).catch(() => null);
+            if (parent && parent.kind === 'host') {
+              hostRes = parent;
+              break;
+            }
+          }
+        }
+      }
+
+      if (hostRes) {
+        const merged = { ...(hostRes.metadata || {}), ...hostMetadata };
         const sources = new Set(merged.discovery_sources || []);
         sources.add('theta-agent');
         merged.discovery_sources = [...sources];
-        await resource.update({ metadata: merged, updated_on: Math.floor(Date.now() / 1000) });
+        await hostRes.update({ metadata: merged, updated_on: Math.floor(Date.now() / 1000) });
         return;
       }
 
       if (!discovery.hostname) return;
       const { DiscoveryReconciler } = require('../services/discovery_reconciler');
-      const { ResourceEdge } = require('../models/resource');
 
-      // Stable identity: MAC when the agent reports one (survives hostname
-      // changes and IP churn), else hostname. The reconciler matches on MAC
-      // first, so a re-discovered host merges into its own row instead of
-      // forking a new one.
       const macPart = String(discovery.mac_address || '').toLowerCase().replace(/[^a-f0-9]/g, '');
       const hostSlug = macPart.length === 12
         ? `host-${macPart}`
         : `host-${discovery.hostname.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`;
-      // Find target site based on location or IP
+      
       const sites = await Resource.list({ where: { kind: 'site' } });
       let targetSite = null;
       if (discovery.location && discovery.location !== 'default') {
-        targetSite = sites.find(s => 
-          s.name === discovery.location || 
-          s.slug === discovery.location || 
-          s.slug === `site_${discovery.location}`
-        );
+        targetSite = sites.find(s => s.name === discovery.location || s.slug === discovery.location || s.slug === `site_${discovery.location}`);
       }
       if (!targetSite && discovery.public_ip) {
         targetSite = sites.find(s => {
@@ -490,25 +488,31 @@ class AgentManager {
           kind: 'host',
           name: discovery.hostname,
           slug: hostSlug,
-          metadata: { ...metadata, subType: 'linux', managed: true }
+          metadata: { ...hostMetadata, subType: 'linux', managed: true }
         }],
         edges: []
       }, { location: targetSite ? targetSite.name : undefined });
 
-      // Find the matched or created host resource
       const allHosts = await Resource.list({ where: { kind: 'host' } });
-      const hostRes = allHosts.find(r => 
-        r.name.toLowerCase() === discovery.hostname.toLowerCase() || 
-        r.slug === hostSlug || 
-        r.metadata?.agentId === agent.id
-      );
+      hostRes = allHosts.find(r => r.name.toLowerCase() === discovery.hostname.toLowerCase() || r.slug === hostSlug);
 
       if (hostRes) {
-        // Bind the agent to its Host resource
-        await agent.update({ resourceId: hostRes.id }).catch(() => {});
-
-        // Attach host to matching Site by Public IP if not already parented
-        // Edge creation is now handled by DiscoveryReconciler above
+        // Create the Service if it doesn't exist
+        serviceRes = await Resource.create({
+          id: crypto.randomUUID(),
+          kind: 'service',
+          name: 'Theta Agent',
+          slug: `svc-${hostRes.slug.replace(/^host-/, '')}-theta-agent`,
+          metadata: { subType: 'theta-agent', managed: true, last_seen: Date.now() },
+          created_on: Math.floor(Date.now() / 1000)
+        });
+        await ResourceEdge.create({
+          id: crypto.randomUUID(),
+          parentId: hostRes.id,
+          childId: serviceRes.id,
+          relation: 'hosts'
+        });
+        await agent.update({ resourceId: serviceRes.id }).catch(() => {});
       }
     } catch (err) {
       // Never let a directory write break the agent connection.

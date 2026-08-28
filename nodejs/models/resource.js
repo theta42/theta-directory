@@ -68,38 +68,38 @@ class Resource extends Model {
       return obj;
     });
     
-    // Bubble up production status: if any child is prod, parent is prod
-    const isProdCache = new Map();
-    function checkProd(resId, visited = new Set()) {
-      if (isProdCache.has(resId)) return isProdCache.get(resId);
-      if (visited.has(resId)) return false; // Cycle prevention
+    // Bubble up tags: if any child has a tag, parent inherits it
+    const tagCache = new Map(); // resId -> Set of tags
+    function getTags(resId, visited = new Set()) {
+      if (tagCache.has(resId)) return tagCache.get(resId);
+      if (visited.has(resId)) return new Set(); // Cycle prevention
       
       visited.add(resId);
       const r = resObjs.find(x => x.id === resId);
-      if (!r) return false;
+      if (!r) return new Set();
       
-      // If intrinsically prod, return true
-      if (r.metadata.isProduction) {
-        isProdCache.set(resId, true);
-        return true;
-      }
+      const tags = new Set(r.metadata.tags || []);
       
       // Check children
       const childrenIds = edges.filter(e => e.parentId === resId).map(e => e.childId);
       for (const cid of childrenIds) {
-        if (checkProd(cid, visited)) {
-          isProdCache.set(resId, true);
-          return true;
+        const childTags = getTags(cid, visited);
+        for (const tag of childTags) {
+          tags.add(tag);
         }
       }
       
-      isProdCache.set(resId, false);
-      return false;
+      tagCache.set(resId, tags);
+      return tags;
     }
     
     let maxUpdated = 0;
     resObjs.forEach(r => {
-      r.metadata.isProduction = checkProd(r.id);
+      r.metadata.bubbled_tags = Array.from(getTags(r.id));
+      // Migrate old isProduction to a tag if it exists and hasn't been migrated
+      if (r.metadata.isProduction && !r.metadata.bubbled_tags.includes('prod')) {
+        r.metadata.bubbled_tags.push('prod');
+      }
       if (r.updated_on && r.updated_on > maxUpdated) maxUpdated = r.updated_on;
     });
 
