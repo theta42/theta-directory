@@ -152,6 +152,7 @@ describe('supports()', () => {
     expect(driver.supports({ kind: 'host', metadata: { subType: 'proxmox' } })).toBe(false);
     expect(driver.supports({ kind: 'oauth', metadata: {} })).toBe(false);
     expect(driver.supports(EMBY)).toBe(true);
-    expect(driver.supports({ kind: 'host', metadata: { agentId: 'a1' } })).toBe(true);
+    // Hosts are not claimed by this driver; resolveDriver does the agent lookup.
+    expect(driver.supports({ kind: 'host', metadata: { subType: 'linux' } })).toBe(false);
   });
 });

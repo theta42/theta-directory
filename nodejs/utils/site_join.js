@@ -118,9 +118,51 @@ function edgeKey(parentId, childId, relation) {
 //     locally. The resources survived (those ARE stamp-guarded); their
 //     parentage did not, which is what made a spoke's directory tree
 //     progressively empty out.
-async function importDirectory({ Resource, ResourceEdge, exportData }) {
+async function importDirectory({ Resource, ResourceEdge, SubtypeTemplate, exportData }) {
   const resources = (exportData && exportData.resources) || [];
   const edges = (exportData && exportData.edges) || [];
+  const subtypeTemplates = (exportData && exportData.subtypeTemplates) || [];
+
+  // Subtype templates follow the same rule as resources: the master is
+  // authoritative, matched by slug.
+  //
+  // Backfilling only the MISSING slugs does not work here, because every site
+  // seeds the same default templates locally at boot (SubtypeTemplate
+  // .seedDefaults, called from models/index.js). Every default slug therefore
+  // already exists on the spoke before it ever joins, so "skip what exists"
+  // means the master's edits to `linux`, `proxmox` or `theta-agent` -- the
+  // ones an operator is most likely to customise -- are exactly the ones that
+  // never replicate.
+  let subtypeTemplatesImported = 0;
+  let subtypeTemplatesUpdated = 0;
+  if (SubtypeTemplate && subtypeTemplates.length > 0) {
+    const existing = await SubtypeTemplate.list().catch(() => []);
+    const bySlug = new Map(existing.map(t => [t.slug, t]));
+    for (const raw of subtypeTemplates) {
+      const t = raw.toJSON ? raw.toJSON() : { ...raw };
+      const slug = t.slug;
+      if (!slug) continue;
+      delete t.id;
+      delete t.created_on;
+      delete t.updated_on;
+      try {
+        const local = bySlug.get(slug);
+        if (local) {
+          await local.update({ ...t, updated_on: Math.floor(Date.now() / 1000) });
+          subtypeTemplatesUpdated++;
+        } else {
+          await SubtypeTemplate.create({
+            ...t,
+            id: require('crypto').randomUUID(),
+            created_on: Math.floor(Date.now() / 1000)
+          });
+          subtypeTemplatesImported++;
+        }
+      } catch (e) {
+        console.warn('[importDirectory] could not import subtype template', slug, e.message);
+      }
+    }
+  }
 
   const bySlug = new Map();
   try {
@@ -306,7 +348,8 @@ async function importDirectory({ Resource, ResourceEdge, exportData }) {
 
   return {
     created, updated, resourcesRemoved, edgeCount, edgesRemoved,
-    edgesSkipped: skipped, edgesKeptLocal, locallyOwned: locallyOwnedSlugs
+    edgesSkipped: skipped, edgesKeptLocal, locallyOwned: locallyOwnedSlugs,
+    subtypeTemplatesImported, subtypeTemplatesUpdated
   };
 }
 

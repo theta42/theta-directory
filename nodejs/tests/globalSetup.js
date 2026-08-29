@@ -1,3 +1,10 @@
+// NOTE: jest runs with maxWorkers: 1 (package.json). Every DB-touching test
+// file shares ONE SQLite file and ONE Redis, and several of them wipe whole
+// tables in beforeEach -- in parallel that is one file deleting another file's
+// fixtures mid-test, which shows up as failures that move around depending on
+// which tests you happen to run together. Do not raise the worker count
+// without first giving each file its own database.
+
 'use strict';
 
 // Flush all test-prefix Redis keys before each test run so state is always clean.

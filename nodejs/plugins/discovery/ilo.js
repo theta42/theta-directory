@@ -47,7 +47,8 @@ module.exports = {
     // the iLO's out-of-band management NIC, not the host's -- merging by
     // that would misrepresent the host's real address as the iLO's, or vice
     // versa, on whichever resource the generic reconciler folded into the
-    // other. See `kind: 'bmc'` below for the other half of that guard.
+    // other. The other half of that guard is the `ilo` subtype's
+    // identity_class: 'bmc' (models/subtype_template.js).
     { key: 'hostSlug', label: 'Server resource slug (optional)', type: 'text', required: false, placeholder: 'host_dl380-01' },
     { key: 'location',    label: 'Location / Site (optional)', type: 'site_select', required: false, placeholder: 'Default Site' },
     { key: 'autoPromote', label: 'Auto-promote to Directory',  type: 'boolean',     required: false, default: false }
@@ -133,7 +134,12 @@ module.exports = {
       // one, or vice versa, depending on merge order. They're linked
       // explicitly instead -- see the `hostSlug` config field above and the
       // edge below.
-      kind: 'bmc',
+      // kind is structural: a BMC is a host -- it belongs in the tree and gets
+      // access groups like anything else. What must NOT happen is discovery
+      // folding it into the server it manages, and that is now an identity-class
+      // rule on the `ilo` subtype rather than a made-up kind that cost this
+      // resource every other host behaviour.
+      kind: 'host',
       name: system.HostName || system.Model || `iLO (${url.replace(/^https?:\/\//, '')})`,
       slug,
       metadata: {
@@ -158,8 +164,7 @@ module.exports = {
         interfaces,
         hostIp: primaryIface ? primaryIface.ip : null,
         hostMac: primaryIface ? primaryIface.mac : null,
-        sourceId: serial || url,
-        isProduction: system.PowerState === 'On'
+        sourceId: serial || url
       }
     }];
 

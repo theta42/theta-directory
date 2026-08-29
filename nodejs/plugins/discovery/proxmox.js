@@ -170,7 +170,6 @@ module.exports = {
         subType: 'proxmox',
         address: url,
         os: 'Proxmox VE',
-        isProduction: true,
         sourceId: url,
         // Deliberately NO `ip`/`interfaces`: this resource stands for the
         // cluster (the API endpoint), not for a machine. Giving it the address
@@ -190,7 +189,13 @@ module.exports = {
     }
     const nodes = (await resNodes.json()).data;
 
+    // Per-node isolation. Enumerating a cluster is a sequence of independent
+    // API calls, and an exception in any one of them used to abandon the whole
+    // payload -- one node with a wedged pvedaemon meant NOTHING was recorded
+    // for the other nine, which then aged towards garbage collection.
+    const nodeErrors = [];
     for (const node of nodes) {
+     try {
       // An offline node is still a real hypervisor that belongs in the
       // directory -- skipping it entirely used to make it look decommissioned
       // and let the reconciler's garbage collector archive it after a week of
@@ -249,7 +254,6 @@ module.exports = {
         metadata: {
           subType: 'hypervisor',
           os: 'Proxmox VE',
-          isProduction: true,
           status: node.status,
           sourceId: `${node.node}`,
           node: node.node,
@@ -316,7 +320,8 @@ module.exports = {
         const vmSlug = guestSlug('vm', vm.name, vm.vmid, ifaces.primaryMac());
 
         resources.push({
-          kind: isTemplate ? 'template' : 'host',
+          // Always a host; `subType: 'template'` is what marks it as one.
+          kind: 'host',
           name: vm.name || `VM ${vm.vmid}`,
           slug: vmSlug,
           metadata: {
@@ -326,7 +331,7 @@ module.exports = {
             // exact guest on the exact node it was discovered from.
             sourceId: `${node.node}/qemu/${vm.vmid}`,
             node: node.node,
-            isProduction: vm.status === 'running',
+            powerState: vm.status,
             interfaces,
             macAddress: ifaces.primaryMac(),
             ip: ifaces.primaryIp()
@@ -384,7 +389,8 @@ module.exports = {
         const lxcSlug = guestSlug('lxc', lxc.name, lxc.vmid, ifaces.primaryMac());
 
         resources.push({
-          kind: isTemplate ? 'template' : 'host',
+          // Always a host; `subType: 'template'` is what marks it as one.
+          kind: 'host',
           name: lxc.name || `LXC ${lxc.vmid}`,
           slug: lxcSlug,
           metadata: {
@@ -392,7 +398,7 @@ module.exports = {
             vmid: lxc.vmid,
             sourceId: `${node.node}/lxc/${lxc.vmid}`,
             node: node.node,
-            isProduction: lxc.status === 'running',
+            powerState: lxc.status,
             interfaces,
             macAddress: ifaces.primaryMac(),
             ip: ifaces.primaryIp()
@@ -400,6 +406,23 @@ module.exports = {
         });
         edges.push({ parentSlug: nodeSlug, childSlug: lxcSlug, relation: 'hosts' });
       }
+     } catch (err) {
+      // Recorded, reported, and moved past. The node's own resource may already
+      // be in `resources` from before the failure, which is the point: partial
+      // truth beats none.
+      nodeErrors.push(`${node.node}: ${err.message}`);
+      if (config.log) config.log(`node ${node.node} failed, continuing: ${err.message}`);
+     }
+    }
+
+    if (nodeErrors.length) {
+      if (nodeErrors.length === nodes.length) {
+        // Every node failed. That is not a partial result, it is a broken
+        // cluster or bad credentials, and it must surface as a failed run
+        // rather than as an empty-but-successful discovery that prunes edges.
+        throw new Error(`every Proxmox node failed: ${nodeErrors.join('; ')}`);
+      }
+      if (config.log) config.log(`${nodeErrors.length}/${nodes.length} node(s) failed: ${nodeErrors.join('; ')}`);
     }
 
     return { resources, edges };

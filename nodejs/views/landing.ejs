@@ -183,7 +183,7 @@
         var lines = accessible ? howTo(r) : [];
 
         var badges = '';
-        if (md.isProduction) badges += '<span class="badge bg-danger ms-1">Prod</span>';
+        if (md.environment) badges += '<span class="badge bg-danger ms-1">' + esc(md.environment) + '</span>';
         if (md.isExternalReachable) badges += '<span class="badge bg-info ms-1">External</span>';
         if (md.os) badges += '<span class="badge bg-light text-dark border ms-1">' + esc(md.os) + '</span>';
 

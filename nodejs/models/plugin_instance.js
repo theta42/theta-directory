@@ -47,6 +47,11 @@ class PluginInstance extends Model {
     // Stable handle: discovery source name + unique constraint. Lowercase
     // alnum + hyphen/underscore to stay safe as a resource-graph slug.
     slug: { type: 'string', isRequired: true, unique: true, min: 1, max: 64 },
+    // How long a single run may take before it is abandoned. A plugin talks to
+    // hardware over the network and can hang indefinitely; without a bound one
+    // unreachable endpoint holds the discovery queue forever. Null uses the
+    // scheduler's default (5 minutes).
+    timeoutMs: { type: 'integer' },
     // Loaded into the scheduler? `false` = unloaded (no scheduled runs).
     enabled: { type: 'boolean', default: true },
     // Cron schedule (5-field). The scheduler turns this into a BullMQ

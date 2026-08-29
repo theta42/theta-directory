@@ -73,7 +73,10 @@ describe('ilo discovery plugin manifest', () => {
 describe('ilo discovery plugin discover()', () => {
   const config = { url: 'https://ilo.example.com', username: 'Administrator', password: 'secret' };
 
-  test('builds one bmc resource from the System + Manager Redfish data, unlinked without hostSlug', async () => {
+  // kind is structural (site/host/service) -- a BMC is a host. What keeps it
+  // from being folded into the server it manages is the `ilo` subtype's
+  // identity_class, not a made-up kind. See services/subtype_templates.js.
+  test('builds one host resource with subType ilo from the System + Manager Redfish data', async () => {
     const { resources, edges } = await ilo.discover(config);
     expect(edges).toEqual([]);
     expect(resources).toHaveLength(1);
@@ -82,7 +85,8 @@ describe('ilo discovery plugin discover()', () => {
     // Deliberately NOT 'host' -- see ilo.js's comment: this keeps the
     // generic reconciler from ever merging the iLO's own out-of-band
     // address into the server's real host resource.
-    expect(r.kind).toBe('bmc');
+    expect(r.kind).toBe('host');
+    expect(r.metadata.subType).toBe('ilo');
     expect(r.name).toBe('web01');
     expect(r.slug).toBe('ilo-abc123xyz');
     expect(r.metadata).toMatchObject({
@@ -101,7 +105,6 @@ describe('ilo discovery plugin discover()', () => {
       cpuCount: 2,
       memoryGiB: 256,
       sourceId: 'ABC123XYZ',
-      isProduction: true,
     });
     // The host's own NICs, distinct from the iLO's own management NIC above.
     expect(r.metadata.interfaces).toEqual([
@@ -117,16 +120,25 @@ describe('ilo discovery plugin discover()', () => {
     expect(edges).toEqual([{ parentSlug: 'host_web01', childSlug: resources[0].slug, relation: 'bmc' }]);
   });
 
-  test('an offline server (PowerState Off) is not marked production', async () => {
+  // `environment` is what an operator declares a resource to be (prod/testing/
+  // dev) and it bubbles UP the graph, so deriving it from power state would
+  // re-label a host, its cluster and its whole site every time a machine was
+  // powered off. The plugin reports the power state as the fact it actually
+  // observed, and nothing more.
+  test('power state is reported as powerState and never as an environment', async () => {
     const offPath = '/redfish/v1/Systems/1/';
     const original = FIXTURE[offPath];
     FIXTURE[offPath] = { ...original, PowerState: 'Off' };
     try {
       const { resources } = await ilo.discover(config);
       expect(resources[0].metadata.powerState).toBe('Off');
-      expect(resources[0].metadata.isProduction).toBe(false);
+      expect(resources[0].metadata.environment).toBeUndefined();
     } finally {
       FIXTURE[offPath] = original;
     }
+
+    const { resources: onResources } = await ilo.discover(config);
+    expect(onResources[0].metadata.powerState).toBe('On');
+    expect(onResources[0].metadata.environment).toBeUndefined();
   });
 });

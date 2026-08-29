@@ -42,28 +42,46 @@ class Agent extends Model {
 
 	// Enroll a new agent and return { agent, token }. The caller is responsible
 	// for showing `token` to the operator once and never storing it.
-	static async enroll({ name, resourceId, enrolledBy, description }) {
+	//
+	// The agent binds to a `theta-agent` SERVICE resource, never to a host --
+	// see utils/agent_binding.js for why. Callers name the machine one of two
+	// ways:
+	//   resourceId: an existing host; its agent service is created if missing.
+	//   siteId:     no host yet; one is created under that site, then the
+	//               service under it. This is the join-key self-enrolment path
+	//               and the operator-driven POST /api/agents/enroll path.
+	// Neither: the agent row exists unbound, and binds on first discovery.
+	static async enroll({ name, resourceId, siteId, enrolledBy, description }) {
+		const { Resource, ResourceEdge } = require('./resource');
+		const { ensureAgentService } = require('../utils/agent_binding');
 		let serviceId = null;
+
 		if (resourceId) {
-			const { Resource, ResourceEdge } = require('./resource');
 			const host = await Resource.get(resourceId).catch(() => null);
 			if (host && host.kind === 'host') {
-				const service = await Resource.create({
-					id: crypto.randomUUID(),
-					kind: 'service',
-					name: 'Theta Agent',
-					slug: `svc-${host.slug.replace(/^host-/, '')}-theta-agent`,
-					metadata: { subType: 'theta-agent', managed: true },
-					created_on: Math.floor(Date.now() / 1000)
-				});
-				await ResourceEdge.create({
-					id: crypto.randomUUID(),
-					parentId: host.id,
-					childId: service.id,
-					relation: 'hosts'
-				});
-				serviceId = service.id;
+				serviceId = (await ensureAgentService(host)).id;
 			}
+		} else if (siteId) {
+			const site = await Resource.get(siteId).catch(() => null);
+			if (!site || site.kind !== 'site') {
+				throw Object.assign(new Error('siteId must refer to a site resource'), { status: 400 });
+			}
+			const safeName = (name || 'theta-agent').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
+			const host = await Resource.create({
+				id: crypto.randomUUID(),
+				kind: 'host',
+				name: name || 'Theta Agent Host',
+				slug: `host-${safeName}-${crypto.randomBytes(3).toString('hex')}`,
+				metadata: { subType: 'linux', managed: true },
+				created_on: Math.floor(Date.now() / 1000)
+			});
+			await ResourceEdge.create({
+				id: crypto.randomUUID(),
+				parentId: site.id,
+				childId: host.id,
+				relation: 'hosts'
+			});
+			serviceId = (await ensureAgentService(host)).id;
 		}
 
 		const token = this.generateToken();

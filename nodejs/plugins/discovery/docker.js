@@ -19,6 +19,11 @@ module.exports = {
     // compose service name alone therefore never matches one, which is why the
     // stack's own containers arrived parentless.
     { key: 'serviceSuffix', label: 'Site slug suffix on service resources', type: 'text', required: false, placeholder: '<site slug>' },
+    // Containers to leave out entirely. Was a hardcoded
+    // /openbao|openboa|bao-renewer/i regex -- correct for this stack and
+    // useless for anyone whose secret store is called something else, with no
+    // way to change it short of editing the plugin.
+    { key: 'ignorePattern', label: 'Ignore containers matching (regex)', type: 'text', required: false, placeholder: 'openbao|bao-renewer' },
     { key: 'location', label: 'Location / Site (optional)', type: 'site_select', required: false, placeholder: 'Default Site' },
     { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: false }
   ],
@@ -30,8 +35,23 @@ module.exports = {
     return { ok: true };
   },
 
+  // The default keeps this stack's own secret-store containers out of the
+  // catalog; an operator can widen or replace it. An unparseable pattern is
+  // reported and then ignored -- a bad regex must not take the whole run down.
+  ignoreRegex: (config) => {
+    const raw = (config && config.ignorePattern) || 'openbao|openboa|bao-renewer';
+    if (!String(raw).trim()) return null;
+    try {
+      return new RegExp(raw, 'i');
+    } catch (err) {
+      if (config && config.log) config.log(`ignorePattern is not a valid regex (${err.message}); ignoring nothing`);
+      return null;
+    }
+  },
+
   discover: async (config) => {
     const isTcp = !!config.tcpHost;
+    const ignoreRe = module.exports.ignoreRegex(config);
     
     const requestOptions = {
       path: '/containers/json',
@@ -84,14 +104,19 @@ module.exports = {
               const ports = (c.Ports || []).map(p => p.PublicPort ? `${p.PublicPort}:${p.PrivatePort}` : `${p.PrivatePort}`).join(', ');
               const isOwnStack = !!(stackProject && composeProject === stackProject);
 
-              const isIgnored = /openbao|openboa|bao-renewer/i.test(name) || /openbao|openboa|bao-renewer/i.test(composeService);
+              const isIgnored = ignoreRe
+                ? (ignoreRe.test(name) || ignoreRe.test(composeService || ''))
+                : false;
 
               if (isIgnored) {
                 continue;
               }
 
               resources.push({
-                kind: 'container',
+                // A container is a service on its host. It used to be
+                // `kind: 'container'`, which groupKind() did not recognise, so
+                // containers never got access groups through the normal path.
+                kind: 'service',
                 name: composeService || name,
                 slug: slug,
                 metadata: {

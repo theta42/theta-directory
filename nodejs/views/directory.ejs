@@ -96,14 +96,15 @@
                 <td class="ps-3">
                   {{{indentHtml}}}
                   {{{caretHtml}}}
-                  {{#hasStatusDot}}<span class="d-inline-block rounded-circle me-1" style="width:10px;height:10px;background:{{agentColor}};" title="{{agentStatusTitle}}"></span>{{/hasStatusDot}}
+                  {{#hasStatusDot}}<span class="d-inline-block rounded-circle me-1" style="width:10px;height:10px;{{#isRolledStatus}}border:2px solid {{statusColor}};background:transparent;{{/isRolledStatus}}{{^isRolledStatus}}background:{{statusColor}};{{/isRolledStatus}}" title="{{statusTitle}}"></span>{{/hasStatusDot}}
                   <a href="#" class="text-reset text-decoration-none me-1" onclick="openEditModal('{{id}}'); return false;" title="{{name}}">
                     <strong>{{displayName}}</strong>
                   </a>
                   {{#hasSecret}}<span class="badge bg-warning text-dark me-1" title="Has stored secrets in OpenBao"><i class="fa-solid fa-key me-1"></i>Secret</span>{{/hasSecret}}
                   <span class="badge bg-secondary me-1">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
-                  {{#metadata.isProduction}}<span class="badge bg-danger me-1">Prod</span>{{/metadata.isProduction}}
-                  {{^metadata.isProduction}}<span class="badge bg-info me-1">Dev</span>{{/metadata.isProduction}}
+                  {{#metadata.environment}}<span class="badge bg-danger me-1">{{metadata.environment}}</span>{{/metadata.environment}}
+                  {{#inheritedEnv}}<span class="badge bg-light text-danger border border-danger me-1" title="Inherited: something under this resource is {{inheritedEnv}}">{{inheritedEnv}}</span>{{/inheritedEnv}}
+                  {{#isArchived}}<span class="badge bg-secondary me-1" title="Not seen since garbage collection ran; hidden from access and jump targets until it is discovered again or promoted">archived</span>{{/isArchived}}
                 </td>
                 <td>
                   {{#metadata.ip}}<div><small>IP:</small> {{metadata.ip}}</div>{{/metadata.ip}}
@@ -289,6 +290,25 @@
     <input type="hidden" id="res-id">
 
     <div class="row mb-3">
+      <div class="col-12 d-flex justify-content-end">
+        <div class="btn-group" role="group" aria-label="View or edit this resource">
+          <input type="radio" class="btn-check" name="btnradio" id="btnradio1" autocomplete="off" checked onchange="toggleEditMode(false)">
+          <label class="btn btn-outline-secondary btn-sm" for="btnradio1"><i class="fa-solid fa-eye me-1"></i>View</label>
+          <input type="radio" class="btn-check" name="btnradio" id="btnradio2" autocomplete="off" onchange="toggleEditMode(true)">
+          <label class="btn btn-outline-primary btn-sm" for="btnradio2"><i class="fa-solid fa-pen me-1"></i>Edit</label>
+        </div>
+      </div>
+    </div>
+
+    <!-- Read-only dashboard. Rendered from the resource, not from the form:
+         View mode used to be the edit form with a Save button hidden, and the
+         selector meant to disable its inputs (#edit-resource-form) matched
+         nothing in the DOM, so "View" was fully editable. -->
+    <div id="resource-view-pane"></div>
+
+    <div id="edit-resource-form">
+
+    <div class="row mb-3">
       <div class="col-6">
         <label class="form-label">Name</label>
         <input type="text" id="res-name" class="form-control shadow-sm">
@@ -314,17 +334,10 @@
         <label class="form-label font-weight-bold"><i class="fa-solid fa-wand-magic-sparkles me-1 text-primary"></i>Preset Subtype Template</label>
         <select id="res-subtype-template" class="form-select shadow-sm me-2 mb-2" onchange="applySubtypeTemplate()">
           <option value="">-- Custom / Manual --</option>
-          <option value="docker">📦 Docker Engine / Container</option>
-          <option value="systemd">⚙️ Linux Systemd Service</option>
-          <option value="postgresql">🗄️ PostgreSQL Database</option>
-          <option value="redis">🔴 Redis In-Memory Cache</option>
-          <option value="proxmox">🖥️ Proxmox VE Hypervisor</option>
-          <option value="wireguard">🛡️ WireGuard VPN Tunnel</option>
-          <option value="unifi">📶 UniFi Network Controller</option>
-          <option value="k8s">☸️ Kubernetes Cluster Node</option>
         </select>
+        <div class="form-text mb-2" id="res-subtype-help"></div>
         <label class="form-label">Sub Type</label>
-        <input type="text" id="res-subtype" class="form-control shadow-sm" placeholder="e.g. docker, systemd, postgresql...">
+        <input type="text" id="res-subtype" class="form-control shadow-sm" placeholder="Pick a template above, or type a custom subtype">
       </div>
     </div>
 
@@ -341,10 +354,13 @@
 
     <div class="row mb-3">
       <div class="col-6">
-        <div class="form-check form-switch mt-2">
-          <input class="form-check-input" type="checkbox" id="res-is-production">
-          <label class="form-check-label" for="res-is-production"><strong>Production</strong></label>
-        </div>
+        <label class="form-label" for="res-environment">Environment</label>
+        <select id="res-environment" class="form-select form-select-sm">
+          <option value="">— none —</option>
+          <option value="prod">prod</option>
+          <option value="testing">testing</option>
+          <option value="dev">dev</option>
+        </select>
       </div>
     </div>
 
@@ -387,6 +403,7 @@
         <div class="text-muted small"><i class="fa-solid fa-spinner fa-spin me-1"></i>Loading live status…</div>
       </div>
     </div>
+    </div><!-- /#edit-resource-form -->
   `;
 
   var detailsTabHtml = `
@@ -410,54 +427,7 @@
       </div>
     </div>
     
-    <div class="row mb-3">
-      <div class="col-12 d-flex justify-content-end mb-2">
-        <div class="btn-group" role="group">
-          <input type="radio" class="btn-check" name="btnradio" id="btnradio1" autocomplete="off" checked onchange="toggleEditMode(false)">
-          <label class="btn btn-outline-secondary btn-sm" for="btnradio1">View</label>
-          <input type="radio" class="btn-check" name="btnradio" id="btnradio2" autocomplete="off" onchange="toggleEditMode(true)">
-          <label class="btn btn-outline-primary btn-sm" for="btnradio2">Edit</label>
-        </div>
-      </div>
-    </div>
     <div id="dynamic-form-fields"></div>
-    <script>
-      function toggleEditMode(isEdit) {
-        $('#edit-resource-form input, #edit-resource-form select, #edit-resource-form textarea').prop('disabled', !isEdit);
-        if(isEdit) {
-          $('.modal-footer .btn-primary').show();
-        } else {
-          $('.modal-footer .btn-primary').hide();
-        }
-        // Always allow switching mode
-        $('input[name="btnradio"]').prop('disabled', false);
-      }
-      
-      // Simple dynamic renderer based on SubtypeTemplate
-      async function renderDynamicFields(subType, metadata = {}) {
-        if (!subType) return $('#dynamic-form-fields').html('');
-        const res = await fetch('/api/subtype-templates/' + subType, { headers: { 'Authorization': 'Bearer ' + app.auth.getToken() }});
-        const data = await res.json();
-        if (data && data.template && data.template.schema && data.template.schema.properties) {
-          let html = '<hr><h6 class="text-muted">Template Specific Fields</h6><div class="row">';
-          for (const [key, prop] of Object.entries(data.template.schema.properties)) {
-            const val = metadata[key] !== undefined ? metadata[key] : '';
-            html += \`<div class="col-6 mb-3">
-              <label class="form-label">\${key}</label>
-              <input type="\${prop.type === 'number' ? 'number' : 'text'}" class="form-control shadow-sm dynamic-field" data-key="\${key}" placeholder="\${prop.description || ''}" value="\${esc(String(val))}">
-            </div>\`;
-          }
-          html += '</div>';
-          $('#dynamic-form-fields').html(html);
-        } else {
-          $('#dynamic-form-fields').html('');
-        }
-      }
-      // Call renderDynamicFields when subtype changes
-      $('#res-subtype-template').on('change', function() {
-        renderDynamicFields($(this).val());
-      });
-    </script>
     <div class="row mb-3" id="host-details-container" style="display: none;">
       <div class="col-4">
         <label class="form-label">VMID</label>
@@ -700,7 +670,7 @@
         {id: 'status', label: 'Status', bodyHtml: statusTabHtml(resourcesById[id])},
       ],
       footer: {
-        metaHtml: id ? app.modal.formatAudit(resourcesById[id], {formatDate: function(ms){ return moment(ms).format('YYYY-MM-DD HH:mm'); }}) : '',
+        metaHtml: id ? app.modal.formatAudit(resourcesById[id], {formatDate: fmtStamp}) : '',
         buttonsHtml: app.modal.footerButtons({onSave: 'saveResource()', saveLabel: 'Save Resource'}),
       },
       url: id ? {path: '/directory/' + resourcesById[id].slug} : null,
@@ -714,9 +684,14 @@
       $('#sw-modal-tab-groups-btn').closest('li').hide();
     }
     
-    // Default to View Mode and load dynamic fields based on subtype
+    // An existing resource opens read-only; a new one opens in Edit, because
+    // there is nothing yet to view and the first thing to do is fill it in.
     setTimeout(() => {
-      toggleEditMode(false);
+      const editing = !id;
+      $('#btnradio2').prop('checked', editing);
+      $('#btnradio1').prop('checked', !editing);
+      refreshSubtypeOptions();
+      toggleEditMode(editing);
       renderDynamicFields($('#res-subtype').val(), id ? resourcesById[id].metadata : {});
     }, 100);
   }
@@ -799,7 +774,6 @@
     });
   }
   
-  var agentsByHost = {};
   var agentsByResource = {};
   var agentsById = {};
   var agentsUnavailable = false;
@@ -826,6 +800,7 @@
       }
 
       indexAgents((resAgents && resAgents.agents) || []);
+      if (!subtypeTemplates.length) await loadSubtypeTemplates();
       
       allGroups = resGroups.results;
       allEdges = resEdges.results;
@@ -856,55 +831,351 @@
     }
   }
 
+  // Indexed by resource id only. There is no by-hostname index any more: the
+  // agent binds to its theta-agent service in the graph, and a second index
+  // keyed on a name is exactly the loose match that put one machine's
+  // telemetry on another machine's row.
   function indexAgents(agents) {
-    agentsByHost = {};
     agentsByResource = {};
     agentsById = {};
     for (const a of agents || []) {
       agentsById[a.id] = a;
       if (a.resourceId) agentsByResource[a.resourceId] = a;
-      const hn = ((a.lastDiscovery && a.lastDiscovery.hostname) || a.name || '').toLowerCase();
-      if (hn && !agentsByHost[hn]) agentsByHost[hn] = a;
     }
+  }
+
+  // Resource timestamps are UNIX SECONDS (routes/api_directory_admin.js). This
+  // used to hand the value straight to moment(), which reads a bare number as
+  // MILLISECONDS -- so every resource in the directory claimed it was created
+  // in January 1970.
+  //
+  // Tolerant of both: rows written before the switch are still milliseconds,
+  // and a "seconds" value large enough to be a plausible ms timestamp is one.
+  function fmtStamp(value) {
+    const n = Number(value);
+    if (!n || !isFinite(n)) return '';
+    const ms = n < 1e11 ? n * 1000 : n;
+    const m = moment(ms);
+    return m.isValid() ? m.format('YYYY-MM-DD HH:mm') : '';
   }
 
   function esc(s) { return s == null ? '' : app.util.escapeHtml(String(s)); }
   function timeAgo(iso) { if (!iso) return ''; var m = moment(iso); return m.isValid() ? m.fromNow() : ''; }
 
-  function attachAgentStatus(n) {
-    n.isHost = true;
+  // The composite status the scheduler wrote (services/scheduler.js evaluates
+  // the subtype's status_rules against telemetry + plugin state).
+  //
+  // `force` is for nodes we know SHOULD have a status -- a host, a service an
+  // agent reports -- where a grey "not evaluated yet" dot is real information.
+  // Everything else gets no dot at all rather than a grey one: a site or a
+  // catalog entry with no rules defined is not unhealthy or unknown, it is
+  // simply not a thing that has a status, and a row of grey dots that never
+  // change teaches people to ignore the column.
+  const STATUS_STYLE = {
+    ok:       { color: '#198754', title: 'Healthy' },
+    warning:  { color: '#ffc107', title: 'Warning' },
+    critical: { color: '#dc3545', title: 'Critical' },
+    error:    { color: '#dc3545', title: 'Critical' },
+    unknown:  { color: '#adb5bd', title: 'Unknown' }
+  };
+
+  function attachCompositeStatus(n, force) {
+    const md = n.metadata || {};
+    const style = STATUS_STYLE[md.status];
+    if (style) {
+      n.hasStatusDot = true;
+      n.statusColor = style.color;
+      n.statusTitle = md.status_message || style.title;
+      return;
+    }
+
+    // No status of its own: show the worst thing underneath it. A site has no
+    // telemetry and no rules, so without this the top of the tree -- the row
+    // you are looking at when everything is collapsed -- was the one row that
+    // never said anything.
+    const rolled = STATUS_STYLE[md.bubbled_status];
+    if (rolled) {
+      n.hasStatusDot = true;
+      n.statusColor = rolled.color;
+      n.isRolledStatus = true;
+      n.statusTitle = md.bubbled_status_from
+        ? rolled.title + ' — from ' + md.bubbled_status_from
+        : rolled.title + ' — rolled up from below';
+      return;
+    }
+
+    if (!force) { n.hasStatusDot = false; return; }
     n.hasStatusDot = true;
-    const name = (n.name || '').toLowerCase();
-    const slug = (n.slug || '').replace(/^host_/, '').toLowerCase();
-    const a = agentsByResource[n.id] || agentsByHost[name] || (slug && agentsByHost[slug]);
-    n.agent = a || null;
-    if (resourcesById[n.id]) resourcesById[n.id].agent = a || null;
-    if (!a) {
-      if (agentsUnavailable) { n.agentColor = '#adb5bd'; n.agentStatusTitle = 'Agent service unreachable'; return; }
-      n.agentColor = '#adb5bd'; n.agentStatusTitle = 'No theta-agent enrolled'; return;
-    }
-    if (a.revoked) { n.agentColor = '#6c757d'; n.agentStatusTitle = 'Agent enrollment revoked'; return; }
-    if (!a.isOnline) {
-      const seen = (a.lastSeen || a.last_seen) ? ' — last seen ' + timeAgo(a.lastSeen || new Date(a.last_seen * 1000).toISOString()) : '';
-      n.agentColor = '#dc3545'; n.agentStatusTitle = 'Agent enrolled but offline' + seen; return;
-    }
-    const t = a.lastTelemetry || {};
-    const high = (t.cpu_usage_percent > 80) || (t.ram_usage_percent > 80) || (t.disk_usage_percent > 90);
-    n.agentColor = high ? '#ffc107' : '#198754';
-    n.agentStatusTitle = high ? 'Connected — high load' : 'Connected — healthy';
+    n.statusColor = '#adb5bd';
+    n.statusTitle = md.status_message || 'No status evaluated yet';
   }
 
-  // Mirrors services/subtype_templates.js: a service an AGENT registered gets
-  // no groups of its own and inherits access from its host. A hand-created
-  // service resource (the stack's own sso-manager-<site>, an OAuth-linked app)
-  // is a catalog entry an operator modelled and keeps its groups.
-  const AGENT_SERVICE_SUBTYPES = new Set([
-    'systemd', 'docker', 'podman', 'process', 'openrc', 'systemd-timer', 'cron'
-  ]);
+  function attachAgentStatus(n) {
+    n.isHost = true;
+    // The agent is bound to a theta-agent service child under this host.
+    let a = null;
+    if (allEdges.length) {
+      const childIds = allEdges.filter(e => e.parentId === n.id).map(e => e.childId);
+      for (const cid of childIds) {
+        const child = resourcesById[cid];
+        if (child && child.kind === 'service' && child.metadata?.subType === 'theta-agent' && agentsByResource[cid]) {
+          a = agentsByResource[cid];
+          break;
+        }
+      }
+    }
+    // Deliberately no name/slug fallback. Matching an agent to a host because
+    // their names look alike is the same loose matching that put one site's
+    // telemetry on another site's resource; the edge is the binding, and if
+    // the edge is missing the honest answer is "no agent".
+    n.agent = a || null;
+    if (resourcesById[n.id]) resourcesById[n.id].agent = a || null;
+    attachCompositeStatus(n, true);
+  }
+
+
+  // ── Dynamic subtype fields ─────────────────────────────────────────────
+  //
+  // This block used to live inside the `detailsTabHtml` template literal, in a
+  // nested script tag. That is not a thing you can do: HTML ends a script
+  // element at the first closing script tag in the source, whatever JavaScript
+  // string it appears to be inside -- including, yes, a comment like this one.
+  // So the page's real script element was cut off here, the
+  // template literal it was in was left unterminated, the whole block failed to
+  // parse -- and EVERY function on this page, the tree renderer included, was
+  // silently never defined. The directory rendered as an empty table with the
+  // rest of the source printed underneath it.
+
+      
+      // Simple dynamic renderer based on SubtypeTemplate
+      async function renderDynamicFields(subType, metadata = {}) {
+        if (!subType) return $('#dynamic-form-fields').html('');
+        const res = await fetch('/api/subtype-templates/' + subType, { headers: { 'Authorization': 'Bearer ' + app.auth.getToken() }});
+        const data = await res.json();
+        if (data && data.template && data.template.schema && data.template.schema.properties) {
+          let html = '<hr><h6 class="text-muted">Template Specific Fields</h6><div class="row">';
+          for (const [key, prop] of Object.entries(data.template.schema.properties)) {
+            const val = metadata[key] !== undefined ? metadata[key] : '';
+            html += `<div class="col-6 mb-3">
+              <label class="form-label">${esc(key)}${prop.required ? ' *' : ''}</label>
+              ${renderDynamicInput(key, prop, val)}
+            </div>`;
+          }
+          html += '</div>';
+          $('#dynamic-form-fields').html(html);
+        } else {
+          $('#dynamic-form-fields').html('');
+        }
+      }
+
+      function renderDynamicInput(key, prop, val) {
+        const safeKey = esc(key);
+        const placeholder = prop.description ? `placeholder="${esc(prop.description)}"` : '';
+        if (prop.type === 'boolean') {
+          return `<div class="form-check">
+            <input class="form-check-input dynamic-field" type="checkbox" data-key="${safeKey}" id="dyn-${safeKey}" ${val ? 'checked' : ''}>
+            <label class="form-check-label" for="dyn-${safeKey}">${esc(prop.description || key)}</label>
+          </div>`;
+        }
+        if (prop.enum && Array.isArray(prop.enum)) {
+          const options = prop.enum.map(v => `<option value="${esc(String(v))}" ${val === v ? 'selected' : ''}>${esc(String(v))}</option>`).join('');
+          return `<select class="form-select shadow-sm dynamic-field" data-key="${safeKey}" ${placeholder}>${options}</select>`;
+        }
+        if (prop.type === 'array') {
+          const list = Array.isArray(val) ? val : (val ? String(val).split(',').map(x => x.trim()).filter(Boolean) : []);
+          return `<input type="text" class="form-control shadow-sm dynamic-field" data-key="${safeKey}" ${placeholder}
+            value="${esc(list.join(', '))}" title="Comma-separated list">`;
+        }
+        const inputType = prop.type === 'number' ? 'number' : 'text';
+        const valueAttr = val !== undefined && val !== null ? `value="${esc(String(val))}"` : '';
+        return `<input type="${inputType}" class="form-control shadow-sm dynamic-field" data-key="${safeKey}" ${placeholder} ${valueAttr}>`;
+      }
+
+      // Call renderDynamicFields when subtype changes
+      $('#res-subtype-template').on('change', function() {
+        renderDynamicFields($(this).val());
+      });
+    
+  $(document).on('change', '#res-subtype-template', function() {
+    applySubtypeTemplate();
+  });
+
+  // ── Read-only view pane ────────────────────────────────────────────────
+  //
+  // What an operator sees when they open a resource: the facts, laid out, with
+  // nothing to accidentally change. Editing is a deliberate switch.
+
+  function fieldRow(label, value, opts) {
+    if (value === undefined || value === null || value === '') return '';
+    const mono = opts && opts.mono ? ' font-monospace' : '';
+    const raw = opts && opts.html;
+    return '<div class="row py-1 border-bottom">'
+      + '<div class="col-4 col-md-3 text-muted small">' + esc(label) + '</div>'
+      + '<div class="col-8 col-md-9 small' + mono + '">' + (raw ? value : esc(value)) + '</div>'
+      + '</div>';
+  }
+
+  function sectionCard(title, icon, bodyHtml) {
+    if (!bodyHtml) return '';
+    return '<div class="card mb-3 shadow-sm border">'
+      + '<div class="card-header bg-light py-2"><h6 class="mb-0 fw-bold text-dark">'
+      + '<i class="' + icon + ' me-1"></i> ' + esc(title) + '</h6></div>'
+      + '<div class="card-body py-2">' + bodyHtml + '</div></div>';
+  }
+
+  function envBadge(md) {
+    const env = md.environment;
+    const bubbled = md.bubbled_environment;
+    if (!env && !bubbled) return '';
+    const cls = { prod: 'bg-danger', testing: 'bg-warning text-dark', dev: 'bg-info text-dark' };
+    let html = '';
+    if (env) html += '<span class="badge ' + (cls[env] || 'bg-secondary') + ' me-1">' + esc(env) + '</span>';
+    // Bubbled but not set here means a child is more critical than this node.
+    if (bubbled && bubbled !== env) {
+      html += '<span class="badge bg-light text-dark border" title="Inherited from a child resource: this resource is as critical as the most critical thing under it">'
+        + '<i class="fa-solid fa-arrow-turn-up me-1"></i>' + esc(bubbled) + ' (from a child)</span>';
+    }
+    return html;
+  }
+
+  function viewPaneHtml(r) {
+    if (!r) return '<p class="text-muted">Nothing selected.</p>';
+    const md = r.metadata || {};
+    const tmpl = subtypeTemplates.find(t => t.slug === (md.subType || ''));
+
+    const style = STATUS_STYLE[md.status];
+    const statusHtml = style
+      ? '<span class="badge" style="background:' + style.color + '">' + esc(String(md.status).toUpperCase()) + '</span>'
+        + ' <span class="text-muted small ms-1">' + esc(md.status_message || style.title) + '</span>'
+      : '<span class="text-muted small">Not evaluated</span>';
+
+    let identity = '';
+    identity += fieldRow('Name', r.name);
+    identity += fieldRow('Slug', r.slug, { mono: true });
+    identity += fieldRow('Kind', r.kind);
+    identity += fieldRow('Subtype', tmpl ? tmpl.name + ' (' + md.subType + ')' : (md.subType || ''));
+    identity += fieldRow('Description', r.description);
+    identity += fieldRow('Status', statusHtml, { html: true });
+    const env = envBadge(md);
+    if (env) identity += fieldRow('Environment', env, { html: true });
+    identity += fieldRow('Owner', r.owner);
+
+    let network = '';
+    network += fieldRow('IP', md.ip, { mono: true });
+    network += fieldRow('Public IP', md.public_ip, { mono: true });
+    network += fieldRow('MAC', md.macAddress, { mono: true });
+    network += fieldRow('Address', md.address, { mono: true });
+    network += fieldRow('Port', md.port);
+    network += fieldRow('External port', md.externalPort);
+
+    let platform = '';
+    platform += fieldRow('OS', md.os);
+    platform += fieldRow('Kernel', md.kernel);
+    platform += fieldRow('CPU', md.cpu);
+    platform += fieldRow('RAM', md.ram_total_gb ? md.ram_total_gb + ' GB' : '');
+    platform += fieldRow('Disk', md.disk_total_gb ? md.disk_total_gb + ' GB' : '');
+    platform += fieldRow('Power state', md.powerState);
+    platform += fieldRow('VMID', md.vmid);
+    platform += fieldRow('Node', md.node);
+
+    // The template's own declared fields, so a subtype's custom properties are
+    // legible in View mode instead of only existing on the edit form.
+    let custom = '';
+    const props = (tmpl && tmpl.schema && tmpl.schema.properties) || {};
+    for (const key of Object.keys(props)) {
+      let v = md[key];
+      if (Array.isArray(v)) v = v.join(', ');
+      if (typeof v === 'boolean') v = v ? 'yes' : 'no';
+      custom += fieldRow(props[key].description || key, v);
+    }
+
+    let place = '';
+    const parentEdge = allEdges.find(e => e.childId === r.id && (e.relation === 'hosts' || e.relation === 'oauth'));
+    const parent = parentEdge ? resourcesById[parentEdge.parentId] : null;
+    if (parent) {
+      place += fieldRow('Parent', '<a href="#" onclick="openEditModal(\'' + parent.id + '\'); return false;">'
+        + esc(parent.name) + '</a>', { html: true });
+    }
+    const kids = allEdges.filter(e => e.parentId === r.id).map(e => resourcesById[e.childId]).filter(Boolean);
+    if (kids.length) {
+      place += fieldRow('Children', kids.map(k =>
+        '<a href="#" class="me-2" onclick="openEditModal(\'' + k.id + '\'); return false;">' + esc(k.name) + '</a>'
+      ).join(''), { html: true });
+    }
+
+    // Access, including what is inherited from an ancestor.
+    let access = '';
+    const summary = accessSummary[r.id];
+    const direct = (summary && summary.groups) || [];
+    const inherited = (summary && summary.inherited) || [];
+    if (direct.length) {
+      access += fieldRow('Direct grants', direct.map(g =>
+        '<span class="badge bg-primary me-1" title="' + esc(g.memberCount) + ' member(s)">' + esc(g.cn) + ' · ' + esc(g.accessLevel) + '</span>'
+      ).join(''), { html: true });
+    }
+    if (inherited.length) {
+      access += fieldRow('Inherited', inherited.map(g =>
+        '<span class="badge bg-secondary me-1" title="Granted on a parent resource and propagated down">'
+        + '<i class="fa-solid fa-arrow-turn-down me-1"></i>' + esc(g.cn) + ' · ' + esc(g.accessLevel) + '</span>'
+      ).join(''), { html: true });
+    }
+    if (!direct.length && !inherited.length) {
+      access += inheritsHostAccess(r)
+        ? fieldRow('Access', '<span class="text-muted">Follows the host that runs this service.</span>', { html: true })
+        : fieldRow('Access', '<span class="text-muted">No group grants this resource.</span>', { html: true });
+    }
+
+    let discovery = '';
+    discovery += fieldRow('Managed', md.managed ? 'yes' : 'no');
+    if (Array.isArray(md.discovery_sources) && md.discovery_sources.length) {
+      discovery += fieldRow('Discovered by', md.discovery_sources.join(', '));
+    }
+    if (md.last_seen) discovery += fieldRow('Last seen', timeAgo(new Date(md.last_seen).toISOString()));
+
+    return sectionCard('Identity', 'fa-solid fa-id-card', identity)
+      + sectionCard('Placement', 'fa-solid fa-sitemap', place)
+      + sectionCard('Network', 'fa-solid fa-network-wired', network)
+      + sectionCard('Platform', 'fa-solid fa-microchip', platform)
+      + sectionCard(tmpl ? tmpl.name + ' fields' : 'Template fields', 'fa-solid fa-sliders', custom)
+      + sectionCard('Access', 'fa-solid fa-user-group', access)
+      + sectionCard('Discovery', 'fa-solid fa-satellite-dish', discovery);
+  }
+
+  // View is the default, and it is a real read-only render rather than the
+  // edit form with Save hidden.
+  function toggleEditMode(isEdit) {
+    const id = $('#res-id').val();
+
+    // The General tab swaps between a read-only render and the form. The other
+    // tabs (Details, Groups, Children, Secrets) are separate panes that cannot
+    // be inside one wrapper, so their inputs are disabled instead -- otherwise
+    // "View" would still let you edit everything on the second tab.
+    $('.modal-body input, .modal-body select, .modal-body textarea')
+      .not('[name="btnradio"]')
+      .prop('disabled', !isEdit);
+    // The slug is derived from the name and is never typed into.
+    $('#res-slug').prop('disabled', false).prop('readonly', true);
+
+    if (isEdit) {
+      $('#resource-view-pane').hide();
+      $('#edit-resource-form').show();
+      $('.modal-footer .btn-primary').show();
+    } else {
+      $('#resource-view-pane').html(viewPaneHtml(id ? resourcesById[id] : null)).show();
+      $('#edit-resource-form').hide();
+      $('.modal-footer .btn-primary').hide();
+    }
+    $('input[name="btnradio"]').prop('disabled', false);
+  }
+
+  // A service whose lifecycle an agent reports gets no groups of its own and
+  // inherits access from its host. Served from services/subtype_templates.js
+  // via routes/index.js, so there is exactly one copy of this table.
+  const AGENT_SERVICE_SUBTYPES = new Set(<%- JSON.stringify(agentServiceSubtypes || []) %>);
   function inheritsHostAccess(r) {
     if (!r || (r.kind !== 'service' && r.kind !== 'container')) return false;
     const meta = r.metadata || {};
-    return Boolean(meta.agentId) && AGENT_SERVICE_SUBTYPES.has(String(meta.subType || '').toLowerCase());
+    return AGENT_SERVICE_SUBTYPES.has(String(meta.subType || '').toLowerCase());
   }
 
   // The unit/container name to act on for a service resource. Mirrors
@@ -918,11 +1189,27 @@
   }
 
   // Find the live ServiceMetric the agent reported for a service resource.
-  // Services carry their host's agentId in metadata (agent_manager.js
-  // reconcileServicesFromTelemetry), so the lookup does not need the tree.
+  // The agent is the one bound to the theta-agent service child under the
+  // service's host, so the lookup walks the graph.
   function liveServiceMetric(r) {
     const meta = (r && r.metadata) || {};
-    const a = meta.agentId ? agentsById[meta.agentId] : null;
+    let a = null;
+    if (allEdges.length) {
+      const parentEdges = allEdges.filter(e => e.childId === r.id);
+      for (const pe of parentEdges) {
+        const parent = resourcesById[pe.parentId];
+        if (!parent || parent.kind !== 'host') continue;
+        const childIds = allEdges.filter(e => e.parentId === parent.id).map(e => e.childId);
+        for (const cid of childIds) {
+          const child = resourcesById[cid];
+          if (child && child.kind === 'service' && child.metadata?.subType === 'theta-agent' && agentsByResource[cid]) {
+            a = agentsByResource[cid];
+            break;
+          }
+        }
+        if (a) break;
+      }
+    }
     if (!a) return { agent: null, svc: null };
     const list = ((a.lastTelemetry || {}).services) || [];
     const want = serviceTargetName(r);
@@ -939,64 +1226,50 @@
   // were current.
   function attachServiceStatus(n) {
     const { agent, svc } = liveServiceMetric(n);
-    if (!agent) {
-      // Stack services (kind: 'service', no agent) are catalog entries rather
-      // than things an agent watches; no dot is more honest than a grey one.
-      if (!(n.metadata && n.metadata.agentId)) return;
-      n.hasStatusDot = true;
-      n.agentColor = '#adb5bd';
-      n.agentStatusTitle = agentsUnavailable ? 'Agent service unreachable' : 'Reporting agent not found';
-      return;
-    }
-    n.hasStatusDot = true;
-    if (!agent.isOnline) {
-      n.agentColor = '#adb5bd';
-      n.agentStatusTitle = 'Host agent offline — service state unknown';
-      return;
-    }
-    if (!svc) {
-      n.agentColor = '#adb5bd';
-      n.agentStatusTitle = 'Registered, but the agent has not reported it yet';
-      return;
-    }
-    if (svc.load_state === 'not-found') {
-      n.agentColor = '#6c757d';
-      n.agentStatusTitle = 'Not present on the host any more';
-      return;
-    }
-    if (svc.active) {
-      n.agentColor = '#198754';
-      n.agentStatusTitle = 'Active' + (svc.substate ? ' (' + svc.substate + ')' : '');
-      return;
-    }
-    n.agentColor = '#dc3545';
-    n.agentStatusTitle = 'Inactive' + (svc.substate ? ' (' + svc.substate + ')' : '');
+    attachCompositeStatus(n, Boolean(agent));
+    if (!agent) return;
+    // Preserve legacy tooltip for live service state when agent data is present.
+    const md = n.metadata || {};
+    let suffix = '';
+    if (!agent.isOnline) suffix = 'Host agent offline — service state unknown';
+    else if (!svc) suffix = 'Registered, but the agent has not reported it yet';
+    else if (svc.load_state === 'not-found') suffix = 'Not present on the host any more';
+    else if (svc.active) suffix = 'Active' + (svc.substate ? ' (' + svc.substate + ')' : '');
+    else suffix = 'Inactive' + (svc.substate ? ' (' + svc.substate + ')' : '');
+    if (suffix) n.statusTitle = (md.status_message || n.statusTitle || 'Service status') + ' — ' + suffix;
   }
 
   // Status tab body for the resource modal.
   function statusTabHtml(resource) {
     if (!resource) return '';
-    const agent = resource.agent;
     const md = resource.metadata || {};
-    
-    let statusHeader = '';
-    if (md.status) {
-      let badgeClass = 'bg-secondary';
-      if (md.status === 'ok') badgeClass = 'bg-success';
-      if (md.status === 'warning') badgeClass = 'bg-warning text-dark';
-      if (md.status === 'critical' || md.status === 'error') badgeClass = 'bg-danger';
-      statusHeader = `<div class="alert alert-light border mb-3 d-flex align-items-center">
-        <div class="me-3 fs-3"><span class="badge ${badgeClass}">${esc(md.status).toUpperCase()}</span></div>
+
+    function statusBadgeClass(status) {
+      if (status === 'ok') return 'bg-success';
+      if (status === 'warning') return 'bg-warning text-dark';
+      if (status === 'critical' || status === 'error') return 'bg-danger';
+      return 'bg-secondary';
+    }
+
+    const statusHeader = md.status ? `
+      <div class="alert alert-light border mb-3 d-flex align-items-center">
+        <div class="me-3 fs-3"><span class="badge ${statusBadgeClass(md.status)}">${esc(md.status).toUpperCase()}</span></div>
         <div>
           <h6 class="mb-1 fw-bold">Computed Status</h6>
           <p class="mb-0 small text-muted">${esc(md.status_message || 'Telemetry evaluation passing')}</p>
         </div>
-      </div>`;
+      </div>` : '';
+
+    const agent = resource.agent;
+    if (!agent) {
+      return statusHeader + `
+        <div class="p-3 text-center text-muted">
+          <i class="fa-solid fa-microchip fa-3x mb-3"></i>
+          <h6>No telemetry available</h6>
+          <p class="small">Install the theta-agent or configure a plugin to populate telemetry.</p>
+        </div>`;
     }
 
-    if (!agent) {
-      return statusHeader + '<div class="p-3 text-center text-muted"><i class="fa-solid fa-microchip fa-3x mb-3"></i><h6>No telemetry available</h6><p class="small">Install the theta-agent or configure a plugin to populate telemetry.</p></div>';
-    }
     const d = agent.lastDiscovery || {};
     const t = agent.lastTelemetry || {};
     const fmtNum = (n) => (n == null || isNaN(n)) ? '0.00' : Number(n).toFixed(2);
@@ -1106,7 +1379,7 @@
 
       ${hostDetailsHtml}      </div>
 
-      <!-- Memory Card (Matching user screenshot design) -->
+      <!-- Memory Card -->
       <div class="card mb-3 shadow-sm border">
         <div class="card-header bg-light py-2">
           <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-memory me-1"></i> Memory</h6>
@@ -1301,9 +1574,17 @@
   // locked-down resource -- it is an unreachable one, and a group whose LDAP
   // entry has been deleted grants nothing, so both get called out rather than
   // rendering as a quiet zero.
+  const groupTitle = (list) => list.map(g => g.cn + ' (' + g.accessLevel + ', ' + g.memberCount + ')').join('&#10;');
+
   function accessCellHtml(resourceId) {
     const summary = accessSummary[resourceId];
-    if (!summary || !summary.groups.length) {
+    const direct = (summary && summary.groups) || [];
+    // Grants that reach this resource from an ancestor. Ownership propagates
+    // down the tree, so a host under a granted site is reachable with no row
+    // of its own -- showing "no groups" there was actively misleading.
+    const inherited = (summary && summary.inherited) || [];
+
+    if (!direct.length && !inherited.length) {
       // A service an agent registered has no groups on purpose: a systemd unit
       // is not an access boundary, so access follows the host that runs it.
       // Saying "no groups" there reads as a misconfiguration when it is the
@@ -1313,12 +1594,23 @@
       }
       return '<span class="badge bg-light text-dark border" title="No LDAP group gates this resource">no groups</span>';
     }
-    const dangling = summary.groups.filter(g => !g.exists);
-    let html = '<span class="badge bg-primary" title="' +
-      summary.groups.map(g => g.cn + ' (' + g.accessLevel + ', ' + g.memberCount + ')').join('&#10;') +
-      '"><i class="fa-solid fa-user-group"></i> ' + summary.memberCount + '</span>';
-    html += ' <small class="text-muted">' + summary.groups.length +
-      ' group' + (summary.groups.length === 1 ? '' : 's') + '</small>';
+
+    let html = '';
+    if (direct.length) {
+      html += '<span class="badge bg-primary" title="Granted directly on this resource&#10;' + groupTitle(direct) +
+        '"><i class="fa-solid fa-user-group"></i> ' + summary.memberCount + '</span>';
+      html += ' <small class="text-muted">' + direct.length + ' group' + (direct.length === 1 ? '' : 's') + '</small>';
+    }
+    if (inherited.length) {
+      html += (html ? ' ' : '') +
+        '<span class="badge bg-secondary" title="Inherited from a parent resource&#10;' + groupTitle(inherited) +
+        '"><i class="fa-solid fa-arrow-turn-down"></i> ' + inherited.length + ' inherited</span>';
+      if (!direct.length) {
+        html += ' <span class="badge bg-primary" title="' + groupTitle(inherited) +
+          '"><i class="fa-solid fa-user-group"></i> ' + summary.memberCount + '</span>';
+      }
+    }
+    const dangling = direct.concat(inherited).filter(g => !g.exists);
     if (dangling.length) {
       html += ' <span class="badge bg-warning text-dark" title="Linked group missing in LDAP: ' +
         dangling.map(g => g.cn).join(', ') + '">!</span>';
@@ -1385,8 +1677,9 @@
       if (sort === 'name') return a.name.localeCompare(b.name);
       if (sort === 'kind') return a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name);
       if (sort === 'env') {
-         const ae = a.metadata?.isProduction ? 0 : 1;
-         const be = b.metadata?.isProduction ? 0 : 1;
+         const rank = { prod: 0, testing: 1, dev: 2 };
+         const ae = rank[a.metadata?.environment] ?? 3;
+         const be = rank[b.metadata?.environment] ?? 3;
          return ae - be || a.name.localeCompare(b.name);
       }
       return 0;
@@ -1433,8 +1726,14 @@
            : '<span class="d-inline-block me-1" style="width:1.1rem"></span>';
          n.childCount = n.children.length;
          n.accessHtml = accessCellHtml(n.id);
+         n.isArchived = (n.metadata || {}).lifecycle_state === 'archived' && (n.metadata || {}).managed !== true;
+         // Environment bubbles up, and was being computed and then never shown:
+         // a site carrying production looked identical to an empty one.
+         const nmd = n.metadata || {};
+         n.inheritedEnv = (!nmd.environment && nmd.bubbled_environment) ? nmd.bubbled_environment : '';
          if (n.kind === 'host') attachAgentStatus(n);
          else if (n.kind === 'service') attachServiceStatus(n);
+         else attachCompositeStatus(n, false);
          finalRenderList.push(n);
          if (n.children.length > 0) {
            flatten(n.children, depth + 1);
@@ -1592,7 +1891,11 @@
       $('#site-details-container').show();
     }
     populateHostDropdown($('#res-host-id').val());
+    refreshSubtypeOptions();
   }
+
+  // Reparenting changes which subtypes are legal, so the list has to follow it.
+  $(document).on('change', '#res-host-id', function() { refreshSubtypeOptions(); });
 
   // Clear the live service-status panel's tracked state when the modal closes.
   $(document).on('hidden.bs.modal', function(){
@@ -1673,7 +1976,7 @@
     $('#res-icon').val('');
     $('#res-tagline').val('');
     updateIconPreview();
-    $('#res-is-production').prop('checked', false);
+    $('#res-environment').val('');
     $('#res-is-external').prop('checked', false);
     $('#res-is-public').prop('checked', false);
     $('#res-is-current-site').prop('checked', false);
@@ -1700,27 +2003,103 @@
     toggleFormFields();
   }
 
+  // ── Subtype templates ──────────────────────────────────────────────────
+  //
+  // Loaded from /api/subtype-templates, not hardcoded here. The list used to be
+  // eight <option> tags and a literal `presets` object that had nothing to do
+  // with the database-backed templates the server validates against -- so the
+  // dropdown offered `k8s` while the server knew `k8s_deployment`, and none of
+  // the placement rules were visible until a save failed.
+  var subtypeTemplates = [];
+
+  async function loadSubtypeTemplates() {
+    try {
+      const res = await app.api.get('subtype-templates');
+      subtypeTemplates = (res && res.templates) || [];
+    } catch (err) {
+      console.error('could not load subtype templates', err);
+      subtypeTemplates = [];
+    }
+  }
+
+  // The templates that may actually be used here: right target kind, and a
+  // parent this resource is allowed to sit under. Showing the rest and failing
+  // on save is how the old dropdown behaved.
+  function applicableTemplates(kind, parentResource) {
+    const parentKind = parentResource ? parentResource.kind : null;
+    const parentSubType = parentResource ? ((parentResource.metadata || {}).subType || '') : '';
+    return subtypeTemplates.filter(function(t) {
+      if (t.target_kind && t.target_kind !== kind) return false;
+      const types = t.valid_parent_types || [];
+      if (types.length && (!parentKind || types.indexOf(parentKind) === -1)) return false;
+      const subs = t.valid_parent_subtypes || [];
+      if (subs.length && (!parentSubType || subs.indexOf(parentSubType) === -1)) return false;
+      return true;
+    });
+  }
+
+  function refreshSubtypeOptions() {
+    const kind = $('#res-kind').val();
+    const parentId = $('#res-host-id').val();
+    const parent = parentId ? resourcesById[parentId] : null;
+    const list = applicableTemplates(kind, parent);
+    const current = $('#res-subtype').val();
+
+    // Grouped: the vocabulary is ~120 templates, and even filtered by kind and
+    // parent a flat list of that length is not something anyone reads.
+    const byCategory = new Map();
+    for (const t of list) {
+      const cat = t.category || 'Other';
+      if (!byCategory.has(cat)) byCategory.set(cat, []);
+      byCategory.get(cat).push(t);
+    }
+    let html = '<option value="">-- Custom / Manual --</option>';
+    for (const [cat, items] of [...byCategory].sort((a, b) => a[0].localeCompare(b[0]))) {
+      html += '<optgroup label="' + esc(cat) + '">';
+      for (const t of items.sort((a, b) => a.name.localeCompare(b.name))) {
+        html += '<option value="' + esc(t.slug) + '"' + (t.slug === current ? ' selected' : '') + '>'
+          + esc(t.name) + '</option>';
+      }
+      html += '</optgroup>';
+    }
+    $('#res-subtype-template').html(html);
+
+    // A subtype already on the resource that is not offered here is worth
+    // saying out loud rather than silently resetting: it usually means the
+    // resource was reparented somewhere its subtype is not allowed.
+    const known = list.some(t => t.slug === current);
+    const $help = $('#res-subtype-help');
+    if (current && !known) {
+      const tmpl = subtypeTemplates.find(t => t.slug === current);
+      $help.html(tmpl
+        ? '<span class="text-warning"><i class="fa-solid fa-triangle-exclamation me-1"></i>'
+          + esc(tmpl.name) + ' is not valid under this parent.</span>'
+        : '<span class="text-muted">Custom subtype <code>' + esc(current) + '</code>, no template.</span>');
+    } else {
+      const tmpl = list.find(t => t.slug === current);
+      $help.html(tmpl && tmpl.description ? esc(tmpl.description) : '');
+    }
+  }
+
   function applySubtypeTemplate() {
     const tmpl = $('#res-subtype-template').val();
-    if (!tmpl) return;
+    if (!tmpl) { $('#res-subtype-help').html(''); return; }
     $('#res-subtype').val(tmpl);
-    const presets = {
-      docker: { icon: 'fa-brands fa-docker', tagline: 'Docker Engine Container Workload', port: '2375' },
-      systemd: { icon: 'fa-solid fa-gears', tagline: 'Linux Systemd Daemon Service' },
-      postgresql: { icon: 'fa-solid fa-database', tagline: 'PostgreSQL Relational Database', port: '5432' },
-      redis: { icon: 'fa-solid fa-cubes', tagline: 'Redis In-Memory Key-Value Cache', port: '6379' },
-      proxmox: { icon: 'fa-solid fa-server', tagline: 'Proxmox VE Hypervisor Host', port: '8006' },
-      wireguard: { icon: 'fa-solid fa-shield-halved', tagline: 'WireGuard VPN Encrypted Tunnel', port: '51820' },
-      unifi: { icon: 'fa-solid fa-wifi', tagline: 'UniFi Network Controller', port: '8443' },
-      k8s: { icon: 'fa-solid fa-dharmachakra', tagline: 'Kubernetes Cluster Worker Node', port: '6443' }
-    };
-    if (presets[tmpl]) {
-      const p = presets[tmpl];
-      if (p.icon) $('#res-icon').val(p.icon);
-      if (p.tagline) $('#res-tagline').val(p.tagline);
-      if (p.port && !$('#res-port').val()) $('#res-port').val(p.port);
-      updateIconPreview();
-    }
+    const t = subtypeTemplates.find(x => x.slug === tmpl);
+    if (!t) { $('#res-subtype-help').html(''); return; }
+
+    // Only fill blanks. Re-picking the same template must never overwrite what
+    // the operator has already typed.
+    if (t.icon && !$('#res-icon').val()) { $('#res-icon').val(t.icon); updateIconPreview(); }
+    if (t.description && !$('#res-tagline').val()) $('#res-tagline').val(t.description);
+
+    // Schema defaults for the fields the template declares.
+    const props = (t.schema && t.schema.properties) || {};
+    if (props.port && props.port.default && !$('#res-port').val()) $('#res-port').val(props.port.default);
+
+    $('#res-subtype-help').html(esc(t.description || ''));
+    const id = $('#res-id').val();
+    renderDynamicFields(tmpl, id && resourcesById[id] ? resourcesById[id].metadata : {});
   }
 
   async function openMergeModal(discoveredId, discName) {
@@ -2275,7 +2654,7 @@
     $('#res-icon').val(r.metadata.icon || '');
     $('#res-tagline').val(r.metadata.tagline || '');
     updateIconPreview();
-    $('#res-is-production').prop('checked', !!r.metadata.isProduction);
+    $('#res-environment').val(r.metadata.environment || '');
     $('#res-is-external').prop('checked', !!r.metadata.isExternalReachable);
     $('#res-is-public').prop('checked', !!r.metadata.isPublic);
     $('#res-is-current-site').prop('checked', !!r.metadata.isCurrentSite);
@@ -2563,7 +2942,7 @@
         systemdService: $('#res-systemd').val(),
         icon: $('#res-icon').val().trim(),
         tagline: $('#res-tagline').val().trim(),
-        isProduction: $('#res-is-production').is(':checked'),
+        environment: $('#res-environment').val() || undefined,
         isExternalReachable: $('#res-is-external').is(':checked'),
         isPublic: $('#res-is-public').is(':checked'),
         isCurrentSite: $('#res-is-current-site').is(':checked')

@@ -29,9 +29,7 @@ class ThetaAgentDriver extends BaseDriver {
     if (!resource) return false;
     const subType = (resource.metadata && resource.metadata.subType) || '';
     if (this.supportedSubtypes.has(subType.toLowerCase())) return true;
-    // A resource an agent is bound to carries the binding in its own metadata;
-    // resolveDriver does the authoritative (awaited) lookup.
-    return Boolean(resource.metadata && resource.metadata.agentId);
+    return false;
   }
 
   // The unit/container/process name to act on for a service resource.

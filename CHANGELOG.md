@@ -1,4 +1,56 @@
-## [2.34.0] - $(date +%Y-%m-%d)
+## [2.35.0] - 2026-08-28
+
+The resource directory redesign is finished and, for the first time, verified in a
+browser. v2.34.0 shipped a directory page that did not execute at all — a `<script>`
+tag nested inside a JavaScript template literal made the entire page script a syntax
+error, so every function on it was undefined and the tree rendered zero rows. Nothing
+caught it: the EJS compiled, every route returned 200, and the whole suite passed.
+Fixing that exposed two more defects only a running page could show — `bubbled_environment`
+was computed on every request and discarded before it reached the tree, and a site had
+no status of its own. Alongside that: 119 seeded subtype templates, ownership that
+propagates down the graph, a safe evaluator for operator-written status rules, and
+four new design documents.
+
+### Fixed
+- **The directory page did not run at all.** `views/directory.ejs` nested a `<script>` element inside a JS template literal. An HTML parser ends a script element at the first closing script tag in the source whatever JS context it appears in, so the page's real script was cut in half, its template literal left unterminated, and the whole block was a `SyntaxError` — `renderTable`, `loadResources` and `openEditModal` were all undefined, the table was empty, and the page printed its own source below itself. Everything three releases of resource-directory work had put in that view had never once rendered.
+- **`tests/view_integrity.test.js` now guards it**: every view compiles, no script element is closed from inside a string literal, every inline script parses as JavaScript, and every function named by an inline handler is actually defined. Verified to fail against v2.34.0 and pass on this release.
+- **Bubbled environment never reached the tree.** `GET /api/directory-admin/resources` read `Resource.list()`, but `bubbled_environment`, `bubbled_status` and rolled-up tags are computed in `Resource.getGraph()` and exist nowhere else — so the headline feature of the redesign was recomputed on every request and thrown away before the one screen that displays it. A site carrying production looked identical to an empty one.
+- **`ResourceEdge.source` was never persisted.** The field was read all over the reparent/prune logic added in v2.33.0 but never declared on the model, and the ORM's `preSave` only iterates declared fields — so it silently dropped on every write and edge reparenting/pruning was inert from the day it shipped.
+- **`POST /api/site/export` handed spokes each other's data.** `SubtypeTemplate.list()` was added to the middle of a `Promise.all` whose result is destructured positionally, shifting every later binding by one: `signingKey` received the template list, `meshSites` the signing key, and `baoSecrets` the agent fleet **including token hashes**. The call is now pinned last with a comment saying why, and `tests/site_export_shape.test.js` asserts each key holds the shape it claims.
+- **Join-key enrolment demanded a `?site=` that no shipped agent sent**, so a self-enrolling agent was rejected. The directory now falls back to its own current site, and rejects only a hint that is present and matches nothing — filing a host under the wrong site silently is worse than refusing.
+- **Discovery garbage collection never persisted anything.** `res.update({ metadata: meta })` where `meta` *is* `res.metadata` is the same object reference, so the ORM saw no change. Stale resources were marked archived on every pass and were still there on the next one.
+- **The `archived` lifecycle flag was written and never read.** A machine that had not been seen for a month was still offered as a jump target. `accessibleResources` now excludes archived, never-promoted resources.
+- **Promoting a discovered resource created groups nothing could read.** `POST /api/discovery/promote/:slug` minted its own `<slug>_access` / `<slug>_admin` pair at access level `user` — a naming scheme no consumer parses and a level the access model does not rank, so the access group granted nothing and site admins could not reach a promoted host. Promotion now goes through `services/resource_groups.js`, the same path a resource created in the Directory takes.
+- **The theta-agent driver claimed any resource carrying `metadata.agentId`**, including ones whose subtype it cannot act on.
+- **Audit timestamps rendered as `1970-01-21`** — resource stamps are seconds and `moment()` reads a bare number as milliseconds.
+- **Access requests could be opened for resources the requester already administered.** The duplicate check only asked whether the caller held the one group being requested, ignoring inheritance, site-admin groups and agent-derived access, so a site administrator's request for a host they already administer sat in an approval queue meaning nothing.
+- **One hung discovery plugin froze every status dot in the directory.** Plugin runs and local maintenance passes shared a queue and a single worker.
+
+### Added
+- **Status rolls up the graph.** A parent shows the worst status among itself and everything beneath it, rendered as a hollow dot so a summary never reads as a measurement. `unknown` outranks `ok`: a site with a blind spot is not healthy. Tooltips say which descendant the status came from, and an unreported resource says "No telemetry reported yet" rather than showing green.
+- **Read-only View mode.** A resource opens as a dashboard — identity, address, environment, status, access, audit — and switches to Edit deliberately. All tabs are disabled in View mode, not just General.
+- **119 seeded subtype templates** across sites, machines, appliances, power/environmental units and applications, seeded idempotently at boot. Subtypes are data: `target_kind`, valid parents, a JSON-Schema-subset field schema, status rules, `ssh_capable`, `inherits_host_access`, `identity_class`, category and icon. The resource modal's subtype picker and dynamic fields are driven from them.
+- **Ownership propagates down the graph** (`services/access_inheritance.js`): granting a site grants what is in it, at the strongest level held. Grants are additive with no deny. Meta/roster groups (`{site}_everyone`) are explicitly excluded — propagating the roster would give every user at a site access to everything in it.
+- **A safe expression evaluator for status rules.** Rules are operator-editable database rows, so conditions are tokenized and evaluated against an explicit grammar rather than `new Function`. Own-properties-only path resolution keeps `metadata.constructor` off the table. Documented in `docs/status-rules.md`.
+- **Per-plugin run timeouts** (`PluginInstance.timeoutMs`, default 5 minutes, 1s–1h) so a deliberately long nmap sweep can have more room than a Redfish poll and an unreachable endpoint cannot hold the queue forever.
+- **Separate discovery and maintenance queues**, so status evaluation and garbage collection keep running while a plugin is hung.
+- **Deleting a plugin instance takes its discovery output with it** (`DiscoveryReconciler.forgetSource`). Pruning only ever ran during a run of the owning source, so a deleted plugin's resources and edges previously outlived it forever. `?keepPromoted=false` removes promoted rows too; the default keeps them and drops the attribution.
+- **Subtype templates replicate to spokes.** Every site seeds the same defaults locally, so backfilling only missing slugs meant the master's edits to `linux` or `proxmox` — the ones an operator is most likely to customise — were exactly the ones that never replicated. The master is authoritative, matched by slug.
+- **Enrol an agent against a site, not just an existing host** (`siteId` on `POST /api/agents/enroll`). The directory creates the host and the agent's service under it; previously enrolling from the UI meant creating the host by hand first.
+- **Agents bind to a `theta-agent` service resource, never to a host** (`utils/agent_binding.js`), and revoking one removes that service and its edges instead of leaving a host claiming a binding that no longer exists.
+- **New documentation**: `docs/subtype-templates.md`, `docs/status-rules.md`, `docs/access-inheritance.md`, `docs/discovery-plugins.md`.
+
+### Changed
+- **Environment is operator-owned.** `metadata.environment` (`prod` / `testing` / `dev`) replaces the boolean `isProduction`; discovery plugins never write it. It bubbles **up** the graph — a resource is as critical as the most critical thing under it — and an inherited value renders as an outlined badge next to a solid own-value.
+- **All five discovery plugins normalised to canonical kinds** (`site` / `host` / `service` / `oauth`) with the subtype carrying the detail. An iLO is a `host` with subtype `ilo` and `identity_class: 'bmc'` — structurally a host, so it gets a place in the tree and access groups, while the identity class is what stops the reconciler folding it into the server it manages and overwriting that server's real address with an out-of-band one.
+- **Proxmox discovery survives a single bad node.** Per-node failures are collected into `nodeErrors` instead of failing the whole run.
+- **Group provisioning extracted to `services/resource_groups.js`**, consulting the subtype template's `ownGroups` — a systemd unit is not an access boundary of its own, and no longer mints groups for one.
+- `jest` pinned to `maxWorkers: 1`; 13 new test files added to the suite.
+
+### Removed
+- `views/index.ejs` — 38 bytes, unreferenced, EJS v1 syntax, did not compile.
+
+## [2.34.0] - 2026-08-28
 ### Added
 - **Resource Graph Redesign:** Implemented a fully abstract Resource Graph architecture.
 - **Virtual LDAP Groups:** Added support for synthesizing Virtual LDAP Groups (e.g. `_access` and `_admin`) dynamically based on inherited tree access via `POST /api/v1/ldap/search` intercept, removing physical `ResourceGroup` rows sprawl.

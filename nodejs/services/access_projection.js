@@ -1,6 +1,7 @@
 'use strict';
 
 const { templateFor, hasLiveAgent } = require('./subtype_templates');
+const { effectiveGrants } = require('./access_inheritance');
 const { hasPermission } = require('../utils/groups');
 
 // ── Access projection ───────────────────────────────────────────────────────
@@ -14,10 +15,14 @@ const { hasPermission } = require('../utils/groups');
 //
 // Three things make a resource accessible:
 //
-//   1. an explicit group grant (a ResourceGroup row for a group the caller
-//      holds), or the isPublic flag -- the original rule, unchanged;
+//   1. a group grant (a ResourceGroup row for a group the caller holds) on the
+//      resource OR ON ANY ANCESTOR OF IT, or the isPublic flag. Ownership
+//      propagates down the tree: granting someone a site grants them what is
+//      in it, which is the promise in docs/resources-reimagined.md and what
+//      makes per-resource grants usable at more than toy scale. See
+//      services/access_inheritance.js;
 //   2. a HOST RUNNING theta-agent -- an agent that is still enrolled, not
-//      merely a stale metadata.agentId left behind by a revoked one -- for a
+//      merely a stale graph edge left behind by a revoked one -- for a
 //      caller the group model already grants
 //      access to hosts at that site (god_admin, {site}_super_admin, or the
 //      {site}_hosts_<level> aggregate -- utils/groups.js hasPermission).
@@ -32,13 +37,41 @@ const { hasPermission } = require('../utils/groups');
 //
 // Auto-discovered-but-never-promoted resources stay excluded throughout: that
 // is discovery output, not catalog content.
-function accessibleResources(all, edges, { groupIds, memberOf = [], activeAgentIds } = {}) {
+//
+// `grants` is Map(resourceId -> accessLevel) for the rows the caller actually
+// holds and that propagate; `nonInheriting` is the same for meta/roster groups,
+// which grant the resource they are linked to and nothing under it.
+// `groupIds` (a bare Set of resource ids) is still accepted for callers that do
+// not care about levels, and is read as a set of 'access' grants.
+function accessibleResources(all, edges, { groupIds, grants, nonInheriting, memberOf = [], agents = [] } = {}) {
 
 	const inCatalog = (r) => {
+		// Retired by garbage collection: not seen for weeks, never promoted.
+		// The flag was written and never read, so a machine that had been gone
+		// for a month was still offered as a jump target.
+		if (r.metadata?.lifecycle_state === 'archived' && r.metadata?.managed !== true) return false;
 		const isAuto = r.metadata?.discovery_sources?.length > 0 && !r.metadata.discovery_sources.includes('manual');
 		return !(isAuto && r.metadata?.managed !== true);
 	};
-	const granted = (r) => groupIds.has(r.id) || Boolean(r.metadata && r.metadata.isPublic);
+
+	const direct = grants instanceof Map
+		? grants
+		: new Map([...(groupIds || [])].map(id => [id, 'access']));
+	const inherited = effectiveGrants(direct, edges, nonInheriting instanceof Map ? nonInheriting : new Map());
+
+	const granted = (r) => inherited.has(r.id) || Boolean(r.metadata && r.metadata.isPublic);
+
+	// Map enrolled agents to their theta-agent service resource ids so the
+	// graph, not metadata.agentId, decides which hosts are managed.
+	const agentServiceIds = new Set();
+	if (agents && agents.length > 0) {
+		const enrolled = new Set(agents.filter(a => !a.revoked).map(a => a.resourceId).filter(Boolean));
+		for (const r of all) {
+			if (r.kind === 'service' && r.metadata?.subType === 'theta-agent' && enrolled.has(r.id)) {
+				agentServiceIds.add(r.id);
+			}
+		}
+	}
 
 	const byId = new Map(all.map(r => [r.id, r]));
 	const parentOf = new Map();
@@ -61,7 +94,7 @@ function accessibleResources(all, edges, { groupIds, memberOf = [], activeAgentI
 	for (const r of all) {
 		if (!inCatalog(r)) continue;
 		if (granted(r)) { reachable.add(r.id); continue; }
-		if (r.kind !== 'host' || !hasLiveAgent(r, activeAgentIds) || !templateFor(r).sshCapable) continue;
+		if (r.kind !== 'host' || !hasLiveAgent(r, agentServiceIds, edges) || !templateFor(r).sshCapable) continue;
 		// hasPermission already answers for god_admin and {site}_super_admin
 		// without needing the site, but the aggregate and per-resource grants
 		// do need it.

@@ -77,6 +77,10 @@ async function initORM() {
     }
     await healSchema();
     await ensureUniqueIndexes();
+    await SubtypeTemplate.seedDefaults();
+    // templateFor() is synchronous and on the access-projection request path,
+    // so the templates are read into a cache here rather than per call.
+    await require('../services/subtype_templates').refreshTemplateCache();
     // Migrate PATs from Redis (pre-v2.24.8 store) into the replicated SQLite
     // catalog. Best-effort and idempotent; safe to leave in place forever.
     try {

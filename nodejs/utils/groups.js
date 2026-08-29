@@ -125,8 +125,20 @@ function hasPermission(memberOf, resource, level) {
   return false;
 }
 
+// Meta groups: `everyone` and `{site}_everyone`. Membership is implicit -- they
+// are a ROSTER of who is at a site, not a grant of anything. hasPermission()
+// above deliberately does not honour them, and neither may access inheritance:
+// the site resource links `{site}_everyone` at level `member` so the group can
+// be managed from the site's modal, and propagating that down the tree would
+// hand every user at a site access to every resource in it.
+function isMetaGroup(cn) {
+  const name = String(cn || '');
+  return name === 'everyone' || name.endsWith('_everyone');
+}
+
 module.exports = {
   GOD_ADMIN,
+  isMetaGroup,
   KNOWN_LEVELS,
   KINDS,
   slugify,

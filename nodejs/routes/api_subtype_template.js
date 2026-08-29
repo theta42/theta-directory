@@ -2,6 +2,7 @@
 const router = require('express').Router();
 const permission = require('../utils/permission');
 const { SubtypeTemplate } = require('../models/subtype_template');
+const { refreshTemplateCache } = require('../services/subtype_templates');
 const { replicateOnFinish } = require('../utils/replicate_on_finish');
 
 // Only allow super admins or directory admins to manage subtype templates
@@ -39,7 +40,8 @@ router.get('/:slug', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { slug, name, target_kind, schema, status_rules, icon } = req.body;
+    const { slug, name, description, category, target_kind, valid_parent_types, valid_parent_subtypes,
+            schema, status_rules, icon, ssh_capable, inherits_host_access } = req.body;
     if (!slug || !name || !target_kind) {
       return res.status(400).json({ status: 'error', message: 'slug, name, and target_kind are required' });
     }
@@ -53,6 +55,12 @@ router.post('/', async (req, res, next) => {
     const created = await SubtypeTemplate.create({
       id: crypto.randomUUID(),
       slug, name, target_kind,
+      description: description || '',
+      category: category || '',
+      valid_parent_types: valid_parent_types || [],
+      valid_parent_subtypes: valid_parent_subtypes || [],
+      ssh_capable: Boolean(ssh_capable),
+      inherits_host_access: Boolean(inherits_host_access),
       schema: schema || {},
       status_rules: status_rules || [],
       icon: icon || '',
@@ -60,6 +68,7 @@ router.post('/', async (req, res, next) => {
     });
 
     replicateOnFinish(res, 'subtype-template-created');
+    await refreshTemplateCache();
     res.json({ status: 'ok', template: created });
   } catch (err) { next(err); }
 });
@@ -72,6 +81,12 @@ router.put('/:id', async (req, res, next) => {
     const patch = {};
     if (req.body.name !== undefined) patch.name = req.body.name;
     if (req.body.target_kind !== undefined) patch.target_kind = req.body.target_kind;
+    if (req.body.description !== undefined) patch.description = req.body.description;
+    if (req.body.category !== undefined) patch.category = req.body.category;
+    if (req.body.valid_parent_types !== undefined) patch.valid_parent_types = req.body.valid_parent_types;
+    if (req.body.valid_parent_subtypes !== undefined) patch.valid_parent_subtypes = req.body.valid_parent_subtypes;
+    if (req.body.ssh_capable !== undefined) patch.ssh_capable = Boolean(req.body.ssh_capable);
+    if (req.body.inherits_host_access !== undefined) patch.inherits_host_access = Boolean(req.body.inherits_host_access);
     if (req.body.schema !== undefined) patch.schema = req.body.schema;
     if (req.body.status_rules !== undefined) patch.status_rules = req.body.status_rules;
     if (req.body.icon !== undefined) patch.icon = req.body.icon;
@@ -80,6 +95,7 @@ router.put('/:id', async (req, res, next) => {
 
     const updated = await template.update(patch);
     replicateOnFinish(res, 'subtype-template-updated');
+    await refreshTemplateCache();
     res.json({ status: 'ok', template: updated });
   } catch (err) { next(err); }
 });
@@ -90,6 +106,7 @@ router.delete('/:id', async (req, res, next) => {
     if (!template) return res.status(404).json({ status: 'error', message: 'Template not found' });
     
     await template.delete();
+    await refreshTemplateCache();
     replicateOnFinish(res, 'subtype-template-deleted');
     res.json({ status: 'ok' });
   } catch (err) { next(err); }

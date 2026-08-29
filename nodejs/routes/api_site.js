@@ -25,6 +25,7 @@ const middleware = require('../middleware/auth');
 const permission = require('../utils/permission');
 const conf = require('@simpleworkjs/conf');
 const { Resource, ResourceEdge } = require('../models/resource');
+const { SubtypeTemplate } = require('../models/subtype_template');
 const { SiteJoinKey } = require('../models/site_join_key');
 const { SiteSpoke } = require('../models/site_spoke');
 const { replicateToSpokes, pushResync } = require('../utils/site_replicate');
@@ -158,7 +159,7 @@ router.post('/export', async (req, res, next) => {
     // meshSites: the cluster roster. Without it a spoke has no idea any other
     // site exists, its gateway builds no peers, and the mesh silently only
     // works at whichever site happens to be the master.
-    const [ldif, resources, edges, signingKey, meshSites, agents, baoSecrets, userVerifications, apiTokens, agentJoinKeys] = await Promise.all([
+    const [ldif, resources, edges, signingKey, meshSites, agents, baoSecrets, userVerifications, apiTokens, agentJoinKeys, subtypeTemplates] = await Promise.all([
       slurpLdif(),
       Resource.list(),
       ResourceEdge.list(),
@@ -176,7 +177,13 @@ router.post('/export', async (req, res, next) => {
       exportSharedBaoSecrets().catch(() => []),
       UserVerification.listDetail().catch(() => []),
       ApiToken.list().catch(() => []),
-      AgentJoinKey.list().catch(() => [])
+      AgentJoinKey.list().catch(() => []),
+      // Keep this LAST, and add anything new after it. The destructuring
+      // above is positional: inserting a promise anywhere but the end
+      // silently shifts every later binding by one, which here means the
+      // signing key, the mesh roster, the agent fleet and the API tokens all
+      // arrive under each other's names -- a corrupt spoke join, not an error.
+      SubtypeTemplate.list().catch(() => [])
     ]);
 
     await key.update({ use_count: (key.use_count || 0) + 1, last_used_on: Math.floor(Date.now() / 1000) }).catch(() => {});
@@ -193,6 +200,7 @@ router.post('/export', async (req, res, next) => {
       // no agent can authenticate against a spoke. See models/agent.js.
       agents: (agents || []).map(a => (a.toReplica ? a.toReplica() : (a.toJSON ? a.toJSON() : a))),
       agentJoinKeys: (agentJoinKeys || []).map(k => (k.toReplica ? k.toReplica() : (k.toJSON ? k.toJSON() : k))),
+      subtypeTemplates: (subtypeTemplates || []).map(t => (t.toJSON ? t.toJSON() : t)),
       baoSecrets: baoSecrets || [],
       userVerifications: userVerifications || [],
       apiTokens: (apiTokens || []).map(t => (t.toReplica ? t.toReplica() : (t.toJSON ? t.toJSON() : t))),
@@ -363,7 +371,7 @@ router.post('/spokes', async (req, res, next) => {
             metadata: {
               isCurrentSite: false,
               isSpoke: true,
-              isProduction: true,
+              environment: 'prod',
               endpoint: cleanEndpoint
             },
             created_on: now
@@ -1154,7 +1162,7 @@ async function adoptFromMaster({ masterUrl, joinKey, seedLdap = false }) {
   }
 
   // 1. Adopt the resource catalog.
-  const imp = await importDirectory({ Resource, ResourceEdge, exportData });
+  const imp = await importDirectory({ Resource, ResourceEdge, SubtypeTemplate, exportData });
 
   // 1b. Adopt the cluster roster, so this site's gateway knows the others
   //     exist. Best-effort: a missing or malformed roster must not fail a

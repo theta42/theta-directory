@@ -75,8 +75,16 @@ router.get('/conf', function(req, res) {
   res.render('conf', {...values});
 });
 
+// The access-inheritance table the directory view needs is defined once, in
+// services/subtype_templates.js, and handed to the template from here. It used
+// to be re-typed as a literal inside directory.ejs and had already drifted
+// (the copy was missing `port-forward`), which is the failure mode a mirrored
+// constant always eventually has.
+const { AGENT_SERVICE_SUBTYPES } = require('../services/subtype_templates');
+const directoryLocals = () => ({ ...values, agentServiceSubtypes: [...AGENT_SERVICE_SUBTYPES] });
+
 router.get('/directory', function(req, res) {
-  res.render('directory', {...values});
+  res.render('directory', directoryLocals());
 });
 
 router.get('/discovery', function(req, res, next) {
@@ -96,7 +104,7 @@ router.get('/vault', function(req, res) {
 // use of :slug at all -- the client reads location.pathname itself and opens
 // the matching resource's modal once the page's own data has loaded.
 router.get('/directory/:slug', function(req, res) {
-  res.render('directory', {...values});
+  res.render('directory', directoryLocals());
 });
 
 // Route removed since it's now in directory
