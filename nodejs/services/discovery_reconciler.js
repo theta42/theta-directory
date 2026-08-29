@@ -1,4 +1,5 @@
 const { Resource, ResourceEdge, ResourceGroup } = require('../models/resource');
+const { identityClassFor } = require('./subtype_templates');
 const { WebhookEmitter } = require('./webhook_emitter');
 const crypto = require('crypto');
 
@@ -66,15 +67,26 @@ class DiscoveryReconciler {
       }
     }
     if (!targetSite) {
+      // This directory's OWN site, not sites[0]. On a master holding a row for
+      // every spoke, sites[0] is whichever site happens to sort first -- so a
+      // plugin with no location configured could file a rack of machines into
+      // a different office entirely.
       const sites = await Resource.list({ where: { kind: 'site' } });
-      if (sites && sites.length > 0) {
-        targetSite = sites[0];
-      } else {
+      targetSite = (sites || []).find(s => s.metadata && s.metadata.isCurrentSite) || null;
+      if (!targetSite && sites && sites.length === 1) targetSite = sites[0];
+      if (!targetSite && sites && sites.length > 1) {
+        console.warn(
+          `[DiscoveryReconciler] ${sourceName}: no location configured and no current-site row; ` +
+          `refusing to guess between ${sites.length} sites.`);
+        return;
+      }
+      if (!targetSite) {
         targetSite = await Resource.create({
           id: crypto.randomUUID(),
           kind: 'site',
           name: 'Default Site',
           slug: 'site_default',
+          metadata: { isCurrentSite: true },
           created_on: Math.floor(Date.now() / 1000)
         }).catch(() => null);
       }
@@ -89,6 +101,44 @@ class DiscoveryReconciler {
     // every discovery run. Newly created rows are pushed onto this list as we
     // go, so later resources in the same payload still match against them.
     const allRes = await Resource.list();
+    const allEdges = await ResourceEdge.list();
+
+    // Which site each existing resource belongs to, by walking parent edges up
+    // to the nearest site. This is what makes weak (IP/name) matching
+    // site-local: without it, two racks that both run a box called `ubuntu` on
+    // 192.168.1.50 merge into one resource.
+    const resById = new Map(allRes.map(r => [r.id, r]));
+    const parentIndex = new Map();
+    for (const e of allEdges) {
+      if (!e.childId || !e.parentId) continue;
+      if (!parentIndex.has(e.childId)) parentIndex.set(e.childId, []);
+      parentIndex.get(e.childId).push(e.parentId);
+    }
+
+    const siteOf = new Map();
+    function computeSiteOf(resourceId, visited = new Set()) {
+      if (siteOf.has(resourceId)) return siteOf.get(resourceId);
+      // Cycle: no answer for THIS traversal. Deliberately not cached -- a null
+      // that only means "we came back around" would be handed to every later
+      // lookup as if it were the real answer.
+      if (visited.has(resourceId)) return null;
+      visited.add(resourceId);
+
+      const res = resById.get(resourceId);
+      if (res && res.kind === 'site') {
+        siteOf.set(resourceId, res.id);
+        return res.id;
+      }
+      let found = null;
+      for (const parentId of parentIndex.get(resourceId) || []) {
+        found = computeSiteOf(parentId, visited);
+        if (found) break;
+      }
+      if (found || visited.size === 1) siteOf.set(resourceId, found);
+      return found;
+    }
+    for (const r of allRes) computeSiteOf(r.id);
+    const incomingSiteId = targetSite ? targetSite.id : null;
 
     for (const res of resources) {
       if (!res.metadata) res.metadata = {};
@@ -97,21 +147,23 @@ class DiscoveryReconciler {
 
       let existing = null;
 
-      // A discovered device may only merge into a resource of the same kind
-      // (or into a placeholder from an earlier, kind-less discovery). Without
-      // this a VM called "gitea-runner" matches a hand-created *service* of
-      // the same name on rule 3 and silently overwrites it -- the discovered
-      // host's metadata lands on a service row, and the operator's entry is
-      // gone. `template` counts as `host`: a VM converted to a template is the
-      // same device, and it should update in place rather than fork a row.
-      const kindClass = (k) => (k === 'template' ? 'host' : k);
-      const incomingKind = kindClass(res.kind || 'unmanaged_device');
-      const kindCompatible = (r) => {
-        const k = kindClass(r.kind);
-        if (k === 'unmanaged_device' || incomingKind === 'unmanaged_device') return true;
-        return k === incomingKind;
-      };
-      const candidates = allRes.filter(kindCompatible);
+      // A discovered device may only merge into a resource of the same IDENTITY
+      // CLASS. Without this a VM called "gitea-runner" matches a hand-created
+      // *service* of the same name on rule 3 and silently overwrites it -- the
+      // discovered host's metadata lands on a service row, and the operator's
+      // entry is gone.
+      //
+      // Identity class is finer than kind (services/subtype_templates.js): a
+      // template counts as its host, a container as a service, and an
+      // out-of-band controller is its own class so an iLO's management NIC can
+      // never fold into the server it manages.
+      const incomingClass = identityClassFor(res);
+      const candidates = allRes.filter(r => {
+        const k = identityClassFor(r);
+        // A placeholder from an earlier, kind-less discovery matches anything.
+        if (k === 'unmanaged_device' || incomingClass === 'unmanaged_device') return true;
+        return k === incomingClass;
+      });
 
       // 1. God Key (UUID) Matching (highest precision)
       if (res.id) {
@@ -150,13 +202,11 @@ class DiscoveryReconciler {
 
       if (!existing && ipsToMatch.length > 0) {
         existing = candidates.find(r => {
-          // Strict boundaries: Never hijack a resource that has a MAC
+          // Strict boundaries: never hijack a resource that already has a strong identity (MAC).
           const rHasMac = !!(r.metadata && (r.metadata.macAddress || (r.metadata.interfaces && r.metadata.interfaces.some(i => i.mac))));
           if (rHasMac) return false;
-          
-          // Strict boundaries: Only match within the same site (we'll assume candidates array check or we check edges)
-          // Since we can't synchronously check edges easily here without a graph, we rely on the parent matching or just matching if it has no MAC.
-          // Wait, to be safe, if we are doing IP fallback, let's just make sure it's not strongly bound.
+          // Strict boundaries: IP fallback only within the same site.
+          if (incomingSiteId && siteOf.get(r.id) !== incomingSiteId) return false;
           if (!r.metadata) return false;
           if (r.metadata.ip && ipsToMatch.includes(r.metadata.ip)) return true;
           if (r.metadata.address) {
@@ -176,6 +226,8 @@ class DiscoveryReconciler {
         existing = candidates.find(r => {
           const rHasMac = !!(r.metadata && (r.metadata.macAddress || (r.metadata.interfaces && r.metadata.interfaces.some(i => i.mac))));
           if (rHasMac) return false;
+          // Strict boundaries: name/slug fallback only within the same site.
+          if (incomingSiteId && siteOf.get(r.id) !== incomingSiteId) return false;
           
           if (res.slug && r.slug === res.slug) return true;
           if (res.name && r.name && r.name.toLowerCase() === res.name.toLowerCase()) return true;
@@ -257,6 +309,9 @@ class DiscoveryReconciler {
         newDevices++;
         res._actualId = created.id; // Map original slug to actual ID
         allRes.push(created);
+        // New rows have no edges yet; weak matching later in this payload
+        // should treat them as belonging to the target site.
+        siteOf.set(created.id, incomingSiteId);
         WebhookEmitter.emit('discovery.new_device', created.toJSON());
       }
     }
@@ -360,26 +415,152 @@ class DiscoveryReconciler {
     }
   }
 
-  static async garbageCollect(staleMs = 7 * 24 * 60 * 60 * 1000) {
+  // Retire discovery output nobody has seen for a while.
+  //
+  // This used to set `metadata.lifecycle_state = 'archived'` and stop. That
+  // field was written here and read NOWHERE -- not by the projection, not by
+  // the tree, not by jump-host -- so "garbage collection" changed a string on a
+  // row and nothing else. Stale devices stayed fully visible and fully
+  // reachable forever.
+  //
+  // Two stages, because deleting on first sight of staleness is too eager for a
+  // laptop that went on holiday, and never deleting is what we had:
+  //
+  //   archived  after `staleMs`  -- hidden from the catalog, still in the
+  //                                 database, trivially restored by being
+  //                                 discovered again.
+  //   deleted   after `purgeMs`  -- gone, with its edges.
+  //
+  // Only ever touches rows that are exclusively auto-discovered and NOT
+  // managed. Anything an operator promoted or created is catalog content and is
+  // never collected, however long it has been quiet.
+  // Everything a discovery source put in the graph, when that source is going
+  // away.
+  //
+  // Deleting a plugin instance used to unschedule it, drop its secrets and
+  // delete the row -- and leave every resource and edge it had created behind,
+  // tagged with a source name that will never run again. Pruning only happens
+  // during a run of the owning source, so those rows were unreachable by any
+  // cleanup path that exists: permanent litter, growing with every plugin an
+  // operator tried and removed.
+  //
+  // `keepPromoted` (the default) leaves anything an operator promoted or
+  // created by hand. Those are catalog content that merely happened to be found
+  // by this plugin; removing the plugin is not a decision to delete them. They
+  // just lose the source attribution.
+  static async forgetSource(sourceName, { keepPromoted = true } = {}) {
+    if (!sourceName) return { removed: 0, kept: 0, edgesRemoved: 0 };
     const allRes = await Resource.list();
-    const cutoff = Date.now() - staleMs;
-    let archived = 0;
+    let removed = 0;
+    let kept = 0;
+    let edgesRemoved = 0;
 
     for (const res of allRes) {
       const meta = res.metadata || {};
       const sources = meta.discovery_sources || [];
-      // Only garbage collect things that are exclusively auto-discovered
-      if (sources.length > 0 && !sources.includes('manual')) {
-        if (meta.last_seen && meta.last_seen < cutoff && meta.lifecycle_state !== 'archived') {
-          meta.lifecycle_state = 'archived';
-          await res.update({ metadata: meta, updated_on: Math.floor(Date.now() / 1000) });
-          archived++;
-          WebhookEmitter.emit('discovery.device_archived', res.toJSON());
-        }
+      if (!sources.includes(sourceName)) continue;
+
+      // Found by more than one source: it is still someone else's, so only drop
+      // our attribution.
+      const others = sources.filter(x => x !== sourceName);
+      const promoted = meta.managed === true || sources.includes('manual');
+
+      if (others.length || (keepPromoted && promoted)) {
+        await res.update({
+          metadata: { ...meta, discovery_sources: others },
+          updated_on: Math.floor(Date.now() / 1000)
+        }).catch(() => {});
+        kept++;
+        continue;
+      }
+
+      const [asChild, asParent] = await Promise.all([
+        ResourceEdge.list({ where: { childId: res.id } }).catch(() => []),
+        ResourceEdge.list({ where: { parentId: res.id } }).catch(() => [])
+      ]);
+      for (const e of [...asChild, ...asParent]) {
+        await e.delete().catch(() => {});
+        edgesRemoved++;
+      }
+      const links = await ResourceGroup.list({ where: { resourceId: res.id } }).catch(() => []);
+      for (const l of links) await l.delete().catch(() => {});
+      await res.delete().catch(() => {});
+      removed++;
+    }
+
+    // Edges this source created between resources that survived for other
+    // reasons: the resource stays, its provenance does not.
+    const orphanEdges = (await ResourceEdge.list().catch(() => []))
+      .filter(e => e.source === sourceName);
+    for (const e of orphanEdges) {
+      await e.delete().catch(() => {});
+      edgesRemoved++;
+    }
+
+    console.log(`[DiscoveryReconciler] forgetSource(${sourceName}): removed ${removed}, kept ${kept}, edges ${edgesRemoved}`);
+    return { removed, kept, edgesRemoved };
+  }
+
+  static async garbageCollect(staleMs = 7 * 24 * 60 * 60 * 1000, purgeMs = 30 * 24 * 60 * 60 * 1000) {
+    const allRes = await Resource.list();
+    const now = Date.now();
+    const staleCutoff = now - staleMs;
+    const purgeCutoff = now - purgeMs;
+    let archived = 0;
+    let purged = 0;
+
+    const collectable = (res) => {
+      const meta = res.metadata || {};
+      if (meta.managed === true) return false;
+      const sources = meta.discovery_sources || [];
+      if (!sources.length || sources.includes('manual')) return false;
+      return true;
+    };
+
+    for (const res of allRes) {
+      if (!collectable(res)) continue;
+      const meta = res.metadata || {};
+      const lastSeen = meta.last_seen;
+      if (!lastSeen) continue;
+
+      if (lastSeen < purgeCutoff) {
+        // Edges first: a row deleted before them leaves edges pointing at an id
+        // that no longer exists, which getGraph() cannot render around.
+        const [asChild, asParent] = await Promise.all([
+          ResourceEdge.list({ where: { childId: res.id } }).catch(() => []),
+          ResourceEdge.list({ where: { parentId: res.id } }).catch(() => [])
+        ]);
+        for (const e of [...asChild, ...asParent]) await e.delete().catch(() => {});
+        const links = await ResourceGroup.list({ where: { resourceId: res.id } }).catch(() => []);
+        for (const l of links) await l.delete().catch(() => {});
+        await res.delete().catch(() => {});
+        purged++;
+        WebhookEmitter.emit('discovery.device_purged', res.toJSON());
+        continue;
+      }
+
+      if (lastSeen < staleCutoff && meta.lifecycle_state !== 'archived') {
+        // A NEW object, not the mutated original. `meta` is `res.metadata` by
+        // reference, and handing the ORM back the same object it already holds
+        // is not seen as a change -- the row is never written. The previous
+        // version of this function did exactly that, which is the second reason
+        // garbage collection did nothing: the flag nothing read was also a flag
+        // that was never actually saved.
+        await res.update({
+          metadata: { ...meta, lifecycle_state: 'archived' },
+          updated_on: Math.floor(Date.now() / 1000)
+        });
+        archived++;
+        WebhookEmitter.emit('discovery.device_archived', res.toJSON());
       }
     }
-    if (archived > 0) console.log(`[DiscoveryReconciler] Garbage collected ${archived} stale devices.`);
+
+    if (archived || purged) {
+      console.log(`[DiscoveryReconciler] garbage collection: archived ${archived}, purged ${purged}`);
+    }
+    return { archived, purged };
   }
+
 }
 
-module.exports = { DiscoveryReconciler };
+module.exports = { DiscoveryReconciler, isDescendant };

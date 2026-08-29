@@ -1,7 +1,8 @@
 'use strict';
 const router = require('express').Router();
+const crypto = require('crypto');
 const permission = require('../utils/permission');
-const { Resource, ResourceEdge, ResourceGroup } = require('../models/resource');
+const { Resource, ResourceEdge, ResourceGroup, ENVIRONMENTS } = require('../models/resource');
 const { SiteJoinKey } = require('../models/site_join_key');
 const { Group } = require('../models/group_ldap');
 const { User } = require('../models/user_ldap');
@@ -12,147 +13,117 @@ const SUPER_ADMIN_GROUP = permission.SUPER_ADMIN_GROUP;
 const groups = require('../utils/groups');
 const { replicateOnFinish } = require('../utils/replicate_on_finish');
 const jumpClient = require('../utils/jump_client');
+const { SubtypeTemplate } = require('../models/subtype_template');
+const {
+  groupKind, ensureGroup, ensureResourceGroup, nestGroup,
+  ensureSiteGroups, provisionResourceGroups
+} = require('../services/resource_groups');
 
-// Make `childCn` a member of `parentCn`, i.e. everyone in the child is
-// transitively in the parent. Idempotent and non-fatal: "already a member" is
-// the goal state, and a missing group (e.g. god_admin absent on a
-// directory seeded by an older entrypoint) is a reason to skip, not to fail the
-// caller's real work.
-async function nestGroup(childCn, parentCn) {
-  try {
-    const parent = await Group.get(parentCn);
-    const child = await Group.get(childCn);
-    if (await Group.wouldCycle(parentCn, child.dn)) {
-      console.error(`nestGroup: refusing ${childCn} -> ${parentCn} (would create a cycle)`);
-      return;
+// Resource timestamps are UNIX SECONDS, everywhere. They used to be written
+// here in milliseconds and by the reconciler, the scheduler and agent_manager
+// in seconds, which made `updated_on` incomparable across writers: getGraph()
+// hands out max(updated_on) as the graph's version, so a single edit through
+// this route pinned it to a ~1e12 value that no agent- or scheduler-driven
+// change could ever exceed.
+const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+// Validate a resource's metadata against its subtype template.
+//
+// JSON Schema semantics, deliberately: declared properties are type-checked,
+// `required` is enforced, and undeclared keys are allowed unless the template
+// opts in with `additionalProperties: false`. This replaced a hand-maintained
+// allow-list of "core" metadata keys, which could only ever lag reality --
+// discovery plugins legitimately write whatever a device reports (`node` from
+// proxmox, `powerState`/`biosVersion` from ilo, `composeProject` from docker),
+// none of which any central list will reliably know about.
+//
+// Validates the MERGED metadata, not the request body. A PUT may legitimately
+// carry a partial `metadata`, so checking the body alone both rejects updates
+// whose required fields are already stored and lets already-stored junk
+// through untouched.
+// Metadata keys the PLATFORM owns, not the template: they are written by the
+// route, the reconciler, the scheduler or getGraph(), and are meaningful for
+// every subtype. `additionalProperties: false` constrains what a template's
+// own fields may be, and must not reject the key that selects the template.
+//
+// Deliberately short. The version of this that listed every per-device fact a
+// plugin might emit (`vmid`, `biosVersion`, `composeProject`, ...) could only
+// ever lag the plugins; that job belongs to `additionalProperties`.
+const PLATFORM_METADATA_KEYS = new Set([
+  'subType', 'subtype', 'tags', 'environment',
+  'managed', 'ignored', 'discovery_sources', 'sourceId', 'last_seen', 'hostId',
+  'status', 'status_message', 'bubbled_environment', 'bubbled_tags'
+]);
+
+function validateMetadataAgainstSchema(metadata, template) {
+  const schema = template.schema || {};
+  const properties = schema.properties || {};
+
+  for (const key of schema.required || []) {
+    const val = metadata[key];
+    if (val === undefined || val === null || val === '') {
+      return `Required field '${key}' is missing for subtype '${template.slug}'`;
     }
-    await parent.addMember({ dn: child.dn });
-  } catch (err) {
-    const benign = err.name === 'TypeOrValueExistsError' || err.code === 20 || err.name === 'GroupNotFound';
-    if (!benign) console.error(`nestGroup: ${childCn} -> ${parentCn} failed:`, err.message);
   }
-}
 
-// ── Group-model provisioning (docs/GROUPS.md) ───────────────────────────────
-// The directory is the single place groups are created, as a projection of the
-// resource graph. These helpers materialize the group-inheritance lattice for
-// a resource so it exists in LDAP as well as in the resolver (utils/groups.js).
-// All of them are idempotent, so calling them again for a resource a newer
-// release is backfilling is a no-op.
-
-// Map a directory resource kind onto a group-model kind (GROUPS.md §2).
-// host -> host; service -> app (services/consoles are the group model's "apps");
-// site gets site-level groups (handled separately); oauth/container get no
-// per-resource groups (oauth clients hang off their owning service).
-function groupKind(resource) {
-  if (resource.kind === 'host') return 'host';
-  if (resource.kind === 'service') return 'app';
+  for (const [key, val] of Object.entries(metadata)) {
+    const prop = properties[key];
+    if (!prop) {
+      if (schema.additionalProperties === false && !PLATFORM_METADATA_KEYS.has(key)) {
+        return `Unknown field '${key}' for subtype '${template.slug}'`;
+      }
+      continue;
+    }
+    if (val === undefined || val === null || val === '') continue;
+    if (prop.type === 'number' && typeof val !== 'number') return `Field '${key}' must be a number`;
+    if (prop.type === 'boolean' && typeof val !== 'boolean') return `Field '${key}' must be a boolean`;
+    if (prop.type === 'string' && typeof val !== 'string') return `Field '${key}' must be a string`;
+    if (prop.type === 'array' && !Array.isArray(val)) return `Field '${key}' must be an array`;
+    if (prop.enum && !prop.enum.includes(val)) {
+      return `Field '${key}' must be one of ${prop.enum.join(', ')}`;
+    }
+  }
   return null;
 }
 
-// Create a groupOfNames if it doesn't already exist. Idempotent; `ownerDn`
-// seeds the mandatory first member. Returns true when created.
-async function ensureGroup(name, ownerDn, description) {
-  try {
-    await Group.add({ name, owner: ownerDn, description });
-    return true;
-  } catch (err) {
-    if (err.name !== 'EntryAlreadyExistsError' && err.code !== 68) {
-      console.error(`ensureGroup: failed to create ${name}:`, err);
+// Full subtype check for a create/update: placement in the hierarchy plus the
+// schema. `metadata` must already be the merged result for an update.
+// Returns an error string, or null when the resource is valid.
+async function validateSubtype(resource, metadata, parent) {
+  const subType = metadata?.subType || metadata?.subtype;
+  if (!subType) return null;
+
+  const matches = await SubtypeTemplate.list({ where: { slug: subType } });
+  const template = matches && matches[0];
+  if (!template) return null;
+
+  if (template.target_kind && template.target_kind !== resource.kind) {
+    return `Subtype '${subType}' is not valid for kind '${resource.kind}' (expected ${template.target_kind})`;
+  }
+
+  if (template.valid_parent_types && template.valid_parent_types.length > 0) {
+    const parentKind = parent?.kind;
+    if (!parentKind || !template.valid_parent_types.includes(parentKind)) {
+      return `Subtype '${subType}' cannot be created under parent kind '${parentKind || 'none'}' `
+        + `(allowed: ${template.valid_parent_types.join(', ')})`;
     }
-    return false;
   }
-}
 
-// Link a group to a resource only if that link doesn't already exist. The
-// ResourceGroup table has no unique constraint on (resourceId, groupCn), so a
-// naive create on every Directory self-heal (which runs ensureSiteGroups /
-// provisionResourceGroups on each load) was accumulating duplicate links -- the
-// "groups appear 3x under a resource" bug. Always check first.
-// (services/discovery_reconciler.js's autoPromote path had the same bug via
-// its own raw ResourceGroup.create() -- both now share ResourceGroup.ensure().)
-async function ensureResourceGroup(resourceId, groupCn, accessLevel) {
-  return ResourceGroup.ensure(resourceId, groupCn, accessLevel);
-}
-
-// Provision the site-level groups + the aggregates the per-resource groups nest
-// into. Idempotent -- called on every directory list so a site seeded by an
-// older release gets its groups without a rebuild:
-//
-//   god_admin -> {site}_super_admin
-//   {site}_super_admin -> {site}_hosts_admin, {site}_apps_admin
-//   {site}_hosts_admin -> {site}_hosts_access ; {site}_apps_admin -> {site}_apps_access
-//
-// `{site}_everyone` is created for completeness; it has implicit membership and
-// is granted to a resource as a grantee, never enumerated.
-async function ensureSiteGroups(siteSlug, ownerDn, siteName, siteResourceId) {
-  if (!siteSlug) return;
-
-  // Link a site group to the site resource (so it shows + is member-manageable
-  // on the site's modal). Idempotent. Admin groups link as owner; access/meta
-  // groups as member.
-  const link = async (cn, isAdmin) => {
-    if (!siteResourceId) return;
-    await ensureResourceGroup(siteResourceId, cn, isAdmin ? 'owner' : 'member');
-  };
-
-  const sAdmin = groups.siteSuperAdminCns(siteSlug);
-  await ensureGroup(sAdmin, ownerDn, `Site admin for ${siteName || siteSlug}`);
-  await link(sAdmin, true);
-  // The kind-scoped aggregates are CREATED here (per-resource groups nest into
-  // them), but are NOT linked to the site resource: a site carries only the god
-  // and site-wide groups (S_super_admin, S_everyone), per the user's model. The
-  // aggregates have no modal home; site-wide access is granted via S_super_admin
-  // and per-resource access via the host/app groups.
-  for (const kind of ['host', 'app']) {
-    await ensureGroup(groups.aggregateGroupCns(siteSlug, kind, 'admin'), ownerDn, `Admin on all ${kind}s at ${siteSlug}`);
-    await ensureGroup(groups.aggregateGroupCns(siteSlug, kind, 'access'), ownerDn, `Access to all ${kind}s at ${siteSlug}`);
+  // Parent SUBTYPE, narrower than parent kind: a `proxmox-lxc` is a host under
+  // a host, which the kind check alone would let you hang off a laptop.
+  if (template.valid_parent_subtypes && template.valid_parent_subtypes.length > 0) {
+    const parentSubType = parent?.metadata?.subType || parent?.metadata?.subtype;
+    if (!parentSubType || !template.valid_parent_subtypes.includes(parentSubType)) {
+      return `Subtype '${subType}' cannot be created under a '${parentSubType || 'none'}' parent `
+        + `(allowed: ${template.valid_parent_subtypes.join(', ')})`;
+    }
   }
-  await ensureGroup(groups.siteEveryoneCns(siteSlug), ownerDn, `All users at ${siteSlug}`);
-  await link(groups.siteEveryoneCns(siteSlug), false);
-  // god_admin is the global group; surface it on the site modal so its members
-  // can be managed from the Directory (it has no home on a single resource).
-  await link(groups.GOD_ADMIN, true);
 
-  // Wire the lattice as nesting so LDAP-level consumers (SSSD, sudo, anything
-  // binding directly) resolve it transitively, not just utils/permission.js.
-  // nestGroup(child, parent) makes child a member of parent -- membership flows
-  // child -> parent ("up"), so a group's members inherit what its parents hold.
-  await nestGroup(groups.GOD_ADMIN, sAdmin); // god admins are site admins everywhere
-  for (const kind of ['host', 'app']) {
-    const aggAdmin = groups.aggregateGroupCns(siteSlug, kind, 'admin');
-    const aggAccess = groups.aggregateGroupCns(siteSlug, kind, 'access');
-    await nestGroup(sAdmin, aggAdmin);        // site admins administer all hosts/apps
-    await nestGroup(aggAdmin, aggAccess);     // site admin implies site access
+  if (metadata.environment && !ENVIRONMENTS.includes(metadata.environment)) {
+    return `environment must be one of ${ENVIRONMENTS.join(', ')}`;
   }
-}
 
-// Provision the per-resource groups for a host/app and nest them into the site
-// aggregates (so a site/aggregate admin reaches this resource by membership).
-// Group names follow docs/GROUPS.md §2: `{site}_{kind}_{nameSlug}_{level}` where
-// nameSlug is the resource name with the kind prefix stripped (`host_theta-env` ->
-// `theta-env`). `kind` (host/app) both goes in the name and selects the aggregate:
-//
-//   {site}_{kind}_{slug}_admin  -> {site}_{kind}_{slug}_access
-//   {site}_{kind}_{slug}_admin  -> {site}_{kind}s_admin    (aggregate)
-//   {site}_{kind}_{slug}_access -> {site}_{kind}s_access   (aggregate)
-//   god_admin                   -> {site}_{kind}_{slug}_admin  (global super admin)
-async function provisionResourceGroups(resource, kind, siteSlug, ownerDn) {
-  const nameSlug = groups.resourceNameSlug(resource.slug);
-  const accessCn = groups.resourceGroupCns(siteSlug, kind, nameSlug, 'access');
-  const adminCn = groups.resourceGroupCns(siteSlug, kind, nameSlug, 'admin');
-
-  await ensureGroup(accessCn, ownerDn, `Access group for ${resource.name}`);
-  await ensureGroup(adminCn, ownerDn, `Admin group for ${resource.name}`);
-
-  // Link both groups to the resource so the Directory can show/revoke them.
-  await ensureResourceGroup(resource.id, accessCn, 'member');
-  await ensureResourceGroup(resource.id, adminCn, 'owner');
-
-  await nestGroup(adminCn, accessCn); // administering implies using
-  await nestGroup(adminCn, groups.aggregateGroupCns(siteSlug, kind, 'admin'));  // aggregate admin reaches this resource
-  await nestGroup(accessCn, groups.aggregateGroupCns(siteSlug, kind, 'access')); // aggregate access reaches this resource
-  await nestGroup(SUPER_ADMIN_GROUP, adminCn); // global super admin
+  return validateMetadataAgainstSchema(metadata, template);
 }
 
 // The group CNs it is valid to associate with a given resource (docs/GROUPS.md
@@ -200,7 +171,13 @@ router.use(async (req, res, next) => {
 // --- Resources ---
 router.get('/resources', async (req, res, next) => {
   try {
-    let resources = await Resource.list();
+    // getGraph(), not list(): the bubbled fields -- environment, status, tags --
+    // are computed there and exist nowhere else. Reading raw rows here meant the
+    // directory tree, the one screen the whole bubbling design is for, was the
+    // one consumer that never saw them: a site carrying production rendered
+    // exactly like an empty one, and the top of a collapsed tree showed no
+    // status at all.
+    let resources = (await Resource.getGraph()).resources;
     resources = resources.filter(r => {
       // Sites are structural containers, not discovery output -- always shown.
       if (r.kind === 'site') return true;
@@ -322,10 +299,16 @@ router.post('/resources', async (req, res, next) => {
     if (req.body.kind === 'oauth' && !req.body.hostId) {
       return res.status(400).json({ error: 'OAuth Integrations must have a parent Service' });
     }
+
+    const parentResource = req.body.hostId
+      ? await Resource.get(req.body.hostId).catch(() => null)
+      : null;
+    const subtypeErr = await validateSubtype(req.body, req.body.metadata || {}, parentResource);
+    if (subtypeErr) return res.status(400).json({ error: subtypeErr });
     
     req.body.owner = req.body.owner || req.user.uid;
 
-    const now = Date.now();
+    const now = nowSeconds();
     req.body.created_by = req.body.created_by || req.user.uid;
     req.body.created_on = now;
     req.body.updated_by = req.user.uid;
@@ -422,11 +405,31 @@ router.put('/resources/:id', async (req, res, next) => {
     const r = await model.get(req.params.id);
     if (!r) return res.status(404).json({ error: 'Not found' });
 
-    req.body.updated_by = req.user.uid;
-    req.body.updated_on = Date.now();
+    // Merge BEFORE validating: a PUT may carry only the fields the form
+    // changed, and the merged object is what actually gets stored.
     if (req.body.metadata && typeof req.body.metadata === 'object') {
       req.body.metadata = { ...(r.metadata || {}), ...req.body.metadata };
     }
+
+    let parentResource = null;
+    if (req.body.hostId) {
+      parentResource = await Resource.get(req.body.hostId).catch(() => null);
+    } else if (req.body.kind !== 'site' && req.body.kind !== 'Site') {
+      // No explicit hostId on the body: the resource is not being reparented,
+      // so validate against the parent it already has.
+      const existingEdges = await ResourceEdge.list({ where: { childId: req.params.id } });
+      const parentEdge = existingEdges.find(e => e.relation === 'hosts' || e.relation === 'oauth')
+        || existingEdges[0];
+      if (parentEdge) {
+        parentResource = await Resource.get(parentEdge.parentId).catch(() => null);
+      }
+    }
+    const subtypeErr = await validateSubtype(
+      req.body, req.body.metadata || r.metadata || {}, parentResource);
+    if (subtypeErr) return res.status(400).json({ error: subtypeErr });
+
+    req.body.updated_by = req.user.uid;
+    req.body.updated_on = nowSeconds();
 
     const updated = await r.update(req.body);
 
@@ -512,9 +515,46 @@ router.get('/edges', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Create a graph edge by hand. The reconciler applies these same three rules
+// to every edge it creates (services/discovery_reconciler.js); an edge added
+// through the API is no less capable of making the tree unrenderable, and a
+// cycle here is what getGraph() and every ancestor walk have to defend against
+// for the rest of the row's life.
 router.post('/edges', async (req, res, next) => {
   try {
-    const edge = await ResourceEdge.create(req.body);
+    const { parentId, childId, relation } = req.body || {};
+    if (!parentId || !childId) {
+      return res.status(400).json({ error: 'parentId and childId are required' });
+    }
+    if (parentId === childId) {
+      return res.status(400).json({ error: 'a resource cannot be its own parent' });
+    }
+
+    const [parent, child] = await Promise.all([
+      Resource.get(parentId).catch(() => null),
+      Resource.get(childId).catch(() => null)
+    ]);
+    if (!parent) return res.status(400).json({ error: 'parentId does not exist' });
+    if (!child) return res.status(400).json({ error: 'childId does not exist' });
+
+    const { isDescendant } = require('../services/discovery_reconciler');
+    const edges = await ResourceEdge.list();
+    if (isDescendant(parentId, childId, edges)) {
+      return res.status(400).json({ error: 'that edge would create a cycle' });
+    }
+
+    // `source` is provenance, and only a discovery run may claim it: it is
+    // what decides which edges a source is allowed to prune. A hand-made edge
+    // that claimed `source: 'proxmox'` would be deleted by the next proxmox
+    // run; an edge FROM proxmox that hid its source would never be reparented.
+    const edge = await ResourceEdge.create({
+      id: crypto.randomUUID(),
+      parentId,
+      childId,
+      relation: relation || 'hosts',
+      source: null,
+      created_on: nowSeconds()
+    });
     res.json({ results: edge });
   } catch (err) { next(err); }
 });
@@ -628,8 +668,44 @@ router.get('/access-summary', async (req, res, next) => {
       }
     }
 
+    // Ownership propagates down (services/access_inheritance.js), so a
+    // resource with no ResourceGroup row of its own can still be perfectly
+    // reachable. Reporting only direct rows made the UI's Access column say
+    // "no access" for the entire subtree under a granted site, which is both
+    // wrong and the reason inherited access was invisible.
+    const { effectiveGrants } = require('../services/access_inheritance');
+    const { isMetaGroup } = require('../utils/groups');
+    const edges = await ResourceEdge.list().catch(() => []);
+    const byGroup = new Map();
+    for (const link of links) {
+      // A meta/roster group is linked to a site so it can be managed from that
+      // site's modal. It grants nothing, and must not appear as an inherited
+      // grant on every resource at the site.
+      if (isMetaGroup(link.groupCn)) continue;
+      if (!byGroup.has(link.groupCn)) byGroup.set(link.groupCn, new Map());
+      byGroup.get(link.groupCn).set(link.resourceId, link.accessLevel);
+    }
+    for (const [groupCn, direct] of byGroup) {
+      const group = groupByCn.get(groupCn);
+      let members = [];
+      if (group) {
+        const eff = await Group.effectiveMembers(groupCn);
+        members = eff.effective.map(dn => uidByDn.get(String(dn).toLowerCase()) || cnFromDn(dn));
+      }
+      for (const [resourceId, level] of effectiveGrants(direct, edges)) {
+        if (direct.has(resourceId)) continue; // already reported as a direct grant
+        const entry = summary[resourceId] || (summary[resourceId] = { groups: [], members: [] });
+        entry.inherited = entry.inherited || [];
+        entry.inherited.push({ cn: groupCn, accessLevel: level, exists: !!group, memberCount: members.length });
+        for (const uid of members) {
+          if (!entry.members.includes(uid)) entry.members.push(uid);
+        }
+      }
+    }
+
     for (const id of Object.keys(summary)) {
       summary[id].memberCount = summary[id].members.length;
+      summary[id].inherited = summary[id].inherited || [];
     }
 
     res.json({ results: summary });

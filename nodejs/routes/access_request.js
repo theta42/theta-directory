@@ -95,6 +95,45 @@ router.post('/', async (req, res, next) => {
       throw httpError(409, 'You already have access to this resource.');
     }
 
+    // ...and the same question asked properly. Membership of the one group
+    // being requested is not the same as "can already reach this": access also
+    // arrives by inheritance from a parent resource, through a site admin
+    // group, or via an enrolled agent. Checking only the group let a site
+    // administrator open a request for a host they already administer, which
+    // then sat in someone's approval queue meaning nothing.
+    try {
+      const { accessibleResources } = require('../services/access_projection');
+      const { ResourceEdge } = require('../models/resource');
+      const { Agent } = require('../models/agent');
+      const { isMetaGroup } = require('../utils/groups');
+      const { strongest } = require('../services/access_inheritance');
+
+      const [all, edges, agents, rgs] = await Promise.all([
+        Resource.list(),
+        ResourceEdge.list().catch(() => []),
+        Agent.list().catch(() => []),
+        callerGroups.length
+          ? ResourceGroup.list({ where: { groupCn: { in: callerGroups } } }).catch(() => [])
+          : []
+      ]);
+      const grants = new Map();
+      const nonInheriting = new Map();
+      for (const rg of rgs) {
+        const target = isMetaGroup(rg.groupCn) ? nonInheriting : grants;
+        target.set(rg.resourceId, strongest(target.get(rg.resourceId), rg.accessLevel || 'access'));
+      }
+      const reachable = accessibleResources(all, edges,
+        { grants, nonInheriting, memberOf: callerGroups, agents });
+      if (reachable.some(r => r.id === resource.id)) {
+        throw httpError(409, 'You already have access to this resource.');
+      }
+    } catch (err) {
+      // A 409 we raised is the answer; anything else is this check failing, and
+      // a failed convenience check must not block a legitimate request.
+      if (err.status === 409) throw err;
+      console.error('access-request: reachability pre-check failed:', err.message);
+    }
+
     const existing = await AccessRequest.findOpen(req.user.uid, groupCn);
     if (existing) throw httpError(409, 'You already have a pending request for this resource.');
 

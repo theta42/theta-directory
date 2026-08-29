@@ -178,6 +178,13 @@ router.put('/:id', async (req, res, next) => {
       updates.cron = req.body.cron;
     }
     if (req.body.enabled !== undefined) updates.enabled = !!req.body.enabled;
+    if (req.body.timeoutMs !== undefined) {
+      const ms = Number(req.body.timeoutMs);
+      if (req.body.timeoutMs === null || req.body.timeoutMs === '') updates.timeoutMs = null;
+      else if (!Number.isFinite(ms) || ms < 1000 || ms > 3600000) {
+        return res.status(400).json({ error: 'timeoutMs must be between 1000 and 3600000 (1s to 1h)' });
+      } else updates.timeoutMs = Math.round(ms);
+    }
 
     // Non-secret config: split the client's flat config so secret fields are
     // never written to the DB. Secrets are changed via PUT /:id/secrets.
@@ -285,8 +292,23 @@ router.delete('/:id', async (req, res, next) => {
     if (!inst) return res.status(404).json({ error: 'Not found' });
     await unscheduleInstance(inst.id);
     await pluginSecrets.remove(inst.id); // best-effort
+
+    // Take this source's discovery output with it. Without this, every
+    // resource and edge the plugin created outlives it forever: pruning only
+    // runs during a run of the owning source, and that source is about to stop
+    // existing. `?keepPromoted=false` also removes rows an operator promoted;
+    // the default keeps them and just drops the attribution.
+    const keepPromoted = req.query.keepPromoted !== 'false';
+    let cleanup = { removed: 0, kept: 0, edgesRemoved: 0 };
+    try {
+      const { DiscoveryReconciler } = require('../services/discovery_reconciler');
+      cleanup = await DiscoveryReconciler.forgetSource(inst.slug, { keepPromoted });
+    } catch (err) {
+      console.error(`[api_plugins] could not clean up after ${inst.slug}:`, err.message);
+    }
+
     await inst.delete();
-    res.json({ results: true });
+    res.json({ results: true, cleanup });
   } catch (err) { next(err); }
 });
 

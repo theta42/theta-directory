@@ -3,6 +3,10 @@
 const crypto = require('crypto');
 const agentKeys = require('./agent_keys');
 const { Agent } = require('../models/agent');
+const { findAgentService, ensureAgentService, hostForAgent } = require('./agent_binding');
+const { resolveAgentSite } = require('./agent_site');
+
+const nowSeconds = () => Math.floor(Date.now() / 1000);
 
 // Tracks the live WebSocket for each enrolled agent and brokers commands to it.
 //
@@ -221,17 +225,7 @@ class AgentManager {
   async reconcileServicesFromTelemetry(agent, services) {
     const { Resource, ResourceEdge } = require('../models/resource');
 
-    // Resolve this agent's host resource (its own binding, or the host a
-    // service inherits from).
-    let hostRes = null;
-    if (agent.resourceId) {
-      hostRes = await Resource.get(agent.resourceId).catch(() => null);
-    }
-    if (!hostRes) {
-      // Unbound agent: find the host that carries this agent's id in metadata.
-      const hosts = await Resource.list({ where: { kind: 'host' } }).catch(() => []);
-      hostRes = hosts.find(h => h.metadata && h.metadata.agentId === agent.id) || null;
-    }
+    const hostRes = await hostForAgent(agent);
     if (!hostRes) {
       console.warn(`[AgentManager] cannot reconcile services for ${agent.id}: no bound host resource`);
       return;
@@ -253,7 +247,6 @@ class AgentManager {
           subType: subtype,
           serviceName: name,
           hostId: hostRes.id,
-          agentId: agent.id,
           managed: true,
           discovery_sources: ['theta-agent'],
           last_seen: Date.now()
@@ -298,14 +291,7 @@ class AgentManager {
     if (!name) throw new Error('unregister_service: missing service name');
 
     const { Resource, ResourceEdge } = require('../models/resource');
-    let hostRes = null;
-    if (agent.resourceId) {
-      hostRes = await Resource.get(agent.resourceId).catch(() => null);
-    }
-    if (!hostRes) {
-      const hosts = await Resource.list({ where: { kind: 'host' } }).catch(() => []);
-      hostRes = hosts.find(h => h.metadata && h.metadata.agentId === agent.id) || null;
-    }
+    const hostRes = await hostForAgent(agent);
 
     const services = await Resource.list({ where: { kind: 'service' } }).catch(() => []);
     const target = services.find(r =>
@@ -373,24 +359,26 @@ class AgentManager {
     };
   }
 
-  // Find connected/enrolled agent bound to a resource ID (or inherited from parent Host).
+  // The agent that can act on a resource: the one bound to it directly (it IS
+  // an agent service), or the one on the host it runs under.
   async getAgentForResource(resourceId) {
     if (!resourceId) return null;
     const rows = await Agent.list().catch(() => []);
+
     let agent = rows.find(a => a.resourceId === resourceId);
     if (!agent) {
       try {
-        const { Resource } = require('../models/resource');
-        const { ResourceEdge } = require('../models/resource');
+        const { Resource, ResourceEdge } = require('../models/resource');
         const res = await Resource.get(resourceId);
-        if (res && res.kind === 'service') {
+        if (res && (res.kind === 'service' || res.kind === 'container')) {
           const edges = await ResourceEdge.list({ where: { childId: resourceId } });
           for (const edge of edges) {
-            const parentRes = await Resource.get(edge.parentId);
-            if (parentRes && parentRes.kind === 'host') {
-              agent = rows.find(a => a.resourceId === parentRes.id || (parentRes.metadata && parentRes.metadata.agentId === a.id));
-              if (agent) break;
-            }
+            const parentRes = await Resource.get(edge.parentId).catch(() => null);
+            if (!parentRes || parentRes.kind !== 'host') continue;
+            const agentService = await findAgentService(parentRes);
+            if (!agentService) continue;
+            agent = rows.find(a => a.resourceId === agentService.id);
+            if (agent) break;
           }
         }
       } catch (err) {
@@ -418,7 +406,7 @@ class AgentManager {
   // than inventing a second matcher here.
   async applyDiscoveryToDirectory(agent, discovery) {
     try {
-      const { Resource, ResourceEdge } = require('../models/resource');
+      const { Resource } = require('../models/resource');
       const hostMetadata = {
         os: discovery.os || undefined,
         kernel: discovery.kernel || undefined,
@@ -432,36 +420,27 @@ class AgentManager {
       };
       for (const k of Object.keys(hostMetadata)) if (hostMetadata[k] === undefined) delete hostMetadata[k];
 
-      let hostRes = null;
-      let serviceRes = null;
-
-      if (agent.resourceId) {
-        serviceRes = await Resource.get(agent.resourceId).catch(() => null);
-        if (serviceRes && serviceRes.kind === 'service') {
-          await serviceRes.update({ 
-            metadata: { ...serviceRes.metadata, last_seen: Date.now() },
-            updated_on: Math.floor(Date.now() / 1000)
-          });
-          const edges = await ResourceEdge.list({ where: { childId: serviceRes.id } }).catch(() => []);
-          for (const edge of edges) {
-            const parent = await Resource.get(edge.parentId).catch(() => null);
-            if (parent && parent.kind === 'host') {
-              hostRes = parent;
-              break;
-            }
-          }
-        }
-      }
-
+      // Bound agent: its service resource names the host directly, and the
+      // service's own last_seen is what makes "the agent is alive" visible on
+      // the node that represents the agent.
+      let hostRes = await hostForAgent(agent);
       if (hostRes) {
+        const serviceRes = await Resource.get(agent.resourceId).catch(() => null);
+        if (serviceRes) {
+          await serviceRes.update({
+            metadata: { ...serviceRes.metadata, last_seen: Date.now() },
+            updated_on: nowSeconds()
+          });
+        }
         const merged = { ...(hostRes.metadata || {}), ...hostMetadata };
         const sources = new Set(merged.discovery_sources || []);
         sources.add('theta-agent');
         merged.discovery_sources = [...sources];
-        await hostRes.update({ metadata: merged, updated_on: Math.floor(Date.now() / 1000) });
+        await hostRes.update({ metadata: merged, updated_on: nowSeconds() });
         return;
       }
 
+      // Unbound agent: let the shared reconciler place the host, then bind.
       if (!discovery.hostname) return;
       const { DiscoveryReconciler } = require('../services/discovery_reconciler');
 
@@ -469,19 +448,18 @@ class AgentManager {
       const hostSlug = macPart.length === 12
         ? `host-${macPart}`
         : `host-${discovery.hostname.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`;
-      
-      const sites = await Resource.list({ where: { kind: 'site' } });
-      let targetSite = null;
-      if (discovery.location && discovery.location !== 'default') {
-        targetSite = sites.find(s => s.name === discovery.location || s.slug === discovery.location || s.slug === `site_${discovery.location}`);
+
+      const targetSite = await resolveAgentSite(discovery);
+      if (!targetSite) {
+        // No fallback to sites[0]. Filing a machine under an arbitrary site is
+        // exactly the cross-site leakage the strict reconciler exists to stop,
+        // and a host in the wrong site inherits the wrong access.
+        console.error(
+          `[AgentManager] agent ${agent.id} reported host ${discovery.hostname} but no site matched ` +
+          `(location=${discovery.location || 'unset'}, public_ip=${discovery.public_ip || 'unset'}) ` +
+          `and this directory has no current-site row -- not filing it anywhere.`);
+        return;
       }
-      if (!targetSite && discovery.public_ip) {
-        targetSite = sites.find(s => {
-          const siteIp = (s.metadata?.public_ip || s.metadata?.ip || s.metadata?.address || '').trim();
-          return siteIp && (siteIp === discovery.public_ip || siteIp.includes(discovery.public_ip));
-        });
-      }
-      if (!targetSite) targetSite = sites.find(s => s.metadata?.isCurrentSite) || sites[0];
 
       await DiscoveryReconciler.reconcile('theta-agent', {
         resources: [{
@@ -491,27 +469,18 @@ class AgentManager {
           metadata: { ...hostMetadata, subType: 'linux', managed: true }
         }],
         edges: []
-      }, { location: targetSite ? targetSite.name : undefined });
+      }, { location: targetSite.name });
 
       const allHosts = await Resource.list({ where: { kind: 'host' } });
-      hostRes = allHosts.find(r => r.name.toLowerCase() === discovery.hostname.toLowerCase() || r.slug === hostSlug);
+      hostRes = allHosts.find(r => r.slug === hostSlug
+        || r.name.toLowerCase() === discovery.hostname.toLowerCase());
 
       if (hostRes) {
-        // Create the Service if it doesn't exist
-        serviceRes = await Resource.create({
-          id: crypto.randomUUID(),
-          kind: 'service',
-          name: 'Theta Agent',
-          slug: `svc-${hostRes.slug.replace(/^host-/, '')}-theta-agent`,
-          metadata: { subType: 'theta-agent', managed: true, last_seen: Date.now() },
-          created_on: Math.floor(Date.now() / 1000)
-        });
-        await ResourceEdge.create({
-          id: crypto.randomUUID(),
-          parentId: hostRes.id,
-          childId: serviceRes.id,
-          relation: 'hosts'
-        });
+        const serviceRes = await ensureAgentService(hostRes);
+        await serviceRes.update({
+          metadata: { ...serviceRes.metadata, last_seen: Date.now() },
+          updated_on: nowSeconds()
+        }).catch(() => {});
         await agent.update({ resourceId: serviceRes.id }).catch(() => {});
       }
     } catch (err) {

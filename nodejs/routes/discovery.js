@@ -34,14 +34,31 @@ async function allEdges() {
 	return ResourceEdge.list().catch(() => []);
 }
 
-// The agents that are still enrolled. A host resource keeps its
-// metadata.agentId after the agent is revoked or deleted, and access must not
-// outlive the enrolment -- so the projection is given the live set rather than
-// trusting the field.
-async function activeAgentIds() {
+// The enrolled agents. Access projection now resolves `Agent.resourceId` to the
+// theta-agent service child in the graph, so no metadata.agentId is trusted.
+// The grants a set of group CNs actually holds, as resourceId -> accessLevel.
+// The level matters now that access propagates down the tree: a viewer on a
+// site must not become an admin on its hosts.
+async function grantsFor(groupCns) {
+	const grants = new Map();
+	const nonInheriting = new Map();
+	if (!groupCns || !groupCns.length) return { grants, nonInheriting };
+
+	const { strongest } = require('../services/access_inheritance');
+	const { isMetaGroup } = require('../utils/groups');
+	const rgs = await ResourceGroup.list({ where: { groupCn: { in: groupCns } } }).catch(() => []);
+	for (const rg of rgs) {
+		// A meta/roster group grants the resource it is linked to and nothing
+		// below it. See utils/groups.js isMetaGroup.
+		const target = isMetaGroup(rg.groupCn) ? nonInheriting : grants;
+		target.set(rg.resourceId, strongest(target.get(rg.resourceId), rg.accessLevel || 'access'));
+	}
+	return { grants, nonInheriting };
+}
+
+async function enrolledAgents() {
 	const { Agent } = require('../models/agent');
-	const rows = await Agent.list().catch(() => []);
-	return new Set(rows.filter(a => !a.revoked).map(a => a.id));
+	return await Agent.list().catch(() => []);
 }
 
 // Resolve the caller's groups once per request and hand back the projection
@@ -123,14 +140,9 @@ router.get('/me', async (req, res, next) => {
 		if (req.user && req.user.isMachine) {
 			accessible = await Resource.list({ where: { id: req.resourceId } });
 		} else {
-			const ids = new Set();
-			if (user.groups.length) {
-				const rgs = await ResourceGroup.list({ where: { groupCn: { in: user.groups } } });
-				for (const rg of rgs) ids.add(rg.resourceId);
-			}
 			const all = await Resource.list();
 			accessible = accessibleResources(all, await allEdges(),
-				{ groupIds: ids, memberOf: user.groups, activeAgentIds: await activeAgentIds() });
+				{ ...(await grantsFor(user.groups)), memberOf: user.groups, agents: await enrolledAgents() });
 		}
 		// resolvedAddress is the whole point of /me ("how do I reach it") and a
 		// service inherits it from its host, so it must be computed here rather
@@ -155,19 +167,14 @@ router.get(['/access/:uid', '/access/:uid/:slug'], async (req, res, next) => {
 		if (!targetUser) return res.status(404).json(envelope({ error: 'User not found' }));
 
 		const groups = await groupCns(targetUser);
-		const ids = new Set();
-		if (groups.length) {
-			const rgs = await ResourceGroup.list({ where: { groupCn: { in: groups } } });
-			for (const rg of rgs) ids.add(rg.resourceId);
-		}
-		
+
 		// The whole catalog, not just the requested slug: a service inherits
 		// access from its host, so filtering to one slug BEFORE the projection
 		// would hide the host the decision depends on and answer "no access"
 		// for a service the user can plainly reach.
 		const all = await Resource.list();
 		let accessible = accessibleResources(all, await allEdges(),
-			{ groupIds: ids, memberOf: groups, activeAgentIds: await activeAgentIds() });
+			{ ...(await grantsFor(groups)), memberOf: groups, agents: await enrolledAgents() });
 		if (req.params.slug) accessible = accessible.filter(r => r.slug === req.params.slug);
 		
 		accessible = await Resource.withResolvedAddress(accessible);
@@ -201,38 +208,47 @@ router.post('/promote/:slug', async (req, res, next) => {
 		const resource = await Resource.getBySlug(req.params.slug);
 		if (!resource) return res.status(404).json(envelope({ error: 'Not found' }));
 		
-		const { Group } = require('../models/group_ldap');
-		
-		const accessGroup = `${resource.slug}_access`;
-		const adminGroup = `${resource.slug}_admin`;
-		
-		// Create groups if they don't exist
-		try { await Group.get(accessGroup); } catch (e) {
-			if (e.status === 404) await Group.add({ name: accessGroup, description: `Access to ${resource.name}`, owner: req.user.dn });
-			else throw e;
-		}
-		try { await Group.get(adminGroup); } catch (e) {
-			if (e.status === 404) await Group.add({ name: adminGroup, description: `Admin access to ${resource.name}`, owner: req.user.dn });
-			else throw e;
-		}
-		
-		// Link them. ensure(), not create(): a re-submitted/retried Promote
-		// click (or the modal being saved twice) had no existence check here,
-		// so repeated promotion attempts on the same resource accumulated
-		// duplicate access/admin group rows -- see ResourceGroup.ensure()'s
-		// comment on models/resource.js for why this can't rely on a DB
-		// constraint instead.
-		await ResourceGroup.ensure(resource.id, accessGroup, 'user');
-		await ResourceGroup.ensure(resource.id, adminGroup, 'admin');
-		
-		const meta = resource.metadata || {};
-		meta.managed = true;
+		// Groups come from services/resource_groups.js, the same path a resource
+		// created through the Directory takes. This handler used to mint its own
+		// `<slug>_access` / `<slug>_admin` pair at levels 'user' and 'admin' --
+		// a naming scheme no consumer parses, and a level ('user') the access
+		// model does not rank, so a promoted resource's access group granted
+		// nothing and site admins could not reach it.
+		const { groupKind, ensureSiteGroups, provisionResourceGroups } = require('../services/resource_groups');
+		const groupsUtil = require('../utils/groups');
+
 		// `Resource.update` is not a static — `update` is an instance method
 		// (@simpleworkjs/orm). Load a fresh instance and call it on that.
+		//
+		// The new object matters as much as the fresh instance: handing the ORM
+		// back the very object it already holds as `metadata` is not seen as a
+		// change and the row is silently not written. This worked only because
+		// the reload made it a different reference; spelling it out so it keeps
+		// working if the reload ever goes away.
 		const inst = await Resource.get(resource.id);
-		await inst.update({ metadata: meta });
+		await inst.update({ metadata: { ...(inst.metadata || {}), managed: true } });
 
-		res.json(envelope({ success: true, groups: [accessGroup, adminGroup] }));
+		// Promotion is what makes a discovered row catalog content, so the
+		// subtype's own rule about groups only applies from here.
+		const gKind = groupKind(inst);
+		let created = [];
+		if (gKind) {
+			const siteSlug = await Resource.findAncestorSiteSlug(inst.id).catch(() => null);
+			if (!siteSlug) {
+				return res.status(409).json(envelope({
+					error: 'This resource has no site ancestor, so its groups cannot be named. Give it a parent first.'
+				}));
+			}
+			await ensureSiteGroups(siteSlug, req.user.dn, siteSlug);
+			await provisionResourceGroups(inst, gKind, siteSlug, req.user.dn);
+			const nameSlug = groupsUtil.resourceNameSlug(inst.slug);
+			created = [
+				groupsUtil.resourceGroupCns(siteSlug, gKind, nameSlug, 'access'),
+				groupsUtil.resourceGroupCns(siteSlug, gKind, nameSlug, 'admin')
+			];
+		}
+
+		res.json(envelope({ success: true, groups: created }));
 	} catch (err) { next(err); }
 });
 

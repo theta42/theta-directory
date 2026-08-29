@@ -16,9 +16,32 @@ module.exports = {
     { key: 'url',      label: 'Controller URL', type: 'url',      required: true, placeholder: 'https://unifi.example:8443' },
     { key: 'user',     label: 'Username',       type: 'text',     required: true },
     { key: 'password', label: 'Password',       type: 'password', required: true, secret: true },
+    // The UniFi controller's own site name, which is NOT the directory's site.
+    // This was hardcoded to `default`, so a controller managing several UniFi
+    // sites only ever reported the first one.
+    { key: 'unifiSite', label: 'UniFi site name', type: 'text', required: false, placeholder: 'default' },
+    // Clients are every phone, TV, laptop and doorbell on the LAN. Importing
+    // them turns a directory of managed infrastructure into a DHCP lease table,
+    // so it is off unless asked for.
+    { key: 'importClients', label: 'Import connected clients as hosts', type: 'boolean', required: false, default: false },
     { key: 'location', label: 'Location / Site (optional)', type: 'site_select', required: false, placeholder: 'Default Site' },
     { key: 'autoPromote', label: 'Auto-promote to Directory', type: 'boolean', required: false, default: false }
   ],
+
+  // What a UniFi device model is, in the directory's vocabulary.
+  //
+  // UniFi reports a `type` ('uap', 'usw', 'ugw', 'udm') and a model string.
+  // Emitting NO subtype -- which this plugin used to do -- is not neutral: an
+  // empty subType falls in the ssh-capable bucket, so every switch and access
+  // point a controller knew about was quietly offered as a jump target.
+  classifyDevice: (dev) => {
+    const type = String((dev && dev.type) || '').toLowerCase();
+    const model = String((dev && dev.model) || '').toLowerCase();
+    if (type === 'uap' || /^(u6|uap|uwb|u7)/.test(model)) return 'unifi_ap';
+    if (type === 'usw' || /^(us|usw|usl)/.test(model)) return 'unifi_switch';
+    if (type === 'ugw' || type === 'udm' || /^(ugw|udm|uxg)/.test(model)) return 'router';
+    return 'unknown';
+  },
 
   // "Test": attempt the UDM login (falls back to the legacy controller login);
   // succeeds only if one of the two login endpoints returns 200.
@@ -85,45 +108,82 @@ module.exports = {
     const edges = [];
 
     const basePath = isUdm ? '/proxy/network' : '';
+    const unifiSite = (config.unifiSite || 'default').trim() || 'default';
 
-    // 2. Get Devices (Switches/APs)
-    const devRes = await fetch(`${url}${basePath}/api/s/default/stat/device`, { headers, agent });
+    // 2. Devices (switches / APs / gateways)
+    const devRes = await fetch(`${url}${basePath}/api/s/${encodeURIComponent(unifiSite)}/stat/device`, { headers, agent });
+    if (!devRes.ok) throw new Error(`UniFi device query failed (${devRes.status}) for site "${unifiSite}"`);
     const devData = (await devRes.json()).data || [];
 
     for (const dev of devData) {
+      if (!dev.mac) continue;
       const devSlug = `unifi-device-${dev.mac.replace(/:/g, '')}`;
       resources.push({
-        kind: 'network_device',
-        name: dev.name || dev.model,
+        kind: 'host',
+        name: dev.name || dev.model || dev.mac,
         slug: devSlug,
         metadata: {
+          subType: module.exports.classifyDevice(dev),
+          subTypeSource: 'unifi-inference',
           make: 'Ubiquiti',
           model: dev.model,
           firmware: dev.version,
-          interfaces: [{ mac: dev.mac, ip: dev.ip }]
+          // The MAC is UniFi's own stable key for a device, and the reconciler
+          // treats a MAC as a strong identity. Without a sourceId every re-run
+          // had to fall back to weak matching.
+          sourceId: dev.mac,
+          macAddress: dev.mac,
+          ip: dev.ip || undefined,
+          interfaces: [{ mac: dev.mac, ip: dev.ip || null }]
         }
       });
     }
 
-    // 3. Get Clients
-    const clientRes = await fetch(`${url}${basePath}/api/s/default/stat/sta`, { headers, agent });
-    const clientData = (await clientRes.json()).data || [];
+    // Uplink topology, between devices we actually reported.
+    const known = new Set(resources.map(r => r.slug));
+    for (const dev of devData) {
+      const uplinkMac = dev.uplink && dev.uplink.uplink_mac;
+      if (!dev.mac || !uplinkMac) continue;
+      const childSlug = `unifi-device-${dev.mac.replace(/:/g, '')}`;
+      const parentSlug = `unifi-device-${uplinkMac.replace(/:/g, '')}`;
+      if (known.has(parentSlug) && known.has(childSlug)) {
+        edges.push({ parentSlug, childSlug, relation: 'hosts' });
+      }
+    }
 
-    for (const client of clientData) {
-      const clientSlug = `unifi-client-${client.mac.replace(/:/g, '')}`;
-      resources.push({
-        kind: 'host', // Or unmanaged_device initially
-        name: client.hostname || client.name || client.mac,
-        slug: clientSlug,
-        metadata: {
-          interfaces: [{ mac: client.mac, ip: client.ip }]
+    // 3. Clients, only when asked for. Every phone and TV on the LAN is a
+    // client; importing them by default turned the directory into a DHCP lease
+    // table, and each one arrived with no subtype -- which made it ssh-capable.
+    if (config.importClients) {
+      const clientRes = await fetch(`${url}${basePath}/api/s/${encodeURIComponent(unifiSite)}/stat/sta`, { headers, agent });
+      if (!clientRes.ok) throw new Error(`UniFi client query failed (${clientRes.status}) for site "${unifiSite}"`);
+      const clientData = (await clientRes.json()).data || [];
+
+      for (const client of clientData) {
+        if (!client.mac) continue;
+        const clientSlug = `unifi-client-${client.mac.replace(/:/g, '')}`;
+        resources.push({
+          kind: 'host',
+          name: client.hostname || client.name || client.mac,
+          slug: clientSlug,
+          metadata: {
+            // A DHCP client is not something we can classify, and guessing
+            // would make it a jump target. `unknown` is not ssh-capable.
+            subType: 'unknown',
+            subTypeSource: 'unifi-client',
+            sourceId: client.mac,
+            macAddress: client.mac,
+            ip: client.ip || undefined,
+            interfaces: [{ mac: client.mac, ip: client.ip || null }]
+          }
+        });
+
+        // Which switch/AP it is on. `hosts`, not a bespoke relation: the graph
+        // has one containment relation and the reconciler prunes on it.
+        const apSlug = client.ap_mac ? `unifi-device-${client.ap_mac.replace(/:/g, '')}` : null;
+        if (apSlug && known.has(apSlug)) {
+          edges.push({ parentSlug: apSlug, childSlug: clientSlug, relation: 'hosts' });
         }
-      });
-      
-      // If we know which switch/AP it's on
-      if (client.ap_mac) {
-        const apSlug = `unifi-device-${client.ap_mac.replace(/:/g, '')}`;
-        edges.push({ parentSlug: apSlug, childSlug: clientSlug, relation: 'connected_to' });
       }
     }
 

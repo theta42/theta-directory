@@ -10,6 +10,8 @@ const agentKeys = require('../utils/agent_keys');
 const ldapTunnel = require('../utils/ldap_tunnel');
 const { Agent, AgentJoinKey } = require('../models/agent');
 const { replicateOnFinish } = require('../utils/replicate_on_finish');
+const { isAgentService, ensureAgentService } = require('../utils/agent_binding');
+const { resolveSiteHint, currentSite } = require('../utils/agent_site');
 
 const ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_admin'];
 
@@ -182,17 +184,33 @@ router.get('/nodes', async (req, res, next) => {
 // get a new one.
 router.post('/enroll', async (req, res, next) => {
   try {
-    const { name, resourceId, description } = req.body || {};
+    const { name, resourceId, siteId, description } = req.body || {};
     if (!name || !String(name).trim()) {
       return res.status(400).json({ status: 'error', message: 'name is required' });
     }
+    if (resourceId && siteId) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'pass resourceId (bind to an existing host) or siteId (create a host), not both'
+      });
+    }
 
+    const { Resource } = require('../models/resource');
     if (resourceId) {
-      const { Resource } = require('../models/resource');
       const resource = await Resource.get(resourceId);
       if (!resource) return res.status(400).json({ status: 'error', message: 'resourceId does not exist' });
       if (resource.kind !== 'host') {
         return res.status(400).json({ status: 'error', message: 'an agent can only be bound to a host resource' });
+      }
+    }
+    // siteId is the operator-driven mirror of join-key self-enrolment: the
+    // host does not exist yet, so the directory creates it under the named
+    // site along with the agent's service. Without this, enrolling from the UI
+    // required creating the host by hand first.
+    if (siteId) {
+      const site = await Resource.get(siteId).catch(() => null);
+      if (!site || site.kind !== 'site') {
+        return res.status(400).json({ status: 'error', message: 'siteId must refer to a site resource' });
       }
     }
 
@@ -200,10 +218,14 @@ router.post('/enroll', async (req, res, next) => {
       name: String(name).trim(),
       description,
       resourceId: resourceId || null,
+      siteId: siteId || null,
       enrolledBy: req.user.uid
     });
 
-    logAgentAudit('enroll', { actor: req.user.uid, agentId: agent.id, agentName: agent.name, resourceId: resourceId || null });
+    logAgentAudit('enroll', {
+      actor: req.user.uid, agentId: agent.id, agentName: agent.name,
+      resourceId: agent.resourceId || null, siteId: siteId || null
+    });
 
     replicateOnFinish(res, 'agent-enrolled');
     pushAgentToMaster(agent, token);
@@ -233,11 +255,22 @@ router.put('/nodes/:id', async (req, res, next) => {
         const { Resource } = require('../models/resource');
         const resource = await Resource.get(req.body.resourceId);
         if (!resource) return res.status(400).json({ status: 'error', message: 'resourceId does not exist' });
-        if (resource.kind !== 'host') {
-          return res.status(400).json({ status: 'error', message: 'an agent can only be bound to a host resource' });
+        // A host is accepted as a convenience -- it is what an operator picks
+        // in the UI -- but the binding itself is always to the host's
+        // theta-agent service.
+        if (resource.kind === 'host') {
+          patch.resourceId = (await ensureAgentService(resource)).id;
+        } else if (isAgentService(resource)) {
+          patch.resourceId = resource.id;
+        } else {
+          return res.status(400).json({
+            status: 'error',
+            message: 'an agent can only be bound to a host or to a theta-agent service resource'
+          });
         }
+      } else {
+        patch.resourceId = null;
       }
-      patch.resourceId = req.body.resourceId || null;
     }
 
     const updated = await agent.update(patch);
@@ -249,23 +282,28 @@ router.put('/nodes/:id', async (req, res, next) => {
 });
 
 
-// Drop the agent binding a host resource carries.
-//
-// metadata.agentId is what tells the rest of the Directory "this machine is
-// under management by that agent" -- the access projection reads it to decide
-// whether an agent-enrolled host is reachable without a per-host grant, and the
-// driver registry uses it to pick the agent driver. Leaving it behind on revoke
-// or delete leaves the resource claiming a binding that no longer exists.
+// Remove the theta-agent service child and any edges when an enrollment is
+// revoked or deleted. The host itself is preserved as a catalog resource; only
+// the graph link to the agent is removed.
 async function unbindAgentFromResources(agent) {
   try {
-    const { Resource } = require('../models/resource');
-    const all = await Resource.list().catch(() => []);
-    for (const r of all) {
-      if (!r.metadata || r.metadata.agentId !== agent.id) continue;
-      const metadata = { ...r.metadata };
-      delete metadata.agentId;
-      await r.update({ metadata }).catch(() => {});
-    }
+    const { Resource, ResourceEdge, ResourceGroup } = require('../models/resource');
+    if (!agent.resourceId) return;
+    const serviceRes = await Resource.get(agent.resourceId).catch(() => null);
+    if (!isAgentService(serviceRes)) return;
+
+    // Dependents FIRST, both directions, same ordering rule as
+    // DELETE /api/directory-admin/resources/:id: there is no transaction here,
+    // so a row deleted before its edges leaves edges pointing at an id that no
+    // longer exists -- invisible in the UI and poisonous to getGraph().
+    const [asChild, asParent, groups] = await Promise.all([
+      ResourceEdge.list({ where: { childId: serviceRes.id } }).catch(() => []),
+      ResourceEdge.list({ where: { parentId: serviceRes.id } }).catch(() => []),
+      ResourceGroup.list({ where: { resourceId: serviceRes.id } }).catch(() => [])
+    ]);
+    for (const g of groups) await g.delete().catch(() => {});
+    for (const e of [...asChild, ...asParent]) await e.delete().catch(() => {});
+    await serviceRes.delete().catch(() => {});
   } catch (err) {
     console.error(`[api_agent] could not unbind agent ${agent.id} from its resources:`, err.message);
   }
@@ -506,6 +544,35 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
         const joinKey = await AgentJoinKey.authenticate(token);
         if (joinKey) {
           const hostname = (url.searchParams.get('hostname') || '').trim();
+
+          // The site the agent believes it is at: `location` from its config,
+          // or the site of an mDNS announcement fronting the very host it is
+          // talking to (theta-agent's resolveSiteHint, local_discovery.go).
+          // Absent, the directory files the host under its own site.
+          //
+          // A hint that is PRESENT but matches nothing is rejected rather than
+          // silently ignored: the agent is telling us it belongs somewhere
+          // specific, and quietly filing it elsewhere is how a host ends up in
+          // the wrong site inheriting the wrong access.
+          const siteHint = (url.searchParams.get('site') || '').trim();
+          let site = null;
+          if (siteHint) {
+            site = await resolveSiteHint(siteHint);
+            if (!site) {
+              logAgentAudit('join_rejected', { remoteAddr, reason: 'site not found', site: siteHint });
+              try { ws.close(4001, `Site not found: ${siteHint}`); } catch (e) {}
+              return;
+            }
+          } else {
+            site = await currentSite();
+            if (!site) {
+              logAgentAudit('join_rejected', { remoteAddr, reason: 'no current site' });
+              try {
+                ws.close(4001, 'This directory has no current site; pass ?site=<slug> or set one in the directory');
+              } catch (e) {}
+              return;
+            }
+          }
           let existingAgent = null;
           if (hostname) {
             const matches = await Agent.list({ where: { name: hostname } });
@@ -520,6 +587,7 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
           } else {
             const enrolled = await Agent.enroll({
               name: hostname || `agent-${Date.now().toString(36)}`,
+              siteId: site.id,
               description: `Self-enrolled with join key ${joinKey.keyPrefix}`,
               enrolledBy: `join-key:${joinKey.label}`
             });

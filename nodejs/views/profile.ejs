@@ -423,7 +423,7 @@
 										<td><a href="{{resolvedAddress}}" target="_blank"><code>{{resolvedAddress}}</code></a></td>
 										<td>{{description}}</td>
 										<td>
-											{{#metadata.isProduction}}<span class="badge bg-danger mb-1">Prod</span><br>{{/metadata.isProduction}}
+											{{#metadata.environment}}<span class="badge bg-danger mb-1">{{metadata.environment}}</span><br>{{/metadata.environment}}
 											<span class="badge bg-secondary">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
 										</td>
 									</tr>

@@ -3,6 +3,19 @@ const { Model } = require('@simpleworkjs/orm');
 
 const { Group } = require('./group_ldap');
 
+// The environments a resource may be classified as, most critical first.
+// Operator-owned: discovery plugins never write `metadata.environment`.
+// Exported so the status-rule evaluator ranks environments the same way the
+// graph does rather than keeping a second copy of this order.
+const ENV_RANK = { prod: 3, testing: 2, dev: 1 };
+const ENVIRONMENTS = Object.keys(ENV_RANK);
+
+// How bad a status is, for rolling up to a parent. `unknown` deliberately
+// outranks `ok`: a site with nine healthy hosts and one it has heard nothing
+// about is not a healthy site, it is a site with a blind spot, and hiding that
+// behind a green dot is the failure mode a status roll-up exists to prevent.
+const STATUS_RANK = { critical: 4, error: 4, warning: 3, unknown: 2, ok: 1 };
+
 class Resource extends Model {
   static exposedMethods = [
     { method: 'search', route: 'resources', verb: 'get', args: { from: 'query' } },
@@ -68,6 +81,14 @@ class Resource extends Model {
       return obj;
     });
     
+    const childIndex = new Map(); // parentId -> [childId]
+    for (const e of edges) {
+      if (!e.parentId || !e.childId) continue;
+      if (!childIndex.has(e.parentId)) childIndex.set(e.parentId, []);
+      childIndex.get(e.parentId).push(e.childId);
+    }
+    const childIdsOf = (resId) => childIndex.get(resId) || [];
+
     // Bubble up tags: if any child has a tag, parent inherits it
     const tagCache = new Map(); // resId -> Set of tags
     function getTags(resId, visited = new Set()) {
@@ -81,8 +102,7 @@ class Resource extends Model {
       const tags = new Set(r.metadata.tags || []);
       
       // Check children
-      const childrenIds = edges.filter(e => e.parentId === resId).map(e => e.childId);
-      for (const cid of childrenIds) {
+      for (const cid of childIdsOf(resId)) {
         const childTags = getTags(cid, visited);
         for (const tag of childTags) {
           tags.add(tag);
@@ -93,12 +113,92 @@ class Resource extends Model {
       return tags;
     }
     
+    // Bubble up environment: a resource is as critical as the most critical
+    // thing running under it. If one LXC is prod, so are its host, its
+    // cluster and its site -- that is the whole point of the field, and it is
+    // why `metadata.environment` is operator-owned and never written by a
+    // discovery plugin (a plugin that derived it from power state would
+    // re-label an entire site every time a VM was shut down).
+    //
+    // `bubbled_environment` is ALWAYS this string, everywhere it appears --
+    // graph output, UI, and the status-rule context in services/scheduler.js.
+    const envCache = new Map(); // resId -> most critical environment string
+    function getEnvironment(resId, visited = new Set()) {
+      if (envCache.has(resId)) return envCache.get(resId);
+      if (visited.has(resId)) return { env: undefined, truncated: true };
+
+      visited.add(resId);
+      const r = resObjs.find(x => x.id === resId);
+      if (!r) return { env: undefined, truncated: false };
+
+      let best = ENV_RANK[r.metadata.environment] ? r.metadata.environment : undefined;
+      let truncated = false;
+
+      for (const cid of childIdsOf(resId)) {
+        const child = getEnvironment(cid, visited);
+        if (child.truncated) truncated = true;
+        if (ENV_RANK[child.env] && (!best || ENV_RANK[child.env] > ENV_RANK[best])) {
+          best = child.env;
+        }
+      }
+
+      const result = { env: best, truncated };
+      // A result the cycle guard cut short is not the real answer for this
+      // node -- caching it would hand that wrong answer to every later
+      // lookup, in an order-dependent way that is miserable to debug.
+      if (!truncated) envCache.set(resId, result);
+      return result;
+    }
+
+    // Bubble up status: the worst thing under you, so a collapsed tree still
+    // tells the truth. Without this a site showed no dot at all -- every status
+    // in the directory was a leaf property, and "see the status of a resource
+    // and its children at a glance" needed the tree fully expanded and a human
+    // to scan it.
+    //
+    // `bubbled_status` is only ever a summary. A resource's own evaluated
+    // `status` is untouched, and the two are shown differently.
+    const statusCache = new Map();
+    function getStatus(resId, visited = new Set()) {
+      if (statusCache.has(resId)) return statusCache.get(resId);
+      if (visited.has(resId)) return { status: undefined, from: null, truncated: true };
+
+      visited.add(resId);
+      const r = resObjs.find(x => x.id === resId);
+      if (!r) return { status: undefined, from: null, truncated: false };
+
+      let best = STATUS_RANK[r.metadata.status] ? r.metadata.status : undefined;
+      let from = best ? r : null;
+      let truncated = false;
+
+      for (const cid of childIdsOf(resId)) {
+        const child = getStatus(cid, visited);
+        if (child.truncated) truncated = true;
+        if (STATUS_RANK[child.status] && (!best || STATUS_RANK[child.status] > STATUS_RANK[best])) {
+          best = child.status;
+          from = child.from;
+        }
+      }
+
+      const result = { status: best, from, truncated };
+      if (!truncated) statusCache.set(resId, result);
+      return result;
+    }
+
     let maxUpdated = 0;
     resObjs.forEach(r => {
       r.metadata.bubbled_tags = Array.from(getTags(r.id));
-      // Migrate old isProduction to a tag if it exists and hasn't been migrated
-      if (r.metadata.isProduction && !r.metadata.bubbled_tags.includes('prod')) {
-        r.metadata.bubbled_tags.push('prod');
+      const bubbledEnv = getEnvironment(r.id).env;
+      if (bubbledEnv) r.metadata.bubbled_environment = bubbledEnv;
+
+      const rolled = getStatus(r.id);
+      if (rolled.status) {
+        r.metadata.bubbled_status = rolled.status;
+        // Which descendant is responsible, so the UI can say "critical —
+        // dl380" rather than leaving someone to expand the tree and hunt.
+        if (rolled.from && rolled.from.id !== r.id) {
+          r.metadata.bubbled_status_from = rolled.from.name || rolled.from.slug;
+        }
       }
       if (r.updated_on && r.updated_on > maxUpdated) maxUpdated = r.updated_on;
     });
@@ -179,16 +279,15 @@ class Resource extends Model {
   // whose kind === 'site', returning its slug (or null if none exists -- a
   // top-level resource with no site parent keeps its unprefixed group name).
   static async findAncestorSiteSlug(resourceId, visited = new Set()) {
-    if (visited.has(resourceId)) return null;
+    if (!resourceId || visited.has(resourceId)) return null;
     visited.add(resourceId);
 
     const parentEdges = await ResourceEdge.list({ where: { childId: resourceId } });
     for (const edge of parentEdges) {
-      const parent = await this.get(edge.parentId);
-      if (!parent) continue;
-      if (parent.kind === 'site') return parent.slug;
-      const found = await this.findAncestorSiteSlug(parent.id, visited);
-      if (found) return found;
+      const parent = await Resource.get(edge.parentId);
+      if (parent && parent.kind === 'site') return parent.slug;
+      const upstream = await this.findAncestorSiteSlug(edge.parentId, visited);
+      if (upstream) return upstream;
     }
     return null;
   }
@@ -199,15 +298,13 @@ class Resource extends Model {
     if (!resourceId || visited.has(resourceId)) return [];
     visited.add(resourceId);
 
+    const parentEdges = await ResourceEdge.list({ where: { childId: resourceId } });
     const ancestors = [];
-    const allEdges = await ResourceEdge.list().catch(() => []);
-    const parentEdges = allEdges.filter(e => e.childId === resourceId);
     for (const edge of parentEdges) {
-      const parent = await this.get(edge.parentId).catch(() => null);
-      if (!parent) continue;
-      ancestors.push(parent);
-      const higher = await this.findAllAncestors(parent.id, visited);
-      ancestors.push(...higher);
+      const parent = await Resource.get(edge.parentId);
+      if (parent) ancestors.push(parent);
+      const upstream = await this.findAllAncestors(edge.parentId, visited);
+      ancestors.push(...upstream);
     }
     return ancestors;
   }
@@ -216,39 +313,51 @@ class Resource extends Model {
 class ResourceEdge extends Model {
   static fields = {
     id: { type: 'uuid', primaryKey: true },
-    parent: { type: 'hasOne', model: 'Resource' }, // Creates parentId
-    child: { type: 'hasOne', model: 'Resource' }, // Creates childId
-    relation: { type: 'string', isRequired: true },
+    parentId: { type: 'uuid', isRequired: true },
+    childId: { type: 'uuid', isRequired: true },
+    relation: { type: 'string', default: 'hosts' },
     // Which discovery source created this edge (e.g. 'proxmox'). Null for
     // manual edges. The reconciler uses it to reparent and prune: a resource
-    // must never keep a parent its source no longer reports.
-    source: { type: 'string' }
+    // must never keep a parent its source no longer reports, and a source may
+    // only ever prune edges it created itself. Dropping this field does not
+    // fail loudly -- @simpleworkjs/orm silently discards keys that are not
+    // declared here, so `source` reads back undefined, every `e.source ===`
+    // test goes false, and reparenting/pruning stop happening at all.
+    source: { type: 'string' },
+    created_on: { type: 'integer' }
   };
 }
 
 class ResourceGroup extends Model {
   static fields = {
     id: { type: 'uuid', primaryKey: true },
-    resource: { type: 'hasOne', model: 'Resource' }, // Creates resourceId
+    resourceId: { type: 'uuid', isRequired: true },
     groupCn: { type: 'string', isRequired: true },
-    accessLevel: { type: 'string', isRequired: true }
+    accessLevel: { type: 'string', default: 'viewer' },
+    created_on: { type: 'integer' }
   };
 
-  // No DB-level unique constraint on (resourceId, groupCn) exists, so callers
-  // MUST check-then-create rather than relying on a constraint violation to
-  // catch a dupe. A caller that skips this (raw ResourceGroup.create()) and
-  // runs more than once for the same resource -- e.g. discovery reconciling
-  // the same LXC from multiple Proxmox cluster nodes -- silently accumulates
-  // duplicate access/admin rows every pass, with no error to notice it by.
+  // Idempotent link between a resource and a group. The table has no unique
+  // constraint on (resourceId, groupCn), so callers must check first to avoid
+  // duplicates on retries or periodic self-heals.
   static async ensure(resourceId, groupCn, accessLevel) {
-    const existing = await this.list({ where: { resourceId, groupCn } });
-    if (existing.length) return existing[0];
-    return this.create({ id: crypto.randomUUID(), resourceId, groupCn, accessLevel });
+    const existing = await this.list({ where: { resourceId, groupCn }, limit: 1 });
+    if (existing && existing[0]) return existing[0];
+    return this.create({
+      id: require('crypto').randomUUID(),
+      resourceId,
+      groupCn,
+      accessLevel,
+      created_on: Math.floor(Date.now() / 1000)
+    });
   }
 }
 
 module.exports = {
   Resource,
   ResourceEdge,
-  ResourceGroup
+  ResourceGroup,
+  ENV_RANK,
+  ENVIRONMENTS,
+  STATUS_RANK
 };

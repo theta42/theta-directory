@@ -56,7 +56,16 @@ beforeAll(async () => {
 	// legitimate requester. Removing only _access would leave the grant intact
 	// through the nesting, which is exactly the kind of thing these tests exist
 	// to catch.
-	for (const cn of [adminGroupCn, accessGroupCn]) {
+	//
+	// Since access inheritance landed, stepping out of the two HOST groups is no
+	// longer enough. Creating the site seeds the creator into
+	// `<site>_super_admin`, which is linked to the site resource -- and a site
+	// admin reaches every resource at that site, exactly as utils/groups.js
+	// hasPermission() has always said they do. Leaving that membership in place
+	// makes the requester an administrator of the very site they are requesting
+	// into, which is not what this flow is about.
+	const siteAdminGroupCn = `${siteSlug}_super_admin`;
+	for (const cn of [adminGroupCn, accessGroupCn, siteAdminGroupCn]) {
 		await request(app)
 			.delete(`/api/group/${encodeURIComponent(cn)}/test`)
 			.set('auth-token', token);
