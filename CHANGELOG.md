@@ -1,3 +1,12 @@
+## [2.36.1] - 2026-08-29
+
+### Added
+- **Subtype Template Editor UI**: Added dedicated Subtype Templates tab in Directory Management (`views/directory.ejs`) featuring catalog view, instant text search, target kind & category filters, visual JSON Schema property builder, raw JSON editor mode, status evaluation rules editor, and full template CRUD modal.
+
+### Changed
+- **Directory Resource Details Tab & Dynamic Schema**: Moved dynamic schema-driven subtype configuration fields from the General tab to the Details tab inside a structured card, rendering declared schema properties (ports, db names, cluster info, flags) cleanly per subtype.
+- **Unified Configuration Page Save & Reset**: Moved the Reset and Save buttons on the Settings/Configuration page (`views/conf.ejs`) to a dedicated card footer aligned right, and consolidated separate per-tab save handlers into a single unified action handler.
+
 ## [2.36.0] - 2026-08-29
 
 ### Fixed

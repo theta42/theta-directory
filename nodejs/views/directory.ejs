@@ -32,6 +32,11 @@
                 <i class="fa-solid fa-plug"></i> Discovery Plugins
               </button>
             </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="subtypes-tab" data-bs-toggle="tab" data-bs-target="#subtypes-tab-pane" type="button" role="tab" aria-controls="subtypes-tab-pane" aria-selected="false" onclick="loadSubtypeTemplates()">
+                <i class="fa-solid fa-shapes"></i> Subtype Templates
+              </button>
+            </li>
           </ul>
         </div>
         <div class="card-body p-0">
@@ -270,6 +275,51 @@
           <div id="discovery-plugins-list" class="mt-3"></div>
         </div>
       </div>
+
+      <!-- Subtype Templates Tab Pane -->
+      <div class="tab-pane fade" id="subtypes-tab-pane" role="tabpanel" aria-labelledby="subtypes-tab">
+        <div class="p-4 bg-white border-top">
+          <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <div>
+              <h5 class="fw-bold mb-1"><i class="fa-solid fa-shapes text-primary me-2"></i> Subtype Templates</h5>
+              <p class="text-muted small mb-0">Custom resource types, JSON schemas, placement constraints, and health status rules.</p>
+            </div>
+            <div class="d-flex flex-wrap gap-2 align-items-center">
+              <input type="text" id="subtype-search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search templates..." onkeyup="renderSubtypeTemplatesTable()" style="width: 200px;">
+              <select id="subtype-kind-filter" class="form-select form-select-sm shadow-sm" onchange="renderSubtypeTemplatesTable()" style="width: 130px;">
+                <option value="">All Kinds</option>
+                <option value="site">Site</option>
+                <option value="host">Host</option>
+                <option value="service">Service</option>
+              </select>
+              <select id="subtype-cat-filter" class="form-select form-select-sm shadow-sm" onchange="renderSubtypeTemplatesTable()" style="width: 150px;">
+                <option value="">All Categories</option>
+              </select>
+              <button class="btn btn-sm btn-outline-primary" onclick="loadSubtypeTemplates()"><i class="fas fa-rotate me-1"></i> Refresh</button>
+              <button class="btn btn-sm btn-primary shadow-sm" onclick="openSubtypeModal()"><i class="fas fa-plus me-1"></i> New Subtype Template</button>
+            </div>
+          </div>
+          <div class="actionMessage" id="subtype-templates-action-msg" style="display:none"></div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0" id="subtype-templates-table">
+              <thead class="table-light">
+                <tr>
+                  <th>Template / Subtype</th>
+                  <th>Target Kind</th>
+                  <th>Category</th>
+                  <th>Capabilities</th>
+                  <th>Schema Properties</th>
+                  <th>Status Rules</th>
+                  <th class="text-end pe-3">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="subtype-templates-list">
+                <tr><td colspan="7" class="text-center text-muted py-4"><i class="fas fa-spinner fa-spin me-2"></i>Loading subtype templates...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
           </div>
         </div>
       </div>
@@ -333,14 +383,9 @@
         <div class="form-text mb-2" id="res-subtype-help"></div>
         <label class="form-label">Sub Type</label>
         <input type="text" id="res-subtype" class="form-control shadow-sm" placeholder="Pick a template above, or type a custom subtype">
+        <div class="form-text mb-2 text-muted"><i class="fa-solid fa-circle-info me-1 text-primary"></i>Subtype-specific configuration fields are configured on the <strong>Details</strong> tab.</div>
       </div>
     </div>
-
-    <!-- The subtype's own declared fields, rendered from its template schema.
-         Directly under the picker that selects the template: these used to
-         render on the Details tab, two clicks from the control that changes
-         them, so picking a subtype appeared to do nothing at all. -->
-    <div id="dynamic-form-fields"></div>
 
     <div class="row mb-3">
       <div class="col-6">
@@ -421,10 +466,23 @@
 
     <div class="row mb-3" id="host-parent-container" style="display: none;">
       <div class="col-12">
-        <label class="form-label text-primary">Parent Resource <span class="text-danger">*</span></label>
+        <label class="form-label text-primary fw-bold">Parent Resource <span class="text-danger">*</span></label>
         <select id="res-host-id" class="form-select shadow-sm border-primary">
           <option value="">-- Select Parent --</option>
         </select>
+      </div>
+    </div>
+
+    <!-- Subtype Schema Properties & Custom Fields -->
+    <div id="subtype-dynamic-details-container" class="mb-3" style="display: none;">
+      <div class="card border shadow-sm">
+        <div class="card-header bg-light py-2 d-flex justify-content-between align-items-center">
+          <h6 class="mb-0 fw-bold text-primary">
+            <i class="fa-solid fa-shapes me-1"></i> <span id="subtype-schema-header">Subtype Configuration</span>
+          </h6>
+          <span class="badge bg-secondary font-monospace small" id="subtype-schema-slug-badge"></span>
+        </div>
+        <div class="card-body py-3" id="dynamic-form-fields"></div>
       </div>
     </div>
     
@@ -985,16 +1043,13 @@
         'isCurrentSite'
       ]);
 
-      // Simple dynamic renderer based on SubtypeTemplate
+      // Dynamic subtype schema renderer based on SubtypeTemplate
       async function renderDynamicFields(subType, metadata = {}) {
-        if (!subType) return $('#dynamic-form-fields').html('');
-        // The already-loaded cache, not a fetch. This used to call fetch()
-        // directly with `Authorization: Bearer app.auth.getToken()` -- the only
-        // hand-rolled auth header on the page, and not a credential the API
-        // accepts: it returned 401 every time, `data.template` came back
-        // undefined, and the catch-all `else` below silently cleared the
-        // container. The subtype fields this whole feature exists for had never
-        // rendered for anyone. Everything else here goes through app.api.
+        if (!subType) {
+          $('#dynamic-form-fields').html('');
+          $('#subtype-dynamic-details-container').hide();
+          return;
+        }
         let t = subtypeTemplates.find(x => x.slug === subType);
         if (!t) {
           try {
@@ -1005,29 +1060,31 @@
           }
         }
         const data = { template: t };
-        if (data && data.template && data.template.schema && data.template.schema.properties) {
-          // Skip anything the main form already has an input for. A template
-          // is free to declare `port` or `address` -- they are genuinely part
-          // of what an `ssh` or `web` service is -- but rendering a second
-          // control bound to the same metadata key gives two boxes for one
-          // value, and whichever is written last silently wins.
-          const entries = Object.entries(data.template.schema.properties)
-            .filter(([key]) => !PLATFORM_METADATA_KEYS.has(key));
-          if (!entries.length) return $('#dynamic-form-fields').html('');
+        if (data && data.template && data.template.schema && data.template.schema.properties && Object.keys(data.template.schema.properties).length > 0) {
+          $('#subtype-schema-header').text((data.template.name || subType) + ' Configuration');
+          $('#subtype-schema-slug-badge').text(subType).show();
+          const entries = Object.entries(data.template.schema.properties);
 
-          let html = '<hr><h6 class="text-muted">'
-            + esc(data.template.name || 'Template') + ' fields</h6><div class="row">';
+          let html = '<div class="row">';
           for (const [key, prop] of entries) {
-            const val = metadata[key] !== undefined ? metadata[key] : '';
-            html += `<div class="col-6 mb-3">
-              <label class="form-label">${esc(prop.description || key)}${prop.required ? ' *' : ''}</label>
+            const val = metadata[key] !== undefined ? metadata[key] : (prop.default !== undefined ? prop.default : '');
+            const colClass = prop.type === 'boolean' ? 'col-12 mb-2' : 'col-md-6 mb-3';
+            html += `<div class="${colClass}">
+              <label class="form-label fw-semibold">${esc(prop.description || key)}${prop.required ? ' <span class="text-danger">*</span>' : ''}</label>
               ${renderDynamicInput(key, prop, val)}
             </div>`;
           }
           html += '</div>';
           $('#dynamic-form-fields').html(html);
+          $('#subtype-dynamic-details-container').show();
+        } else if (t) {
+          $('#subtype-schema-header').text((t.name || subType) + ' Configuration');
+          $('#subtype-schema-slug-badge').text(subType).show();
+          $('#dynamic-form-fields').html('<p class="text-muted small mb-0"><i class="fa-solid fa-circle-info me-1 text-primary"></i>This subtype does not declare additional custom schema fields. Standard platform fields apply below.</p>');
+          $('#subtype-dynamic-details-container').show();
         } else {
           $('#dynamic-form-fields').html('');
+          $('#subtype-dynamic-details-container').hide();
         }
       }
 
@@ -1035,14 +1092,14 @@
         const safeKey = esc(key);
         const placeholder = prop.description ? `placeholder="${esc(prop.description)}"` : '';
         if (prop.type === 'boolean') {
-          return `<div class="form-check">
+          return `<div class="form-check form-switch">
             <input class="form-check-input dynamic-field" type="checkbox" data-key="${safeKey}" id="dyn-${safeKey}" ${val ? 'checked' : ''}>
             <label class="form-check-label" for="dyn-${safeKey}">${esc(prop.description || key)}</label>
           </div>`;
         }
         if (prop.enum && Array.isArray(prop.enum)) {
           const options = prop.enum.map(v => `<option value="${esc(String(v))}" ${val === v ? 'selected' : ''}>${esc(String(v))}</option>`).join('');
-          return `<select class="form-select shadow-sm dynamic-field" data-key="${safeKey}" ${placeholder}>${options}</select>`;
+          return `<select class="form-select shadow-sm dynamic-field" data-key="${safeKey}">${options}</select>`;
         }
         if (prop.type === 'array') {
           const list = Array.isArray(val) ? val : (val ? String(val).split(',').map(x => x.trim()).filter(Boolean) : []);
@@ -1055,7 +1112,7 @@
       }
 
       // Call renderDynamicFields when subtype changes
-      $('#res-subtype-template').on('change', function() {
+      $('#res-subtype-template, #res-subtype').on('change input', function() {
         renderDynamicFields($(this).val());
       });
     
@@ -1197,9 +1254,9 @@
 
     return sectionCard('Identity', 'fa-solid fa-id-card', identity)
       + sectionCard('Placement', 'fa-solid fa-sitemap', place)
+      + sectionCard(tmpl ? tmpl.name + ' Configuration' : (md.subType ? md.subType + ' Configuration' : 'Subtype Configuration'), 'fa-solid fa-shapes', custom)
       + sectionCard('Network', 'fa-solid fa-network-wired', network)
       + sectionCard('Platform', 'fa-solid fa-microchip', platform)
-      + sectionCard(tmpl ? tmpl.name + ' fields' : 'Template fields', 'fa-solid fa-sliders', custom)
       + sectionCard('Access', 'fa-solid fa-user-group', access)
       + sectionCard('Discovery', 'fa-solid fa-satellite-dish', discovery);
   }
@@ -2090,9 +2147,151 @@
   // Loaded from /api/subtype-templates, not hardcoded here. The list used to be
   // eight <option> tags and a literal `presets` object that had nothing to do
   // with the database-backed templates the server validates against -- so the
-  // dropdown offered `k8s` while the server knew `k8s_deployment`, and none of
-  // the placement rules were visible until a save failed.
+  // ── Subtype templates & Editor ──────────────────────────────────────────
   var subtypeTemplates = [];
+
+  function handleSubtypeNameInput(val) {
+    if (!$('#sub-tmpl-id').val()) {
+      $('#sub-tmpl-slug').val((val || '').toLowerCase().replace(/[^a-z0-9_-]/g, '-'));
+    }
+  }
+
+  function updateSubtypeIconPreview(val) {
+    $('#sub-tmpl-icon-preview').attr('class', (val || '').trim() || 'fa-solid fa-shapes');
+  }
+
+  function removeSchemaPropertyRow(rowId) {
+    $('#' + rowId).remove();
+  }
+
+  var subtypeModalGeneralTab = `
+    <div class="actionMessage mb-3" style="display:none"></div>
+    <input type="hidden" id="sub-tmpl-id">
+    <div class="row mb-3">
+      <div class="col-6">
+        <label class="form-label fw-semibold">Name <span class="text-danger">*</span></label>
+        <input type="text" id="sub-tmpl-name" class="form-control shadow-sm" placeholder="e.g. PostgreSQL Database" oninput="handleSubtypeNameInput(this.value)">
+      </div>
+      <div class="col-6">
+        <label class="form-label fw-semibold">Slug <span class="text-danger">*</span></label>
+        <input type="text" id="sub-tmpl-slug" class="form-control shadow-sm font-monospace" placeholder="e.g. postgres">
+        <div class="form-text">Matched against metadata.subType; unique identifier.</div>
+      </div>
+    </div>
+    <div class="row mb-3">
+      <div class="col-6">
+        <label class="form-label fw-semibold">Target Kind <span class="text-danger">*</span></label>
+        <select id="sub-tmpl-target-kind" class="form-select shadow-sm">
+          <option value="service">Service (App / Container / Port)</option>
+          <option value="host">Host (Machine / VM)</option>
+          <option value="site">Site</option>
+        </select>
+      </div>
+      <div class="col-6">
+        <label class="form-label fw-semibold">Category</label>
+        <input type="text" id="sub-tmpl-category" class="form-control shadow-sm" list="sub-cat-datalist" placeholder="e.g. Database, Web, Hypervisor">
+        <datalist id="sub-cat-datalist"></datalist>
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Description / Tagline</label>
+      <textarea id="sub-tmpl-description" class="form-control shadow-sm" rows="2" placeholder="One-line summary of what this resource subtype represents."></textarea>
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Icon</label>
+      <div class="input-group shadow-sm">
+        <span class="input-group-text"><i id="sub-tmpl-icon-preview" class="fa-solid fa-shapes"></i></span>
+        <input type="text" id="sub-tmpl-icon" class="form-control font-monospace" placeholder="fa-solid fa-database" oninput="updateSubtypeIconPreview(this.value)">
+      </div>
+      <div class="form-text">FontAwesome class string (e.g. <code>fa-solid fa-database</code>).</div>
+    </div>
+  `;
+
+  var subtypeModalCapabilitiesTab = `
+    <h6 class="fw-bold mb-3 text-primary"><i class="fa-solid fa-shield-halved me-1"></i> Capabilities & Permissions</h6>
+    <div class="form-check form-switch mb-3">
+      <input class="form-check-input" type="checkbox" id="sub-tmpl-ssh-capable">
+      <label class="form-check-label fw-semibold" for="sub-tmpl-ssh-capable">
+        SSH Capable (Can be offered as an SSH Jump target)
+      </label>
+      <div class="form-text">Set to true only for machines/hosts that accept SSH login. Out-of-band controllers (iLO, iDRAC) are guarded against shell access.</div>
+    </div>
+    <div class="form-check form-switch mb-3">
+      <input class="form-check-input" type="checkbox" id="sub-tmpl-inherits-access">
+      <label class="form-check-label fw-semibold" for="sub-tmpl-inherits-access">
+        Inherits Host Access (Access follows the host resource)
+      </label>
+      <div class="form-text">If checked, this service inherits access control from the parent host without requiring separate per-service LDAP groups.</div>
+    </div>
+    <hr>
+    <h6 class="fw-bold mb-3 text-primary"><i class="fa-solid fa-sitemap me-1"></i> Placement & Hierarchy Constraints</h6>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Valid Parent Kinds</label>
+      <div class="d-flex gap-3">
+        <div class="form-check">
+          <input class="form-check-input parent-kind-check" type="checkbox" value="site" id="parent-kind-site">
+          <label class="form-check-label" for="parent-kind-site">Site</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input parent-kind-check" type="checkbox" value="host" id="parent-kind-host">
+          <label class="form-check-label" for="parent-kind-host">Host</label>
+        </div>
+        <div class="form-check">
+          <input class="form-check-input parent-kind-check" type="checkbox" value="service" id="parent-kind-service">
+          <label class="form-check-label" for="parent-kind-service">Service</label>
+        </div>
+      </div>
+      <div class="form-text">Leave all unchecked to allow placement under any parent kind.</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label fw-semibold">Valid Parent Subtypes (optional)</label>
+      <input type="text" id="sub-tmpl-parent-subtypes" class="form-control shadow-sm font-monospace" placeholder="e.g. linux, proxmox, truenas">
+      <div class="form-text">Comma-separated list of parent subtype slugs. Leave blank to allow any subtype.</div>
+    </div>
+  `;
+
+  var subtypeModalSchemaTab = `
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <div>
+        <h6 class="fw-bold mb-0 text-primary"><i class="fa-solid fa-code me-1"></i> JSON Schema Properties</h6>
+        <div class="text-muted small">Defines custom metadata fields rendered in the resource Details tab and validated on save.</div>
+      </div>
+      <div class="btn-group btn-group-sm">
+        <button type="button" class="btn btn-primary" id="btn-schema-builder-mode" onclick="toggleSchemaEditorMode('builder')"><i class="fa-solid fa-list me-1"></i> Visual Builder</button>
+        <button type="button" class="btn btn-outline-secondary" id="btn-schema-raw-mode" onclick="toggleSchemaEditorMode('raw')"><i class="fa-solid fa-code me-1"></i> Raw JSON</button>
+      </div>
+    </div>
+    <div id="sub-schema-builder-container">
+      <div class="table-responsive mb-2">
+        <table class="table table-sm table-bordered align-middle mb-0">
+          <thead class="table-light">
+            <tr>
+              <th style="width: 25%;">Property Key</th>
+              <th style="width: 20%;">Type</th>
+              <th style="width: 35%;">Label / Description</th>
+              <th style="width: 10%; text-align: center;">Required</th>
+              <th style="width: 10%; text-align: center;">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="sub-schema-props-list"></tbody>
+        </table>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-primary" onclick="addSchemaPropertyRow()"><i class="fa-solid fa-plus me-1"></i> Add Property Field</button>
+    </div>
+    <div id="sub-schema-raw-container" style="display:none;">
+      <textarea id="sub-tmpl-schema-json" class="form-control font-monospace shadow-sm" rows="10" placeholder='{"properties": {}, "required": []}'></textarea>
+      <div class="form-text">Valid JSON Schema object (with <code>properties</code> map).</div>
+    </div>
+  `;
+
+  var subtypeModalStatusTab = `
+    <div class="mb-3">
+      <h6 class="fw-bold text-primary"><i class="fa-solid fa-heart-pulse me-1"></i> Status Rules (Health Evaluation)</h6>
+      <p class="text-muted small">JSON array of rule objects evaluated against telemetry and plugin state to compute resource status dots (ok, warning, critical).</p>
+      <textarea id="sub-tmpl-status-json" class="form-control font-monospace shadow-sm" rows="10" placeholder='[]'></textarea>
+      <div class="form-text">Example: <code>[{"status": "critical", "condition": "metadata.powerState === 'off'"}]</code>. Leave <code>[]</code> if unused.</div>
+    </div>
+  `;
 
   async function loadSubtypeTemplates() {
     try {
@@ -2101,6 +2300,353 @@
     } catch (err) {
       console.error('could not load subtype templates', err);
       subtypeTemplates = [];
+    }
+    renderSubtypeTemplatesTable();
+    refreshSubtypeOptions();
+  }
+
+  function renderSubtypeTemplatesTable() {
+    const $list = $('#subtype-templates-list');
+    if (!$list.length) return;
+    $list.empty();
+    const query = ($('#subtype-search-filter').val() || '').toLowerCase().trim();
+    const kindFilter = $('#subtype-kind-filter').val();
+    const catFilter = $('#subtype-cat-filter').val();
+
+    // Populate category dropdown
+    const categories = new Set();
+    subtypeTemplates.forEach(t => { if (t.category) categories.add(t.category); });
+    const $catSelect = $('#subtype-cat-filter');
+    const existingVal = $catSelect.val();
+    $catSelect.html('<option value="">All Categories</option>' + [...categories].sort().map(c => `<option value="${esc(c)}" ${c === existingVal ? 'selected' : ''}>${esc(c)}</option>`).join(''));
+
+    const filtered = subtypeTemplates.filter(t => {
+      if (kindFilter && t.target_kind !== kindFilter) return false;
+      if (catFilter && t.category !== catFilter) return false;
+      if (query) {
+        const text = `${t.name} ${t.slug} ${t.description || ''} ${t.category || ''} ${t.target_kind || ''}`.toLowerCase();
+        if (!text.includes(query)) return false;
+      }
+      return true;
+    });
+
+    if (filtered.length === 0) {
+      $list.append('<tr><td colspan="7" class="text-center text-muted py-4"><i class="fa-solid fa-shapes text-black-50 fs-2 mb-2"></i><br>No subtype templates match the current filter.</td></tr>');
+      return;
+    }
+
+    filtered.sort((a, b) => (a.name || a.slug).localeCompare(b.name || b.slug));
+
+    filtered.forEach(t => {
+      const iconCls = t.icon || 'fa-solid fa-shapes';
+      const kindBadges = {
+        site: 'bg-info text-dark',
+        host: 'bg-success',
+        service: 'bg-primary'
+      };
+      const kindBadge = `<span class="badge ${kindBadges[t.target_kind] || 'bg-secondary'}">${esc(t.target_kind || 'service')}</span>`;
+      const catBadge = t.category ? `<span class="badge bg-light text-dark border">${esc(t.category)}</span>` : '<span class="text-muted small">—</span>';
+
+      const caps = [];
+      if (t.ssh_capable) caps.push('<span class="badge bg-dark text-light me-1" title="SSH Shell Capable"><i class="fa-solid fa-terminal me-1"></i>SSH</span>');
+      if (t.inherits_host_access) caps.push('<span class="badge bg-light text-dark border me-1" title="Inherits Host Access"><i class="fa-solid fa-sitemap me-1"></i>Host Access</span>');
+      const capsHtml = caps.length ? caps.join('') : '<span class="text-muted small">—</span>';
+
+      const props = (t.schema && t.schema.properties) ? Object.keys(t.schema.properties) : [];
+      const propsHtml = props.length
+        ? `<span class="badge bg-secondary me-1" title="${esc(props.join(', '))}">${props.length} field(s)</span> <small class="text-muted font-monospace">${esc(props.slice(0, 3).join(', '))}${props.length > 3 ? '…' : ''}</small>`
+        : '<span class="text-muted small">None</span>';
+
+      const rules = Array.isArray(t.status_rules) ? t.status_rules : [];
+      const rulesHtml = rules.length
+        ? `<span class="badge bg-warning text-dark">${rules.length} rule(s)</span>`
+        : '<span class="text-muted small">—</span>';
+
+      const row = `
+        <tr>
+          <td>
+            <div class="d-flex align-items-center">
+              <span class="me-2 text-primary fs-5" style="width: 24px; text-align: center;"><i class="${esc(iconCls)}"></i></span>
+              <div>
+                <strong>${esc(t.name)}</strong>
+                <span class="font-monospace text-muted small ms-1">(${esc(t.slug)})</span>
+                ${t.description ? `<div class="text-muted small text-truncate" style="max-width: 320px;">${esc(t.description)}</div>` : ''}
+              </div>
+            </div>
+          </td>
+          <td>${kindBadge}</td>
+          <td>${catBadge}</td>
+          <td>${capsHtml}</td>
+          <td>${propsHtml}</td>
+          <td>${rulesHtml}</td>
+          <td class="text-end pe-3">
+            <button class="btn btn-sm btn-outline-primary me-1" onclick="openSubtypeModal('${esc(t.id)}')"><i class="fas fa-pen"></i> Edit</button>
+            <button class="btn btn-sm btn-outline-danger" onclick="deleteSubtypeTemplate('${esc(t.id)}', '${esc(t.name || t.slug)}')"><i class="fas fa-trash"></i></button>
+          </td>
+        </tr>
+      `;
+      $list.append(row);
+    });
+  }
+
+  function addSchemaPropertyRow(key = '', type = 'string', desc = '', required = false, enumVals = '') {
+    const rowId = 'schema-prop-' + Math.random().toString(36).substring(2, 9);
+    const html = `
+      <tr id="${rowId}" class="schema-prop-row">
+        <td><input type="text" class="form-control form-control-sm font-monospace prop-key" value="${esc(key)}" placeholder="e.g. targetPort"></td>
+        <td>
+          <select class="form-select form-select-sm prop-type" onchange="togglePropEnumInput('${rowId}')">
+            <option value="string" ${type === 'string' ? 'selected' : ''}>string</option>
+            <option value="number" ${type === 'number' ? 'selected' : ''}>number</option>
+            <option value="boolean" ${type === 'boolean' ? 'selected' : ''}>boolean</option>
+            <option value="array" ${type === 'array' ? 'selected' : ''}>array</option>
+            <option value="enum" ${type === 'enum' ? 'selected' : ''}>enum</option>
+          </select>
+          <input type="text" class="form-control form-control-sm prop-enum mt-1" placeholder="val1, val2" value="${esc(enumVals)}" style="display: ${type === 'enum' ? 'block' : 'none'};">
+        </td>
+        <td><input type="text" class="form-control form-control-sm prop-desc" value="${esc(desc)}" placeholder="Field label / description"></td>
+        <td class="text-center"><input type="checkbox" class="form-check-input prop-required" ${required ? 'checked' : ''}></td>
+        <td class="text-center">
+          <button type="button" class="btn btn-sm btn-outline-danger" onclick="removeSchemaPropertyRow('${rowId}')"><i class="fa-solid fa-trash"></i></button>
+        </td>
+      </tr>
+    `;
+    $('#sub-schema-props-list').append(html);
+  }
+
+  function togglePropEnumInput(rowId) {
+    const isEnum = $(`#${rowId} .prop-type`).val() === 'enum';
+    $(`#${rowId} .prop-enum`).toggle(isEnum);
+  }
+
+  function collectSchemaFromBuilder() {
+    const properties = {};
+    const required = [];
+    $('.schema-prop-row').each(function() {
+      const key = $(this).find('.prop-key').val().trim();
+      if (!key) return;
+      const type = $(this).find('.prop-type').val();
+      const desc = $(this).find('.prop-desc').val().trim();
+      const isReq = $(this).find('.prop-required').is(':checked');
+      const enumStr = $(this).find('.prop-enum').val().trim();
+
+      const prop = { description: desc };
+      if (type === 'enum') {
+        prop.type = 'string';
+        prop.enum = enumStr.split(',').map(x => x.trim()).filter(Boolean);
+      } else {
+        prop.type = type;
+      }
+      properties[key] = prop;
+      if (isReq) required.push(key);
+    });
+    return {
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      properties: properties,
+      required: required
+    };
+  }
+
+  var currentSchemaEditorMode = 'builder';
+  function toggleSchemaEditorMode(mode) {
+    currentSchemaEditorMode = mode;
+    if (mode === 'raw') {
+      const schemaObj = collectSchemaFromBuilder();
+      $('#sub-tmpl-schema-json').val(JSON.stringify(schemaObj, null, 2));
+      $('#sub-schema-builder-container').hide();
+      $('#sub-schema-raw-container').show();
+      $('#btn-schema-builder-mode').removeClass('btn-primary').addClass('btn-outline-primary');
+      $('#btn-schema-raw-mode').removeClass('btn-outline-secondary').addClass('btn-secondary');
+    } else {
+      try {
+        const raw = $('#sub-tmpl-schema-json').val().trim();
+        const obj = raw ? JSON.parse(raw) : { properties: {} };
+        populateSchemaBuilder(obj);
+      } catch (err) {
+        app.messages.toast('Invalid JSON Schema: ' + err.message, 'warning');
+      }
+      $('#sub-schema-raw-container').hide();
+      $('#sub-schema-builder-container').show();
+      $('#btn-schema-builder-mode').removeClass('btn-outline-primary').addClass('btn-primary');
+      $('#btn-schema-raw-mode').removeClass('btn-secondary').addClass('btn-outline-secondary');
+    }
+  }
+
+  function populateSchemaBuilder(schemaObj) {
+    $('#sub-schema-props-list').empty();
+    const props = (schemaObj && schemaObj.properties) || {};
+    const reqList = (schemaObj && Array.isArray(schemaObj.required)) ? schemaObj.required : [];
+    const entries = Object.entries(props);
+    if (!entries.length) {
+      // Empty
+    } else {
+      for (const [k, p] of entries) {
+        const type = p.enum ? 'enum' : (p.type || 'string');
+        const enumVals = p.enum ? p.enum.join(', ') : '';
+        const desc = p.description || '';
+        const isReq = reqList.includes(k);
+        addSchemaPropertyRow(k, type, desc, isReq, enumVals);
+      }
+    }
+  }
+
+  function openSubtypeModal(id) {
+    const tmpl = id ? subtypeTemplates.find(t => t.id === id) : null;
+    const isEdit = !!tmpl;
+
+    app.modal.open({
+      title: isEdit ? 'Edit Subtype Template: ' + esc(tmpl.name) : 'New Subtype Template',
+      size: 'lg',
+      tabs: [
+        { id: 'sub-general', label: 'General', bodyHtml: subtypeModalGeneralTab, active: true },
+        { id: 'sub-capabilities', label: 'Capabilities & Placement', bodyHtml: subtypeModalCapabilitiesTab },
+        { id: 'sub-schema', label: 'Schema Properties', bodyHtml: subtypeModalSchemaTab },
+        { id: 'sub-status', label: 'Status Rules', bodyHtml: subtypeModalStatusTab }
+      ],
+      footer: {
+        buttonsHtml: app.modal.footerButtons({ onSave: `saveSubtypeTemplate('${id || ''}')`, saveLabel: 'Save Template' })
+      }
+    });
+
+    const categories = new Set();
+    subtypeTemplates.forEach(t => { if (t.category) categories.add(t.category); });
+    $('#sub-cat-datalist').html([...categories].sort().map(c => `<option value="${esc(c)}">`).join(''));
+
+    if (isEdit) {
+      $('#sub-tmpl-id').val(tmpl.id);
+      $('#sub-tmpl-name').val(tmpl.name || '');
+      $('#sub-tmpl-slug').val(tmpl.slug || '').prop('readonly', true);
+      $('#sub-tmpl-target-kind').val(tmpl.target_kind || 'service');
+      $('#sub-tmpl-category').val(tmpl.category || '');
+      $('#sub-tmpl-description').val(tmpl.description || '');
+      $('#sub-tmpl-icon').val(tmpl.icon || '');
+      $('#sub-tmpl-icon-preview').attr('class', tmpl.icon || 'fa-solid fa-shapes');
+
+      $('#sub-tmpl-ssh-capable').prop('checked', !!tmpl.ssh_capable);
+      $('#sub-tmpl-inherits-access').prop('checked', !!tmpl.inherits_host_access);
+
+      const parentTypes = tmpl.valid_parent_types || [];
+      $('.parent-kind-check').each(function() {
+        $(this).prop('checked', parentTypes.includes($(this).val()));
+      });
+      $('#sub-tmpl-parent-subtypes').val((tmpl.valid_parent_subtypes || []).join(', '));
+
+      populateSchemaBuilder(tmpl.schema || { properties: {} });
+      $('#sub-tmpl-schema-json').val(JSON.stringify(tmpl.schema || { properties: {} }, null, 2));
+
+      $('#sub-tmpl-status-json').val(JSON.stringify(tmpl.status_rules || [], null, 2));
+    } else {
+      $('#sub-tmpl-id').val('');
+      $('#sub-tmpl-name').val('');
+      $('#sub-tmpl-slug').val('').prop('readonly', false);
+      $('#sub-tmpl-target-kind').val('service');
+      $('#sub-tmpl-category').val('');
+      $('#sub-tmpl-description').val('');
+      $('#sub-tmpl-icon').val('fa-solid fa-cube');
+      $('#sub-tmpl-icon-preview').attr('class', 'fa-solid fa-cube');
+
+      $('#sub-tmpl-ssh-capable').prop('checked', false);
+      $('#sub-tmpl-inherits-access').prop('checked', false);
+      $('.parent-kind-check').prop('checked', false);
+      $('#sub-tmpl-parent-subtypes').val('');
+
+      populateSchemaBuilder({ properties: {} });
+      $('#sub-tmpl-schema-json').val('{\n  "properties": {}\n}');
+      $('#sub-tmpl-status-json').val('[]');
+    }
+  }
+
+  async function saveSubtypeTemplate(id) {
+    const name = $('#sub-tmpl-name').val().trim();
+    const slug = $('#sub-tmpl-slug').val().trim();
+    const target_kind = $('#sub-tmpl-target-kind').val();
+    const category = $('#sub-tmpl-category').val().trim() || null;
+    const description = $('#sub-tmpl-description').val().trim() || null;
+    const icon = $('#sub-tmpl-icon').val().trim() || null;
+
+    if (!name || !slug) {
+      app.messages.toast('Name and Slug are required.', 'warning');
+      return;
+    }
+
+    const ssh_capable = $('#sub-tmpl-ssh-capable').is(':checked');
+    const inherits_host_access = $('#sub-tmpl-inherits-access').is(':checked');
+
+    const valid_parent_types = [];
+    $('.parent-kind-check:checked').each(function() {
+      valid_parent_types.push($(this).val());
+    });
+
+    const parentSubtypesRaw = $('#sub-tmpl-parent-subtypes').val().trim();
+    const valid_parent_subtypes = parentSubtypesRaw ? parentSubtypesRaw.split(',').map(x => x.trim()).filter(Boolean) : [];
+
+    let schema;
+    if (currentSchemaEditorMode === 'raw') {
+      try {
+        const raw = $('#sub-tmpl-schema-json').val().trim();
+        schema = raw ? JSON.parse(raw) : { properties: {} };
+      } catch (err) {
+        app.messages.toast('Invalid Schema JSON: ' + err.message, 'danger');
+        return;
+      }
+    } else {
+      schema = collectSchemaFromBuilder();
+    }
+
+    let status_rules;
+    try {
+      const rawRules = $('#sub-tmpl-status-json').val().trim();
+      status_rules = rawRules ? JSON.parse(rawRules) : [];
+      if (!Array.isArray(status_rules)) {
+        app.messages.toast('Status rules must be a JSON array.', 'danger');
+        return;
+      }
+    } catch (err) {
+      app.messages.toast('Invalid Status Rules JSON: ' + err.message, 'danger');
+      return;
+    }
+
+    const payload = {
+      name,
+      slug,
+      target_kind,
+      category,
+      description,
+      icon,
+      ssh_capable,
+      inherits_host_access,
+      valid_parent_types,
+      valid_parent_subtypes,
+      schema,
+      status_rules
+    };
+
+    try {
+      if (id) {
+        await app.api.put('subtype-templates/' + encodeURIComponent(id), payload);
+        app.messages.toast('Subtype template updated successfully!', 'success');
+      } else {
+        await app.api.post('subtype-templates', payload);
+        app.messages.toast('Subtype template created successfully!', 'success');
+      }
+      app.modal.close();
+      await loadSubtypeTemplates();
+    } catch (err) {
+      app.messages.action('Failed to save template: ' + (err.message || err), app.modal.body(), 'danger');
+    }
+  }
+
+  async function deleteSubtypeTemplate(id, name) {
+    const confirmed = await app.messages.confirm('Delete subtype template "' + name + '"?', $('#subtype-templates-action-msg'), 'warning');
+    if (!confirmed) return;
+
+    try {
+      await app.api.delete('subtype-templates/' + encodeURIComponent(id));
+      app.messages.toast('Deleted subtype template "' + name + '"', 'success');
+      await loadSubtypeTemplates();
+    } catch (err) {
+      app.messages.toast('Failed to delete template: ' + (err.message || err), 'danger');
     }
   }
 
@@ -3034,11 +3580,13 @@
     // Add dynamic fields
     $('.dynamic-field').each(function() {
       const key = $(this).data('key');
-      let val = $(this).val();
-      if ($(this).attr('type') === 'number') {
-        val = val === '' ? undefined : Number(val);
+      let val;
+      if ($(this).is(':checkbox')) {
+        val = $(this).is(':checked');
+      } else if ($(this).attr('type') === 'number') {
+        val = $(this).val() === '' ? undefined : Number($(this).val());
       } else {
-        val = val === '' ? undefined : val;
+        val = $(this).val() === '' ? undefined : $(this).val();
       }
       if (val !== undefined) {
         data.metadata[key] = val;
