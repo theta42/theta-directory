@@ -67,8 +67,28 @@ describe('the shipped vocabulary', () => {
   test('sites are roots and services hang off hosts', () => {
     for (const t of defaults) {
       if (t.target_kind === 'site') expect(t.valid_parent_types).toEqual([]);
-      if (t.target_kind === 'service') expect(t.valid_parent_types).toEqual(['host']);
+      // A service parents onto a host, and may additionally parent onto another
+      // service: an OAuth client belongs to the service it authenticates for
+      // (the Proxy's client hangs off the Proxy), which is one level below a
+      // host. Nothing else may be a service's parent.
+      if (t.target_kind === 'service') {
+        expect(t.valid_parent_types).toContain('host');
+        expect(t.valid_parent_types.filter(p => p !== 'host' && p !== 'service')).toEqual([]);
+      }
     }
+  });
+
+  test('oauth clients are a service subtype, not a kind of their own', () => {
+    for (const slug of ['oauth', 'oidc-client', 'saml-sp']) {
+      const t = bySlug.get(slug);
+      expect(t).toBeDefined();
+      expect(t.target_kind).toBe('service');
+      // No <slug>_access/_admin pair: an OAuth client's authorization is its
+      // own allowed_groups, checked at token issue.
+      expect(t.inherits_host_access).toBe(true);
+      expect(t.valid_parent_types).toContain('service');
+    }
+    expect(defaults.filter(t => t.target_kind === 'oauth')).toEqual([]);
   });
 
   test('nothing that is not a shell is marked ssh_capable', () => {

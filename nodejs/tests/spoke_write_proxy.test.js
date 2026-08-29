@@ -296,4 +296,30 @@ describe('spoke_write_proxy middleware', () => {
     expect(res.jsonBody.message).toContain('Re-register');
     expect(mockFetchCalls.length).toBe(0);
   });
+
+  test('signs forwarded writes with an HMAC (push token + uid + path + ts)', async () => {
+    jest.spyOn(siteConfig, 'get').mockReturnValue(SPOKE);
+    const fwdAuth = require('../utils/forwarded_auth_hmac');
+
+    const req = makeReq({
+      url: '/api/directory-admin/resources',
+      headers: { 'content-type': 'application/json' },
+      body: { name: 'New Host', kind: 'host', slug: 'host_new' },
+      user: { uid: 'alice' }
+    });
+    const res = makeRes();
+    await spokeWriteProxy(req, res, jest.fn());
+
+    const call = mockFetchCalls[0];
+    const ts = call.opts.headers['x-forwarded-ts'];
+    const mac = call.opts.headers['x-forwarded-mac'];
+    expect(ts).toBeDefined();
+    expect(mac).toBeDefined();
+    // The MAC verifies against the push token, uid, timestamp, and path.
+    const path = '/api/directory-admin/resources';
+    expect(fwdAuth.verify('push_test_token', 'alice', ts, path, mac)).toBe(true);
+    // A tampered MAC / wrong token / wrong path must fail.
+    expect(fwdAuth.verify('wrong_token', 'alice', ts, path, mac)).toBe(false);
+    expect(fwdAuth.verify('push_test_token', 'alice', ts, '/api/other', mac)).toBe(false);
+  });
 });

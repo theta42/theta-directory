@@ -136,15 +136,22 @@ async function addPosixAccount(client, data, opts = {}){
 		loginShell: data.loginShell,
 		homeDirectory: data.homeDirectory,
 		description: data.description || ' ',
-		// A migrated account keeps whatever sudo rule it already had; a new one
-		// gets this directory's default. Handing every imported user ALL/ALL
-		// because the source happened to be more restrictive would quietly grant
-		// privileges the old directory withheld.
-		sudoHost: data.sudoHost || 'ALL',
-		sudoCommand: data.sudoCommand || 'ALL',
-		sudoUser: data.sudoUser || data.uid,
-		objectclass: ['inetOrgPerson', 'sudoRole', 'ldapPublicKey', 'posixAccount', 'top', 'theta42Person'],
+		objectclass: ['inetOrgPerson', 'ldapPublicKey', 'posixAccount', 'top', 'theta42Person'],
 	};
+
+	// Scoped sudo (H12): do NOT stamp sudoHost/sudoCommand "ALL/ALL" on a new
+	// account. While the SSSD sudo responder is unscoped (design-gap D5), that
+	// single default is a universal-root landmine. Only attach a sudoRole --
+	// with whatever host/command the source directory actually granted -- when
+	// an LDIF import explicitly carries one (ldif_import.js sets data.sudoHost
+	// etc.). New-directory accounts get no sudo rule at all.
+	if (data.sudoHost) {
+		entry.objectclass = entry.objectclass.concat(['sudoRole']);
+		entry.sudoHost = data.sudoHost;
+		entry.sudoCommand = data.sudoCommand || 'ALL';
+		entry.sudoUser = data.sudoUser || data.uid;
+	}
+
 
 	if (data.givenName || data.first_name) {
 		entry.givenName = data.givenName || data.first_name;
@@ -210,7 +217,18 @@ async function addLdapUser(client, data, opts = {}){
 
 	try{
 		if (!data.uid) {
-			data.uid = `${data.givenName[0]}${data.sn}`.toLowerCase();
+			// givenName may be empty for non-person/service accounts; fall back
+			// to a uid derived from sn alone rather than producing a leading
+			// empty segment ("[empty]sn").
+			const given = (data.givenName || '').trim();
+			const sn = (data.sn || '').trim();
+			if (!given && !sn) {
+				let error = new Error('either uid, givenName, or sn is required to create a user');
+				error.status = 400;
+				throw error;
+			}
+			data.uid = `${given[0] || ''}${sn}`.toLowerCase();
+			if (!data.uid) data.uid = `user-${Date.now().toString(36)}`;
 		}
 		// Normalizes the DN to this directory's convention. Source directories
 		// commonly use a display name here ("cn=Jane Doe"), which would break
@@ -241,7 +259,7 @@ async function addLdapUser(client, data, opts = {}){
 
 async function deleteLdapUser(client, data){
 	try{
-		await client.del(`cn=${data.cn},${conf.groupBase}`);
+		await client.del(`cn=${escapeLDAPDNValue(data.cn)},${conf.groupBase}`);
 	}catch(error){
 		if (error.code !== 0x20) throw error; // ignore NoSuchObject — personal group may not exist
 	}
@@ -292,12 +310,18 @@ User.list = async function(){
 			  filter: conf.userFilter,
 			  attributes: ['*', '+'],
 			});
-			return res.searchEntries.map(function(user){return user.uid});
+			// Honor userNameAttribute: the configured username attribute may be
+			// something other than 'uid' (e.g. mail). Fall back to uid when the
+			// configured attribute is absent on the entry.
+			const attr = conf.userNameAttribute || 'uid';
+			return res.searchEntries.map(function(user){
+				return user[attr] || user.uid;
+			});
 		});
 	}catch(error){
 		throw error;
 	}
-};
+}
 
 User.listDetail = async function(){
 	try{
@@ -693,10 +717,14 @@ User.addByInvite = async function(data){
 	try{
 		let token = await InviteToken.get(data.token);
 
-		if(!token.is_valid && data.mailToken !== token.mail_token){
+		// All three must hold: the token is still valid, the mail_token matches
+		// (proves the invitee holds the invite email), and the token has not
+		// already been claimed. The old `&&` test let a used token through when
+		// the mail_token happened to match.
+		if (!token.is_valid || data.mailToken !== token.mail_token || token.claimed_by !== '__NONE__') {
 			let error = new Error('Token Invalid');
 			error.name = 'Token Invalid';
-			error.message = `Token is not valid or as allready been used. ${data.token}`;
+			error.message = `Token is not valid or has already been used. ${data.token}`;
 			error.status = 401;
 			throw error;
 		}
@@ -742,7 +770,6 @@ User.addByInvite = async function(data){
 	}catch(error){
 		throw error;
 	}
-
 };
 
 User.verifyEmail = async function(data){
@@ -998,7 +1025,19 @@ User.login = async function(data){
 			error.status = 401;
 			throw error;
 		}
-		let user = await this.get(data.uid || data.username);
+		let user;
+		try {
+			user = await this.get(data.uid || data.username);
+		} catch (getErr) {
+			// Deliberately uniform: a missing user and a wrong password both
+			// surface as 401 LDAPLoginFailed. Returning 404 for "not found"
+			// while returning 401 for "wrong password" would let a caller
+			// enumerate which uids exist.
+			let error = new Error('Invalid Credentials, login failed.');
+			error.name = 'LDAPLoginFailed';
+			error.status = 401;
+			throw error;
+		}
 
 		if (user.pwdAccountLockedTime) {
 			let error = new Error('Invalid Credentials, login failed.');

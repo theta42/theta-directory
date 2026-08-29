@@ -139,15 +139,18 @@ class ThetaAgentDriver extends BaseDriver {
       return { status: 'ok', driver: this.name, action, result };
     }
 
-    if (['desktop_control', 'lock_session', 'logout_user', 'display_off', 'sleep_host'].includes(action) || subType.startsWith('desktop')) {
-      const subAction = params.subAction || action;
-      const targetUser = params.user || '';
-      const result = await AgentManager.sendCommand(agent.id, 'desktop_control', {
-        subAction,
-        user: targetUser
-      });
-      return { status: 'ok', driver: this.name, action: subAction, result };
-    }
+	if (['desktop_control', 'lock_session', 'logout_user', 'display_off', 'sleep_host'].includes(action) || subType.startsWith('desktop')) {
+		const subAction = params.subAction || action;
+		const targetUser = params.user || '';
+		const result = await AgentManager.sendCommand(agent.id, 'desktop_control', {
+			subAction,
+			user: targetUser
+		// H7: these session-control commands mutate user state, so the agent
+		// requires an Ed25519 signature on them (fail-closed). Sign them.
+		}, true);
+		return { status: 'ok', driver: this.name, action: subAction, result };
+	}
+
 
     // Service lifecycle. `service_action` is the name the Directory UI sends;
     // `systemd_action` stays accepted because that is the wire command the

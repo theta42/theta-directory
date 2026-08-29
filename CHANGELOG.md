@@ -1,3 +1,26 @@
+## [2.36.0] - 2026-08-29
+
+### Fixed
+- **Webhook API endpoint authorization (C2):** Gated `/api/webhook` with `middleware.auth` + `app_sso_admin`, sanitized and validated webhook target URLs, and stripped private fields from responses.
+- **Join-key rotation verification (H1):** Enforced `?prev_token=` authentication for agent join key rotation requests (Contract G-2) to prevent unauthorized hostname takeover.
+- **LDAP search base scoping and attribute filtering (H2):** Restricted `/api/v1/ldap/search` base DN to user/group bases and stripped sensitive attributes (`userPassword`, `sshPrivateKey`) from search results.
+- **OpenLDAP ACL hardening (H3):** Hardened slapd ACLs to `access to * by * none`, granting read access strictly to authenticated service accounts and rootdn.
+- **Session invalidation and deactivation check (H4):** Added direct Redis session token invalidation on logout, enforced a 30-day TTL on session tokens, and rejected authentication for deactivated/locked users.
+- **Invite token redemption atomicity (H5):** Corrected invite token verification logic to prevent reused or double-redeemed invite tokens.
+- **Signed agent desktop commands (H7):** Implemented Ed25519 signature generation over `{type, payload}` canonical envelope for desktop and systemd commands (Contract G-1).
+- **Spoke write proxy HMAC authentication (H14):** Added `x-forwarded-mac` HMAC token validation for spoke-to-master request proxying (Contract G-4).
+- **Docker entrypoint slapd.conf generation (H15):** Removed leading whitespace in `docker-entrypoint.sh` here-doc delimiter that caused broken slapd configurations on fresh container starts.
+- **Authenticated OpenLDAP healthcheck and seeding (H16):** Updated `waitForSlapd` and container reboot verification in `docker-entrypoint.sh` to use authenticated admin queries under hardened ACLs.
+- **User enumeration protections (M26):** Standardized response times and generic responses on OTP and password reset endpoints to mitigate username enumeration.
+- **User profile endpoint access control (M27):** Gated `GET /api/user/:uid` to self or users with `app_sso_admin` group membership.
+- **Constant-time OTP comparison (M28):** Replaced direct string equality with `crypto.timingSafeEqual` for OTP codes and handled missing OAuth client secrets gracefully.
+- **LDAP DN escaping in rollback paths (M29):** Escaped DN values when rolling back or removing users and groups from LDAP.
+- **Redis URL operator precedence (M37):** Fixed ternary operator precedence in `metrics.js` Redis client initialization.
+- **Docker-aware test runner (M40):** Added `test_runner.js` to automatically spin up isolated OpenLDAP + Redis test containers on the host while executing Jest directly inside containers.
+
+### Added
+- **Full Docker test suite harness:** Added `docker-compose.test.yml`, `docker-compose.e2e.yml` (LDAP WebSocket tunnel E2E), and `docker-compose.multisite-e2e.yml` (3-node cluster join & live replication E2E).
+
 ## [2.35.0] - 2026-08-28
 
 The resource directory redesign is finished and, for the first time, verified in a

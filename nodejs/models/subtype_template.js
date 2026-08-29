@@ -95,14 +95,28 @@ class SubtypeTemplate extends Model {
     });
 
     // Every host that is a machine with a shell shares one shape.
-    const machine = (slug, name, description, icon, parentSubtypes = [], category = 'Machines') => ({
+    const machine = (slug, name, description, icon, parentSubtypes = [], category = 'Machines', schema = null) => ({
       slug, name, description, icon, category,
       target_kind: 'host',
       valid_parent_types: parentSubtypes.length ? ['host'] : ['site', 'host'],
       valid_parent_subtypes: parentSubtypes,
       ssh_capable: true,
-      status_rules: machineRules
+      status_rules: machineRules,
+      ...(schema ? { schema } : {})
     });
+
+    // Fields shared by every machine you get a shell on. NOT `port` or
+    // `address` -- the main resource form already has inputs for those, and a
+    // template that re-declares a platform key gets it skipped in the UI
+    // (PLATFORM_METADATA_KEYS in views/directory.ejs).
+    const shellFields = {
+      properties: {
+        sshPort: { type: 'number', description: 'SSH port', default: 22 },
+        sshUser: { type: 'string', description: 'Default SSH user' },
+        serial: { type: 'string', description: 'Serial number' },
+        location: { type: 'string', description: 'Physical location (rack, room)' }
+      }
+    };
 
     // Network gear and out-of-band controllers: never a shell, whatever else
     // is true of them.
@@ -145,13 +159,19 @@ class SubtypeTemplate extends Model {
       site('home', 'Home / Remote', 'A home or otherwise personal location.', 'fa-solid fa-house'),
 
       // ── Hosts: machines you log into ────────────────────────────────────
-      machine('linux', 'Linux Server', 'A Linux host, typically running theta-agent.', 'fa-brands fa-linux'),
-      machine('windows', 'Windows Server', 'A Windows host.', 'fa-brands fa-windows'),
-      machine('server', 'Server', 'A physical or virtual server of unspecified OS.', 'fa-solid fa-server'),
-      machine('desktop', 'Desktop', 'An end-user workstation.', 'fa-solid fa-desktop'),
-      machine('laptop', 'Laptop', 'An end-user portable machine.', 'fa-solid fa-laptop'),
-      machine('mac', 'macOS Host', 'A macOS desktop, laptop or server.', 'fa-brands fa-apple'),
-      machine('bsd', 'BSD Host', 'A FreeBSD/OpenBSD/NetBSD host.', 'fa-solid fa-terminal'),
+      machine('linux', 'Linux Server', 'A Linux host, typically running theta-agent.', 'fa-brands fa-linux', [], 'Machines', shellFields),
+      machine('windows', 'Windows Server', 'A Windows host.', 'fa-brands fa-windows', [], 'Machines',
+        { properties: {
+            rdpPort: { type: 'number', description: 'RDP port', default: 3389 },
+            domain: { type: 'string', description: 'AD domain' },
+            serial: { type: 'string', description: 'Serial number' },
+            location: { type: 'string', description: 'Physical location (rack, room)' }
+          } }),
+      machine('server', 'Server', 'A physical or virtual server of unspecified OS.', 'fa-solid fa-server', [], 'Machines', shellFields),
+      machine('desktop', 'Desktop', 'An end-user workstation.', 'fa-solid fa-desktop', [], 'Machines', shellFields),
+      machine('laptop', 'Laptop', 'An end-user portable machine.', 'fa-solid fa-laptop', [], 'Machines', shellFields),
+      machine('mac', 'macOS Host', 'A macOS desktop, laptop or server.', 'fa-brands fa-apple', [], 'Machines', shellFields),
+      machine('bsd', 'BSD Host', 'A FreeBSD/OpenBSD/NetBSD host.', 'fa-solid fa-terminal', [], 'Machines', shellFields),
       machine('thin-client', 'Thin Client', 'A minimal endpoint that boots to a remote session.', 'fa-solid fa-display'),
       machine('cloud-vm', 'Cloud Instance', 'A VM rented from a cloud provider.', 'fa-solid fa-cloud'),
       machine('k8s-node', 'Kubernetes Node', 'A machine in a Kubernetes cluster.', 'fa-solid fa-dharmachakra'),
@@ -221,15 +241,37 @@ class SubtypeTemplate extends Model {
       appliance('san', 'SAN', 'A storage area network appliance.', 'fa-solid fa-database', 'Storage'),
 
       // ── Services the agent reports ──────────────────────────────────────
+      // Each of these is a thing the agent can start/stop, and the ONE field
+      // that matters is the name it is addressed by -- `unitName` for systemd,
+      // the container name for docker. The driver already reads these
+      // (drivers/theta_agent_driver.js); until now they could only be set by
+      // discovery, never corrected by hand.
       unit('theta-agent', 'Theta Agent', 'The agent enrolment itself, bound to this host.', 'fa-solid fa-shield-halved'),
-      unit('systemd', 'Systemd Unit', 'A systemd service on the host.', 'fa-solid fa-gears'),
-      unit('systemd-timer', 'Systemd Timer', 'A systemd timer on the host.', 'fa-solid fa-clock'),
-      unit('openrc', 'OpenRC Service', 'An OpenRC service on the host.', 'fa-solid fa-gears'),
-      unit('cron', 'Cron Job', 'A scheduled cron job on the host.', 'fa-solid fa-clock'),
-      unit('windows-service', 'Windows Service', 'A Windows service on the host.', 'fa-brands fa-windows'),
-      unit('process', 'Process', 'A bare process the agent watches.', 'fa-solid fa-microchip'),
-      unit('docker', 'Docker Container', 'A Docker container on the host.', 'fa-brands fa-docker'),
-      unit('podman', 'Podman Container', 'A Podman container on the host.', 'fa-brands fa-docker'),
+      unit('systemd', 'Systemd Unit', 'A systemd service on the host.', 'fa-solid fa-gears',
+        { properties: { unitName: { type: 'string', description: 'Unit name (e.g. nginx.service)' } } }),
+      unit('systemd-timer', 'Systemd Timer', 'A systemd timer on the host.', 'fa-solid fa-clock',
+        { properties: { unitName: { type: 'string', description: 'Timer name (e.g. backup.timer)' } } }),
+      unit('openrc', 'OpenRC Service', 'An OpenRC service on the host.', 'fa-solid fa-gears',
+        { properties: { unitName: { type: 'string', description: 'Service name' } } }),
+      unit('cron', 'Cron Job', 'A scheduled cron job on the host.', 'fa-solid fa-clock',
+        { properties: {
+            schedule: { type: 'string', description: 'Cron expression' },
+            command: { type: 'string', description: 'Command' }
+          } }),
+      unit('windows-service', 'Windows Service', 'A Windows service on the host.', 'fa-brands fa-windows',
+        { properties: { unitName: { type: 'string', description: 'Service name' } } }),
+      unit('process', 'Process', 'A bare process the agent watches.', 'fa-solid fa-microchip',
+        { properties: { processName: { type: 'string', description: 'Process name' } } }),
+      unit('docker', 'Docker Container', 'A Docker container on the host.', 'fa-brands fa-docker',
+        { properties: {
+            containerName: { type: 'string', description: 'Container name' },
+            image: { type: 'string', description: 'Image' }
+          } }),
+      unit('podman', 'Podman Container', 'A Podman container on the host.', 'fa-brands fa-docker',
+        { properties: {
+            containerName: { type: 'string', description: 'Container name' },
+            image: { type: 'string', description: 'Image' }
+          } }),
 
       // What a network scan concluded nothing from. NOT ssh_capable: an
       // unclassified device is as likely to be a camera as a server, and
@@ -254,6 +296,47 @@ class SubtypeTemplate extends Model {
         status_rules: unitRules },
       app('ssh', 'SSH', 'An SSH endpoint on this host.', 'fa-solid fa-terminal',
         { properties: { port: portField('SSH port', 22) } }),
+
+      // OAuth/OIDC clients. A service, not a kind of its own -- see
+      // models/oauth_client.js. `valid_parent_types` is ['host', 'service']
+      // because a client belongs to the thing it authenticates for (the Proxy's
+      // client hangs off the Proxy service), which is one level below a host.
+      // No `schema` on these two: redirect URIs, scopes, allowed groups and
+      // token TTLs have a purpose-built panel in the resource modal (it also
+      // rotates the client secret, which a generic field cannot). Declaring
+      // them here as well would render a second set of inputs writing the same
+      // keys into `metadata` while the panel writes them top-level for
+      // OAuthClient.update -- two controls, one value, last one wins.
+      { ...app('oauth', 'OAuth Client', 'An OAuth2/OIDC client registered against this directory.', 'fa-solid fa-key',
+          null, 'Identity'),
+        valid_parent_types: ['host', 'service'],
+        // No <slug>_access/_admin pair of its own. An OAuth client's actual
+        // authorization is its own `allowed_groups`, checked at token issue;
+        // minting a second, unrelated LDAP group pair per client would be
+        // sprawl with no decision behind it -- the same reason a systemd unit
+        // gets none. It follows the service it authenticates for.
+        inherits_host_access: true },
+      { ...app('oidc-client', 'OIDC Client', 'An OpenID Connect relying party.', 'fa-solid fa-id-badge',
+          null, 'Identity'),
+        valid_parent_types: ['host', 'service'],
+        // No <slug>_access/_admin pair of its own. An OAuth client's actual
+        // authorization is its own `allowed_groups`, checked at token issue;
+        // minting a second, unrelated LDAP group pair per client would be
+        // sprawl with no decision behind it -- the same reason a systemd unit
+        // gets none. It follows the service it authenticates for.
+        inherits_host_access: true },
+      { ...app('saml-sp', 'SAML Service Provider', 'A SAML relying party.', 'fa-solid fa-file-signature',
+          { properties: {
+              entity_id: { type: 'string', description: 'Entity ID' },
+              acs_url: { type: 'string', description: 'Assertion Consumer Service URL' }
+            } }, 'Identity'),
+        valid_parent_types: ['host', 'service'],
+        // No <slug>_access/_admin pair of its own. An OAuth client's actual
+        // authorization is its own `allowed_groups`, checked at token issue;
+        // minting a second, unrelated LDAP group pair per client would be
+        // sprawl with no decision behind it -- the same reason a systemd unit
+        // gets none. It follows the service it authenticates for.
+        inherits_host_access: true },
       app('http', 'HTTP Service', 'An HTTP endpoint on this host.', 'fa-solid fa-globe',
         { properties: { port: portField('HTTP port', 80), address: { type: 'string', description: 'Base URL' } } }),
       app('web', 'Web Application', 'A web application in the catalog.', 'fa-solid fa-globe',

@@ -33,7 +33,19 @@ Auth.checkToken = async function(data){
 	try{
 		let token = await AuthToken.get(data);
 		if(token.is_valid){
-			return await User.get(token.created_by);
+			// Reject expired sessions (AuthToken._ttl, 30 days).
+			if (token.isExpired) {
+				try { await token.update({ is_valid: false }); } catch (_) {}
+				throw new Error('session expired');
+			}
+			const user = await User.get(token.created_by);
+			// Per-request check: a deactivated/locked user's existing session
+			// must not keep working after the lock is applied. pwdAccountLockedTime
+			// is set by setActive(false) / the ppolicy overlay.
+			if (user.pwdAccountLockedTime) {
+				throw new Error('account locked');
+			}
+			return user;
 		}
 		throw new Error('invalid token');
 	}catch(error){

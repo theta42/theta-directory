@@ -1,6 +1,6 @@
 {
   "name": "t42-theta-directory",
-  "version": "2.35.0",
+  "version": "2.36.0",
   "description": "A very simple LDAP management and SSO system",
   "author": [
     {
@@ -11,7 +11,13 @@
   "scripts": {
     "start": "node ./bin/www",
     "dev": "npx nodemon --ignore public/ ./bin/www",
-    "test": "NODE_ENV=test jest tests/groups.test.js tests/socket_pubsub.test.js tests/site_join.test.js tests/site_config.test.js tests/site_replicate.test.js tests/proxy_client.test.js tests/reconciler.test.js tests/nmap_plugin.test.js tests/jump_client.test.js tests/ldap_replication.test.js tests/orm_method_guard.test.js tests/ldap_tunnel.test.js tests/site_promote.test.js tests/mesh_route.test.js tests/ldap_runtime_config.test.js tests/ldap_reconcile.test.js tests/ldap_seed.test.js tests/access_projection.test.js tests/mutex.test.js tests/unique_index_repair.test.js tests/ldif_import.test.js tests/mesh_addressing.test.js tests/mesh_clients.test.js tests/mesh_roster.test.js tests/docker_plugin.test.js tests/ilo_plugin.test.js tests/ilo_driver.test.js tests/spoke_write_proxy.test.js tests/replicate_on_finish.test.js tests/api_site_spokes.test.js tests/fetch_with_auth_redirect.test.js tests/api_token.test.js tests/api_agent.test.js tests/agent_manager.test.js tests/api_agent_ops.test.js tests/api_conf.branding.test.js tests/api_conf.proxy.test.js tests/directory_janitor.test.js tests/discovery_naming.test.js tests/driver_registry.test.js tests/theta_agent_driver.test.js tests/no_native_dialogs.test.js tests/posix_id.test.js tests/proxmox_interfaces.test.js tests/redirect_uri.test.js tests/resource_site_slug.test.js tests/site_config_creation.test.js tests/vault_broker.test.js tests/reconciler_strict.test.js tests/scheduler_state.test.js tests/subtype_template.test.js tests/reconciler_edges.test.js tests/site_export_shape.test.js tests/status_evaluation_e2e.test.js tests/access_inheritance.test.js tests/subtype_vocabulary.test.js tests/nmap_classify.test.js tests/subtype_seed_e2e.test.js tests/plugin_contract.test.js tests/discovery_lifecycle.test.js tests/view_integrity.test.js --forceExit"
+    "test": "node ./test_runner.js",
+    "test:jest": "NODE_ENV=test jest --forceExit",
+    "test:unit": "NODE_ENV=test jest --forceExit",
+    "test:docker": "docker compose -f ../docker-compose.test.yml down -v && docker compose -f ../docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from test-runner && docker compose -f ../docker-compose.test.yml down -v",
+    "test:e2e": "docker compose -f ../docker-compose.e2e.yml down -v && docker compose -f ../docker-compose.e2e.yml up --build --abort-on-container-exit && docker compose -f ../docker-compose.e2e.yml down -v",
+    "test:multisite": "docker compose -f ../docker-compose.multisite-e2e.yml down -v && docker compose -f ../docker-compose.multisite-e2e.yml up --build --abort-on-container-exit && docker compose -f ../docker-compose.multisite-e2e.yml down -v",
+    "test:all": "npm run test:docker && npm run test:e2e && npm run test:multisite"
   },
   "jest": {
     "testEnvironment": "node",

@@ -296,10 +296,6 @@ router.post('/resources', async (req, res, next) => {
     if (req.body.kind === 'service' && !req.body.hostId) {
       return res.status(400).json({ error: 'Services must have a parent Host' });
     }
-    if (req.body.kind === 'oauth' && !req.body.hostId) {
-      return res.status(400).json({ error: 'OAuth Integrations must have a parent Service' });
-    }
-
     const parentResource = req.body.hostId
       ? await Resource.get(req.body.hostId).catch(() => null)
       : null;
@@ -314,8 +310,13 @@ router.post('/resources', async (req, res, next) => {
     req.body.updated_by = req.user.uid;
     req.body.updated_on = now;
 
+    // An OAuth client is a service with `subType: 'oauth'`; the OAuthClient
+    // wrapper mints the client_id/secret pair the resource row cannot.
+    const isOAuth = req.body.kind === 'service'
+      && (req.body.metadata || {}).subType === 'oauth';
+
     let r;
-    if (req.body.kind === 'oauth') {
+    if (isOAuth) {
       const { OAuthClient } = require('../models/oauth_client');
       // Pass created_by explicitly for the wrapper (overrides the generic
       // assignment above -- this is OAuthClient-wrapper-specific behavior).
@@ -326,8 +327,8 @@ router.post('/resources', async (req, res, next) => {
       r = await Resource.create(req.body);
     }
 
-    if ((r.kind === 'host' || r.kind === 'service' || r.kind === 'oauth') && req.body.hostId) {
-      await ResourceEdge.create({ parentId: req.body.hostId, childId: r.id, relation: r.kind === 'oauth' ? 'oauth' : 'hosts' });
+    if ((r.kind === 'host' || r.kind === 'service') && req.body.hostId) {
+      await ResourceEdge.create({ parentId: req.body.hostId, childId: r.id, relation: 'hosts' });
     }
 
     // ── Group provisioning (docs/GROUPS.md) ───────────────────────────────
@@ -393,15 +394,17 @@ router.put('/resources/:id', async (req, res, next) => {
     if (req.body.kind === 'service' && !req.body.hostId) {
       return res.status(400).json({ error: 'Services must have a parent Host' });
     }
-    if (req.body.kind === 'oauth' && !req.body.hostId) {
-      return res.status(400).json({ error: 'OAuth Integrations must have a parent Service' });
-    }
-
     // OAuthClient is a wrapper over the same `resource` row, but its .update()
     // handles the oauth-specific body fields (redirect_uris, scopes,
     // token_lifetime) that a bare Resource would drop into metadata unvalidated.
-    const { OAuthClient } = require('../models/oauth_client');
-    const model = req.body.kind === 'oauth' ? OAuthClient : Resource;
+    //
+    // Keyed off the STORED subtype, not the body: a PUT that only changes the
+    // name carries no metadata, and reading the discriminator from the request
+    // would silently downgrade an OAuth client to a plain resource update and
+    // drop its redirect URIs.
+    const { OAuthClient, isOAuthClient } = require('../models/oauth_client');
+    const stored = await Resource.get(req.params.id).catch(() => null);
+    const model = isOAuthClient(stored) ? OAuthClient : Resource;
     const r = await model.get(req.params.id);
     if (!r) return res.status(404).json({ error: 'Not found' });
 
@@ -418,8 +421,7 @@ router.put('/resources/:id', async (req, res, next) => {
       // No explicit hostId on the body: the resource is not being reparented,
       // so validate against the parent it already has.
       const existingEdges = await ResourceEdge.list({ where: { childId: req.params.id } });
-      const parentEdge = existingEdges.find(e => e.relation === 'hosts' || e.relation === 'oauth')
-        || existingEdges[0];
+      const parentEdge = existingEdges.find(e => e.relation === 'hosts') || existingEdges[0];
       if (parentEdge) {
         parentResource = await Resource.get(parentEdge.parentId).catch(() => null);
       }
@@ -433,13 +435,13 @@ router.put('/resources/:id', async (req, res, next) => {
 
     const updated = await r.update(req.body);
 
-    if ((updated.kind === 'host' || updated.kind === 'service' || updated.kind === 'oauth') && req.body.hostId !== undefined) {
+    if ((updated.kind === 'host' || updated.kind === 'service') && req.body.hostId !== undefined) {
       const existingEdges = await ResourceEdge.list({ where: { childId: r.id } });
       for (const e of existingEdges) {
-        if (e.relation === 'hosts' || e.relation === 'oauth') await e.delete();
+        if (e.relation === 'hosts') await e.delete();
       }
       if (req.body.hostId) {
-        await ResourceEdge.create({ parentId: req.body.hostId, childId: r.id, relation: updated.kind === 'oauth' ? 'oauth' : 'hosts' });
+        await ResourceEdge.create({ parentId: req.body.hostId, childId: r.id, relation: 'hosts' });
       }
     }
 

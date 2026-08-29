@@ -197,3 +197,38 @@ DELETE /api/subtype-templates/:id
 Changing a template's `schema` does not rewrite existing resources. Fields that
 are no longer declared stay in metadata and stop being rendered; a newly
 `required` field is enforced the next time someone saves that resource.
+
+## What renders on the form
+
+The subtype's `schema.properties` become inputs in the resource modal, directly
+under the subtype picker that selects the template.
+
+A key the main form **already has an input for** is skipped
+(`PLATFORM_METADATA_KEYS` in `views/directory.ejs`): `ip`, `address`, `port`,
+`macAddress`, `os`, `vmid`, `environment`, `icon`, `tagline` and friends. A
+template is free to declare them — `port` genuinely is part of what an `ssh`
+service is, and it is what `View` mode reads to label the field — but rendering
+a second control bound to the same metadata key gives two boxes for one value,
+and whichever is written last silently wins. This is why the `web` subtype
+shows no extra fields: both of its declared properties are platform keys.
+
+The same rule is why `oauth` and `oidc-client` declare no schema at all.
+Redirect URIs, scopes, allowed groups and token TTLs have a purpose-built panel
+that also rotates the client secret, which a generic string input cannot do.
+
+## OAuth clients are a subtype, not a kind
+
+`kind: 'oauth'` no longer exists. An OAuth client is a **service** carrying
+`metadata.subType: 'oauth'`, parented to the service it authenticates for — the
+Proxy's client hangs off the Proxy.
+
+A kind is a structural role in the graph, and an OAuth client is none of those
+things structurally: it is one more thing a service exposes, alongside its HTTP
+endpoint and its SSH port. As a kind it was an outlier that got no access groups,
+had no subtype vocabulary at all, and needed a special-cased `relation: 'oauth'`
+edge. As a subtype it inherits the whole model for free.
+
+These subtypes set `inherits_host_access: true`, so they get no
+`<slug>_access`/`_admin` pair of their own — an OAuth client's real
+authorization is its own `allowed_groups`, checked at token issue, and a second
+unrelated LDAP group pair per client would be sprawl with no decision behind it.

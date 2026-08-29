@@ -340,9 +340,15 @@ class AgentManager {
     }
 
     const finalPayload = { ...payload };
-    if (isHighRisk) finalPayload.signature = await this.signPayload(finalPayload);
+    if (isHighRisk) {
+      // G-1 signature envelope: bind the command TYPE into the signature so a
+      // signature for one command type cannot be replayed as another (H7 —
+      // "signatures cover payload only (no type... → replay + type-portable)").
+      const envelope = { type: commandType, ...finalPayload };
+      finalPayload.signature = await this.signPayload(envelope);
+    }
 
-    const message = { type: commandType, payload: finalPayload };
+     const message = { type: commandType, payload: finalPayload };
     state.ws.send(JSON.stringify(message));
     return message;
   }

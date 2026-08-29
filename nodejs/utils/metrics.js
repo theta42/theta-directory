@@ -8,8 +8,17 @@ async function getClient() {
         // conf.redis could be an object or a connection string depending on @simpleworkjs/conf
         // But for sso-manager, Redis runs locally or is configured via environment
         // The tests use createClient() with no args, so we do the same, allowing env vars to override
-        const url = (conf.redis && typeof conf.redis === 'string') ? conf.redis : (conf.redis && conf.redis.url) ? conf.redis.url : undefined;
-        client = createClient({ url });
+        let url = process.env.REDIS_URL;
+        if (!url && conf.redis) {
+            if (typeof conf.redis === 'string') {
+                url = conf.redis;
+            } else if (conf.redis.redisConf && typeof conf.redis.redisConf.url === 'string') {
+                url = conf.redis.redisConf.url;
+            } else if (typeof conf.redis.url === 'string') {
+                url = conf.redis.url;
+            }
+        }
+        client = createClient(url ? { url } : undefined);
         client.on('error', (err) => console.error('Redis metrics error', err));
         await client.connect();
     }

@@ -75,8 +75,10 @@ async function nestGroup(childCn, parentCn) {
 
 // Map a directory resource kind onto a group-model kind (GROUPS.md §2).
 // host -> host; service -> app (services/consoles are the group model's "apps");
-// site gets site-level groups (handled separately); oauth/container get no
-// per-resource groups (oauth clients hang off their owning service).
+// site gets site-level groups (handled separately); container and the
+// inheriting subtypes (systemd units, port forwards, oauth clients) get no
+// per-resource groups -- that is decided by the subtype template's
+// `inherits_host_access`, via templateFor().ownGroups below.
 
 // Create a groupOfNames if it doesn't already exist. Idempotent; `ownerDn`
 // seeds the mandatory first member. Returns true when created.

@@ -53,7 +53,7 @@ class Agent extends Model {
 	// Neither: the agent row exists unbound, and binds on first discovery.
 	static async enroll({ name, resourceId, siteId, enrolledBy, description }) {
 		const { Resource, ResourceEdge } = require('./resource');
-		const { ensureAgentService } = require('../utils/agent_binding');
+		const { ensureAgentService, findHostAtSite } = require('../utils/agent_binding');
 		let serviceId = null;
 
 		if (resourceId) {
@@ -66,21 +66,34 @@ class Agent extends Model {
 			if (!site || site.kind !== 'site') {
 				throw Object.assign(new Error('siteId must refer to a site resource'), { status: 400 });
 			}
-			const safeName = (name || 'theta-agent').toLowerCase().replace(/[^a-z0-9_-]/g, '-');
-			const host = await Resource.create({
-				id: crypto.randomUUID(),
-				kind: 'host',
-				name: name || 'Theta Agent Host',
-				slug: `host-${safeName}-${crypto.randomBytes(3).toString('hex')}`,
-				metadata: { subType: 'linux', managed: true },
-				created_on: Math.floor(Date.now() / 1000)
-			});
-			await ResourceEdge.create({
-				id: crypto.randomUUID(),
-				parentId: site.id,
-				childId: host.id,
-				relation: 'hosts'
-			});
+
+			// ADOPT before creating. The machine self-enrolling here usually
+			// already has a host resource -- bootstrap.js seeds the stack host
+			// on every install -- and minting a second one gave a fresh
+			// deployment two hosts with the same name, one holding every
+			// service and the other holding only the agent.
+			let host = await findHostAtSite(site.id, name);
+			if (!host) {
+				const safeName = (name || 'theta-agent').toLowerCase()
+					.replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'theta-agent';
+				host = await Resource.create({
+					id: crypto.randomUUID(),
+					kind: 'host',
+					name: name || 'Theta Agent Host',
+					// No random suffix: the slug is derived from the hostname so
+					// the same machine re-enrolling lands on the same row, and
+					// findHostAtSite above can recognise it next time.
+					slug: `host-${safeName}`,
+					metadata: { subType: 'linux', managed: true },
+					created_on: Math.floor(Date.now() / 1000)
+				});
+				await ResourceEdge.create({
+					id: crypto.randomUUID(),
+					parentId: site.id,
+					childId: host.id,
+					relation: 'hosts'
+				});
+			}
 			serviceId = (await ensureAgentService(host)).id;
 		}
 
@@ -205,10 +218,11 @@ class AgentJoinKey extends Model {
 		if (!key) return null;
 		if (key.revoked) return null;
 		if (key.expires_on && key.expires_on < Math.floor(Date.now() / 1000)) return null;
+		if (key.max_uses && key.use_count >= key.max_uses) return null;
 		return key;
 	}
 
-	static async issue({ label, createdBy, expiresInDays }) {
+	static async issue({ label, createdBy, expiresInDays, maxUses }) {
 		const raw = this.generateKey();
 		const key = await this.create({
 			id: crypto.randomUUID(),
@@ -219,6 +233,7 @@ class AgentJoinKey extends Model {
 			created_by: createdBy || null,
 			created_on: Math.floor(Date.now() / 1000),
 			expires_on: expiresInDays ? Math.floor(Date.now() / 1000) + expiresInDays * 86400 : null,
+			max_uses: maxUses ? Number(maxUses) : null,
 			use_count: 0
 		});
 		return { key, raw };
@@ -233,6 +248,7 @@ class AgentJoinKey extends Model {
 		created_by: { type: 'string' },
 		created_on: { type: 'integer' },
 		expires_on: { type: 'integer' },
+		max_uses: { type: 'integer' },
 		use_count: { type: 'integer', default: 0 },
 		last_used_on: { type: 'integer' }
 	};

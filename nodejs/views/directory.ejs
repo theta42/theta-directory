@@ -289,16 +289,12 @@
     <div class="actionMessage mb-3" style="display:none"></div>
     <input type="hidden" id="res-id">
 
-    <div class="row mb-3">
-      <div class="col-12 d-flex justify-content-end">
-        <div class="btn-group" role="group" aria-label="View or edit this resource">
-          <input type="radio" class="btn-check" name="btnradio" id="btnradio1" autocomplete="off" checked onchange="toggleEditMode(false)">
-          <label class="btn btn-outline-secondary btn-sm" for="btnradio1"><i class="fa-solid fa-eye me-1"></i>View</label>
-          <input type="radio" class="btn-check" name="btnradio" id="btnradio2" autocomplete="off" onchange="toggleEditMode(true)">
-          <label class="btn btn-outline-primary btn-sm" for="btnradio2"><i class="fa-solid fa-pen me-1"></i>Edit</label>
-        </div>
-      </div>
-    </div>
+    <!-- The View/Edit toggle is NOT here. It lives in the modal header, injected
+         by openResourceModal() -- see modeToggleHtml below. It used to sit in
+         this pane, which meant switching to any other tab took the only control
+         that could leave View mode away with it: every field on Details (OAuth
+         Configuration among them), Groups, Children, Secrets and Status was
+         disabled with nothing on screen able to enable it. -->
 
     <!-- Read-only dashboard. Rendered from the resource, not from the form:
          View mode used to be the edit form with a Save button hidden, and the
@@ -327,7 +323,6 @@
           <option value="site">Site</option>
           <option value="host">Host</option>
           <option value="service">Service (App)</option>
-          <option value="oauth">OAuth Integration</option>
         </select>
       </div>
       <div class="col-6">
@@ -340,6 +335,12 @@
         <input type="text" id="res-subtype" class="form-control shadow-sm" placeholder="Pick a template above, or type a custom subtype">
       </div>
     </div>
+
+    <!-- The subtype's own declared fields, rendered from its template schema.
+         Directly under the picker that selects the template: these used to
+         render on the Details tab, two clicks from the control that changes
+         them, so picking a subtype appeared to do nothing at all. -->
+    <div id="dynamic-form-fields"></div>
 
     <div class="row mb-3">
       <div class="col-6">
@@ -427,7 +428,6 @@
       </div>
     </div>
     
-    <div id="dynamic-form-fields"></div>
     <div class="row mb-3" id="host-details-container" style="display: none;">
       <div class="col-4">
         <label class="form-label">VMID</label>
@@ -654,6 +654,19 @@
     </div>
   `;
 
+  // The View/Edit switch, injected into the modal HEADER rather than into a tab
+  // pane. Mode is a property of the whole modal -- every tab is disabled in View
+  // mode -- so the control for it cannot live inside one tab's content, or
+  // leaving that tab strands the operator in a read-only form with no way out.
+  var modeToggleHtml = `
+    <div class="btn-group ms-auto me-2 resource-mode-toggle" role="group" aria-label="View or edit this resource">
+      <input type="radio" class="btn-check" name="btnradio" id="btnradio1" autocomplete="off" checked onchange="toggleEditMode(false)">
+      <label class="btn btn-outline-secondary btn-sm" for="btnradio1"><i class="fa-solid fa-eye me-1"></i>View</label>
+      <input type="radio" class="btn-check" name="btnradio" id="btnradio2" autocomplete="off" onchange="toggleEditMode(true)">
+      <label class="btn btn-outline-primary btn-sm" for="btnradio2"><i class="fa-solid fa-pen me-1"></i>Edit</label>
+    </div>
+  `;
+
   // Shared by openAddModal/openEditModal: builds the tabbed/footer/(optionally
   // URL-tracked) modal DOM. Callers then populate fields via .val() and hide
   // the Groups/Children tabs in add-mode (no resource id to scope them to).
@@ -675,6 +688,19 @@
       },
       url: id ? {path: '/directory/' + resourcesById[id].slug} : null,
     });
+    // Header injection, after open() has rebuilt the modal DOM. Placed before
+    // the close button so it reads as part of the title bar.
+    //
+    // Addressed by #sw-modal, NOT `.modal.show`: Bootstrap adds `show` on the
+    // fade transition, which has not happened yet at this point, so a
+    // `.show`-scoped selector matches nothing and drops the toggle silently.
+    // Remove first: app.modal.open() rebuilds the BODY but reuses the header,
+    // so injecting unconditionally stacked a second toggle on every reopen --
+    // two live pairs of radios sharing one name, where clicking the stale one
+    // left the visible pair showing the wrong mode.
+    $('#sw-modal .modal-header .resource-mode-toggle').remove();
+    $('#sw-modal .modal-header .btn-close').before(modeToggleHtml);
+
     $('#sw-modal-tab-groups-btn, #sw-modal-tab-children-btn, #sw-modal-tab-secrets-btn').closest('li').toggle(!!id);
     // Services an agent registered are gated by their host, not by groups of
     // their own -- offering the tab invites operators to create a
@@ -947,17 +973,54 @@
   // rest of the source printed underneath it.
 
       
+      // The metadata keys the main resource form already renders an input for.
+      // A template that declares one of these is not wrong -- `port` really is
+      // part of what an `ssh` service is -- but it must not get a SECOND
+      // control here bound to the same key. Keep in step with the `metadata`
+      // object built in saveResource().
+      var PLATFORM_METADATA_KEYS = new Set([
+        'subType', 'ip', 'address', 'vmid', 'macAddress', 'os', 'port',
+        'externalPort', 'gitRepo', 'installPath', 'systemdService', 'icon',
+        'tagline', 'environment', 'isExternalReachable', 'isPublic',
+        'isCurrentSite'
+      ]);
+
       // Simple dynamic renderer based on SubtypeTemplate
       async function renderDynamicFields(subType, metadata = {}) {
         if (!subType) return $('#dynamic-form-fields').html('');
-        const res = await fetch('/api/subtype-templates/' + subType, { headers: { 'Authorization': 'Bearer ' + app.auth.getToken() }});
-        const data = await res.json();
+        // The already-loaded cache, not a fetch. This used to call fetch()
+        // directly with `Authorization: Bearer app.auth.getToken()` -- the only
+        // hand-rolled auth header on the page, and not a credential the API
+        // accepts: it returned 401 every time, `data.template` came back
+        // undefined, and the catch-all `else` below silently cleared the
+        // container. The subtype fields this whole feature exists for had never
+        // rendered for anyone. Everything else here goes through app.api.
+        let t = subtypeTemplates.find(x => x.slug === subType);
+        if (!t) {
+          try {
+            const res = await app.api.get('subtype-templates/' + encodeURIComponent(subType));
+            t = res && res.template;
+          } catch (e) {
+            console.error('[directory] could not load subtype template', subType, e);
+          }
+        }
+        const data = { template: t };
         if (data && data.template && data.template.schema && data.template.schema.properties) {
-          let html = '<hr><h6 class="text-muted">Template Specific Fields</h6><div class="row">';
-          for (const [key, prop] of Object.entries(data.template.schema.properties)) {
+          // Skip anything the main form already has an input for. A template
+          // is free to declare `port` or `address` -- they are genuinely part
+          // of what an `ssh` or `web` service is -- but rendering a second
+          // control bound to the same metadata key gives two boxes for one
+          // value, and whichever is written last silently wins.
+          const entries = Object.entries(data.template.schema.properties)
+            .filter(([key]) => !PLATFORM_METADATA_KEYS.has(key));
+          if (!entries.length) return $('#dynamic-form-fields').html('');
+
+          let html = '<hr><h6 class="text-muted">'
+            + esc(data.template.name || 'Template') + ' fields</h6><div class="row">';
+          for (const [key, prop] of entries) {
             const val = metadata[key] !== undefined ? metadata[key] : '';
             html += `<div class="col-6 mb-3">
-              <label class="form-label">${esc(key)}${prop.required ? ' *' : ''}</label>
+              <label class="form-label">${esc(prop.description || key)}${prop.required ? ' *' : ''}</label>
               ${renderDynamicInput(key, prop, val)}
             </div>`;
           }
@@ -1090,7 +1153,7 @@
     }
 
     let place = '';
-    const parentEdge = allEdges.find(e => e.childId === r.id && (e.relation === 'hosts' || e.relation === 'oauth'));
+    const parentEdge = allEdges.find(e => e.childId === r.id && e.relation === 'hosts');
     const parent = parentEdge ? resourcesById[parentEdge.parentId] : null;
     if (parent) {
       place += fieldRow('Parent', '<a href="#" onclick="openEditModal(\'' + parent.id + '\'); return false;">'
@@ -1150,8 +1213,11 @@
     // tabs (Details, Groups, Children, Secrets) are separate panes that cannot
     // be inside one wrapper, so their inputs are disabled instead -- otherwise
     // "View" would still let you edit everything on the second tab.
+    //
+    // Scoped to .modal-body, which is what keeps the header's own View/Edit
+    // radios out of it: they are the way back out of View mode and disabling
+    // them would be a one-way door.
     $('.modal-body input, .modal-body select, .modal-body textarea')
-      .not('[name="btnradio"]')
       .prop('disabled', !isEdit);
     // The slug is derived from the name and is never typed into.
     $('#res-slug').prop('disabled', false).prop('readonly', true);
@@ -1165,7 +1231,10 @@
       $('#edit-resource-form').hide();
       $('.modal-footer .btn-primary').hide();
     }
-    $('input[name="btnradio"]').prop('disabled', false);
+
+    // Say which mode this is. The title read "Edit Resource" over a form that
+    // could not be edited.
+    if (id) $('#sw-modal .modal-title').text(isEdit ? 'Edit Resource' : 'View Resource');
   }
 
   // A service whose lifecycle an agent reports gets no groups of its own and
@@ -1174,8 +1243,18 @@
   const AGENT_SERVICE_SUBTYPES = new Set(<%- JSON.stringify(agentServiceSubtypes || []) %>);
   function inheritsHostAccess(r) {
     if (!r || (r.kind !== 'service' && r.kind !== 'container')) return false;
-    const meta = r.metadata || {};
-    return AGENT_SERVICE_SUBTYPES.has(String(meta.subType || '').toLowerCase());
+    const subType = String((r.metadata || {}).subType || '').toLowerCase();
+    // The TEMPLATE is authoritative -- `inherits_host_access` is the same field
+    // services/subtype_templates.js answers from, so the tab the UI hides and
+    // the groups the server declines to create cannot disagree. This used to
+    // read only the server-injected AGENT_SERVICE_SUBTYPES bootstrap Set, which
+    // is a mirrored constant: `oauth` became an inheriting subtype and the Set
+    // did not know, so an OAuth client was offered a Groups tab for groups that
+    // are never provisioned. The Set stays as the fallback for a subtype the
+    // template cache has not loaded yet.
+    const tpl = subtypeTemplates.find(t => t.slug === subType);
+    if (tpl) return Boolean(tpl.inherits_host_access);
+    return AGENT_SERVICE_SUBTYPES.has(subType);
   }
 
   // The unit/container name to act on for a service resource. Mirrors
@@ -1863,22 +1942,16 @@
       $('#public-container').hide();
       $('#site-details-container').hide();
     } else if (kind === 'service') {
+      // OAuth Configuration is keyed off the SUBTYPE now, not a kind of its
+      // own: an OAuth client is one more thing a service exposes.
+      const isOAuth = isOAuthSubtype($('#res-subtype').val());
       $('#host-parent-container').show();
       $('#host-details-container').hide();
-      $('#service-ports-container').show();
-      $('#service-details-container').show();
-      $('#oauth-details-container').hide();
-      $('#external-container').show();
-      $('#public-container').show();
-      $('#site-details-container').hide();
-    } else if (kind === 'oauth') {
-      $('#host-parent-container').show();
-      $('#host-details-container').hide();
-      $('#service-ports-container').hide();
-      $('#service-details-container').hide();
-      $('#oauth-details-container').show();
-      $('#external-container').hide();
-      $('#public-container').hide();
+      $('#service-ports-container').toggle(!isOAuth);
+      $('#service-details-container').toggle(!isOAuth);
+      $('#oauth-details-container').toggle(isOAuth);
+      $('#external-container').toggle(!isOAuth);
+      $('#public-container').toggle(!isOAuth);
       $('#site-details-container').hide();
     } else { // site
       $('#host-parent-container').hide();
@@ -1920,6 +1993,15 @@
       $('#res-slug').val(slug);
     }
   });
+
+  // OAuth clients are services carrying one of these subtypes -- `kind: 'oauth'`
+  // no longer exists (models/oauth_client.js). Kept as a list rather than a
+  // single string because a SAML SP and an OIDC RP want the same client
+  // credentials panel.
+  var OAUTH_SUBTYPES = ['oauth', 'oidc-client', 'saml-sp'];
+  function isOAuthSubtype(subType) {
+    return OAUTH_SUBTYPES.indexOf(String(subType || '').toLowerCase()) !== -1;
+  }
 
   // Per-kind fallbacks, kept in sync with KIND_ICONS in views/landing.ejs so the
   // preview shows what the catalog will actually render for a blank icon.
@@ -2098,6 +2180,9 @@
     if (props.port && props.port.default && !$('#res-port').val()) $('#res-port').val(props.port.default);
 
     $('#res-subtype-help').html(esc(t.description || ''));
+    // Which panels apply is a function of the subtype now, not just the kind
+    // (OAuth Configuration is the one that moved), so re-run the toggle.
+    toggleFormFields();
     const id = $('#res-id').val();
     renderDynamicFields(tmpl, id && resourcesById[id] ? resourcesById[id].metadata : {});
   }
@@ -2233,8 +2318,6 @@
       if (kind === 'host' && (r.kind === 'site' || r.kind === 'host')) {
         $target.append($('<option>').val(r.id).text(r.name + ' (' + r.slug + ')'));
       } else if (kind === 'service' && (r.kind === 'host' || r.kind === 'service')) {
-        $target.append($('<option>').val(r.id).text(r.name + ' (' + r.slug + ')'));
-      } else if (kind === 'oauth' && r.kind === 'service') {
         $target.append($('<option>').val(r.id).text(r.name + ' (' + r.slug + ')'));
       }
     });
@@ -2665,11 +2748,10 @@
     $('#res-access-ttl').val((r.metadata.token_lifetime || {}).access_token || 3600);
     $('#res-refresh-ttl').val((r.metadata.token_lifetime || {}).refresh_token || 2592000);
     
-    if (r.kind === 'oauth') $('#oauth-rotate-container').show();
-    else $('#oauth-rotate-container').hide();
+    $('#oauth-rotate-container').toggle(isOAuthSubtype(r.metadata && r.metadata.subType));
     
     // Find parent host
-    const parentEdge = allEdges.find(e => e.childId === r.id && (e.relation === 'hosts' || e.relation === 'oauth'));
+    const parentEdge = allEdges.find(e => e.childId === r.id && e.relation === 'hosts');
     populateHostDropdown(parentEdge ? parentEdge.parentId : '');
     toggleFormFields();
 
@@ -2926,7 +3008,7 @@
       name: $('#res-name').val(),
       slug: $('#res-slug').val(),
       kind: $('#res-kind').val(),
-      hostId: ['host', 'service', 'oauth'].includes($('#res-kind').val()) ? $('#res-host-id').val() : undefined,
+      hostId: ['host', 'service'].includes($('#res-kind').val()) ? $('#res-host-id').val() : undefined,
       description: $('#res-description').val(),
       metadata: {
         subType: $('#res-subtype').val(),
@@ -2963,7 +3045,7 @@
       }
     });
     
-    if (data.kind === 'oauth') {
+    if (isOAuthSubtype(data.metadata && data.metadata.subType)) {
       data.redirect_uris = $('#res-redirect-uris').val().split('\n').map(x => x.trim()).filter(Boolean);
       data.scopes = $('#res-scopes').val().split(' ').map(x => x.trim()).filter(Boolean);
       data.allowed_groups = $('#res-allowed-groups').val().split(' ').map(x => x.trim()).filter(Boolean);
@@ -2985,7 +3067,7 @@
       const savedId = id || (res.results && res.results.id);
       if (savedId) setTimeout(function(){ app.util.revealItem($('#resource-row-' + savedId)); }, 400);
 
-      if (!id && data.kind === 'oauth' && res.results && res.results._raw_secret) {
+      if (!id && isOAuthSubtype(data.metadata && data.metadata.subType) && res.results && res.results._raw_secret) {
         // Deliberately no app.modal.close() before this -- app.modal is a
         // singleton, and close() immediately followed by open() in the same
         // tick collides with Bootstrap's hide-transition guard (show()

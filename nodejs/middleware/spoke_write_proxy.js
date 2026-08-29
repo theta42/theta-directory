@@ -253,7 +253,18 @@ async function spokeWriteProxy(req, res, next) {
   forwardHeaders['x-forwarded-spoke'] = cfg.siteSlug || 'spoke';
   forwardHeaders['x-forwarded-for'] = req.ip || req.headers['x-forwarded-for'] || '';
   forwardHeaders['x-forwarded-proto'] = req.protocol || 'http';
+  // Sign the forwarded request so the master can verify it was really sent
+  // by a holder of this spoke's push token and not a replay of something
+  // intercepted (H-14). Keyed by the push token; binds uid + path + timestamp.
+  const fwdAuth = require('../utils/forwarded_auth_hmac');
+  const ts = String(Date.now());
+  forwardHeaders['x-forwarded-ts'] = ts;
+  forwardHeaders['x-forwarded-mac'] = fwdAuth.sign(pushToken, user.uid, ts, path);
 
+  // The 'admin' default is intentionally absent: if we cannot resolve the
+  // acting user we must NOT invent a god-admin identity. The local router's
+  // own auth (above) already gated this request to a real user, so user.uid
+  // is always present here; the sign() call above relies on it.
   let body;
   if (req.body && typeof req.body === 'object' && Object.keys(req.body).length > 0) {
     body = JSON.stringify(req.body);

@@ -217,7 +217,7 @@ A resource owner must be empowered to:
 - [x] Build dynamic form renderer in Edit mode using Subtype `schema`.
 
 ### Discovery plugins
-- [x] Close the `kind` vocabulary to site/host/service/oauth; move `bmc`, `network_device`, `container` and `template` to subtypes.
+- [x] Close the `kind` vocabulary to site/host/service; move `bmc`, `network_device`, `container`, `template` and `oauth` to subtypes.
 - [x] Move the BMC merge guard from a fake `kind` to `identity_class` on the subtype.
 - [x] Make `groupKind()` consult `templateFor().ownGroups`, so one rule decides which resources get their own groups.
 - [x] Unify the two group-naming schemes: `/promote` now uses `services/resource_groups.js` like everything else.

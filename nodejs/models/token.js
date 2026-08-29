@@ -29,10 +29,18 @@ class AuthToken extends Token{
 		user: {model: 'User', type: 'hasOne', localKey: 'created_by'},
 	}
 
+	// Browser-session auth tokens expire 30 days after creation. A session is a
+	// long-lived convenience for a human at a browser, not a machine credential,
+	// so a bounded lifetime limits the window a stolen token is usable.
+	static _ttl = 60 * 60 * 24 * 30;
+
+	get isExpired() {
+		return (new Date).getTime() > (Number(this.created_on) + (this.constructor._ttl * 1000));
+	}
+
 	static async create(data){
 		data.created_by = data.username;
 		return super.create(data)
-
 	}
 }
 
@@ -105,7 +113,13 @@ class OtpToken extends Token {
 
 	static async verify(uid, code) {
 		const tokens = await this.list({where: {uid}});
-		const match = tokens.find(t => t.is_valid && !t.isExpired && t.code === code);
+		const codeBuf = Buffer.from(String(code), 'utf8');
+		const match = tokens.find(t => {
+			if (!t.is_valid || t.isExpired) return false;
+			const tBuf = Buffer.from(String(t.code), 'utf8');
+			if (tBuf.length !== codeBuf.length) return false;
+			return crypto.timingSafeEqual(tBuf, codeBuf);
+		});
 		if (!match) return null;
 		await match.update({is_valid: false});
 		return match;
