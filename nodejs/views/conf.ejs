@@ -74,61 +74,107 @@
 		}
 	}
 
-	async function saveBranding() {
-		const btn = $('#btn-save-branding');
-		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
-
-		const payload = {
-			name: $('#branding-name').val().trim(),
-			logo: $('#branding-logo').val().trim(),
-			icon: $('#branding-icon').val().trim(),
-		};
-
-		try {
-			await app.api.post('conf/branding', payload);
-			app.messages.toast('Branding saved! Spokes will sync on next replication.', 'success');
-		} catch (error) {
-			app.messages.toast('Failed to save branding: ' + error.message, 'danger');
-		} finally {
-			btn.prop('disabled', false).html('<i class="fas fa-save me-1"></i> Save Branding');
+	async function handleReset() {
+		const activeTabId = $('#confTabs .nav-link.active').attr('id');
+		if (activeTabId === 'branding-tab') {
+			await loadBranding();
+			app.messages.toast('Branding reset to saved values', 'info');
+		} else if (activeTabId === 'proxy-tab') {
+			await loadProxyConf();
+			app.messages.toast('Proxy configuration reset to saved values', 'info');
+		} else if (activeTabId === 'tos-tab') {
+			await loadTos();
+			app.messages.toast('Terms of Service reset to saved values', 'info');
+		} else if (activeTabId === 'apps-tab') {
+			await loadApps();
+			app.messages.toast('Apps list refreshed', 'info');
+		} else if (activeTabId === 'sms-tab') {
+			await Promise.all([loadConf(), loadMessagingPlugins()]);
+			app.messages.toast('SMS & Messaging settings reset', 'info');
+		} else {
+			await loadConf();
+			app.messages.toast('Configuration reset to saved values', 'info');
 		}
 	}
 
-	async function saveConf() {
+	async function handleSave() {
 		const btn = $('#btn-save');
+		const originalHtml = btn.html();
 		btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i> Saving...');
 
-		const payload = {
-			smtp: {
-				host: $('#smtp-host').val(),
-				port: parseInt($('#smtp-port').val(), 10) || 587,
-				user: $('#smtp-user').val(),
-				pass: $('#smtp-pass').val(),
-				from: $('#smtp-from').val(),
-				secure: $('#smtp-secure').is(':checked')
-			},
-			oauth: {
-				issuer: $('#oauth-issuer').val(),
-				jwtSecret: $('#oauth-jwtsecret').val(),
-				token_lifetime: {
-					access_token: parseInt($('#oauth-token-access').val(), 10) || 3600,
-					refresh_token: parseInt($('#oauth-token-refresh').val(), 10) || 2592000
-				}
-			},
-			voipms: {
-				username: $('#voipms-username').val(),
-				did: $('#voipms-did').val(),
-				password: $('#voipms-password').val()
-			}
-		};
-
+		const activeTabId = $('#confTabs .nav-link.active').attr('id');
 		try {
-			await app.api.post('conf', payload);
-			app.messages.toast('Configuration saved successfully!', 'success');
+			if (activeTabId === 'branding-tab') {
+				const payload = {
+					name: $('#branding-name').val().trim(),
+					logo: $('#branding-logo').val().trim(),
+					icon: $('#branding-icon').val().trim(),
+				};
+				await app.api.post('conf/branding', payload);
+				app.messages.toast('Branding saved! Spokes will sync on next replication.', 'success');
+			} else if (activeTabId === 'proxy-tab') {
+				const payload = {
+					oidc: {
+						issuer: $('#proxy-issuer').val(),
+						clientId: $('#proxy-client-id').val(),
+						clientSecret: $('#proxy-client-secret').val()
+					},
+					ldap: {
+						bindPassword: $('#proxy-ldap-bindpass').val()
+					}
+				};
+				await app.api.post('conf/proxy', payload);
+				app.messages.toast('Proxy configuration saved securely to OpenBao!', 'success');
+			} else if (activeTabId === 'tos-tab') {
+				const content = document.getElementById('tos-content').value.trim();
+				const resetAcceptance = document.getElementById('tos-reset-acceptance').checked;
+				if (!content) {
+					app.messages.toast('Terms of Service text cannot be empty.', 'warning');
+					return;
+				}
+				await new Promise((resolve, reject) => {
+					app.tos.update({content, resetAcceptance}, (error, data) => {
+						if (error) return reject(new Error((data && data.message) || error));
+						resolve(data);
+					});
+				});
+				app.messages.toast('Terms of Service saved successfully!', 'success');
+				document.getElementById('tos-reset-acceptance').checked = false;
+				loadTos();
+			} else if (activeTabId === 'apps-tab') {
+				app.messages.toast('Use the "Mint Token" button inside the App Tokens panel to mint tokens.', 'info');
+			} else {
+				// Branding, OAuth, SMTP, and SMS tabs
+				const payload = {
+					smtp: {
+						host: $('#smtp-host').val(),
+						port: parseInt($('#smtp-port').val(), 10) || 587,
+						user: $('#smtp-user').val(),
+						pass: $('#smtp-pass').val(),
+						from: $('#smtp-from').val(),
+						secure: $('#smtp-secure').is(':checked')
+					},
+					oauth: {
+						issuer: $('#oauth-issuer').val(),
+						jwtSecret: $('#oauth-jwtsecret').val(),
+						token_lifetime: {
+							access_token: parseInt($('#oauth-token-access').val(), 10) || 3600,
+							refresh_token: parseInt($('#oauth-token-refresh').val(), 10) || 2592000
+						}
+					},
+					voipms: {
+						username: $('#voipms-username').val(),
+						did: $('#voipms-did').val(),
+						password: $('#voipms-password').val()
+					}
+				};
+				await app.api.post('conf', payload);
+				app.messages.toast('Configuration saved successfully!', 'success');
+			}
 		} catch (error) {
-			app.messages.toast('Failed to save configuration: ' + error.message, 'danger');
+			app.messages.toast('Failed to save: ' + (error.message || error), 'danger');
 		} finally {
-			btn.prop('disabled', false).html('<i class="fas fa-save me-1"></i> Save Configuration');
+			btn.prop('disabled', false).html(originalHtml);
 		}
 	}
 
@@ -455,10 +501,6 @@
 							</button>
 						</li>
 					</ul>
-					<div>
-						<button class="btn btn-sm btn-outline-secondary me-1" onclick="loadConf()"><i class="fas fa-rotate me-1"></i> Reset</button>
-						<button id="btn-save" class="btn btn-sm btn-primary" onclick="saveConf()"><i class="fas fa-save me-1"></i> Save Configuration</button>
-					</div>
 				</div>
 
 				<div class="card-body p-4">
@@ -491,7 +533,6 @@
 								<input type="text" class="form-control" id="branding-icon" placeholder="/static/img/icon.png">
 								<div class="form-text">Small icon for browser tabs and bookmarks. Falls back to the logo if empty.</div>
 							</div>
-							<button id="btn-save-branding" class="btn btn-primary" onclick="saveBranding()"><i class="fas fa-save me-1"></i> Save Branding</button>
 						</div>
 
 						<!-- OAuth & JWT Tab -->
@@ -643,8 +684,6 @@
 									<button class="btn btn-outline-secondary" type="button" onclick="togglePassword('proxy-ldap-bindpass')"><i class="fas fa-eye"></i></button>
 								</div>
 							</div>
-
-							<button id="btn-save-proxy" class="btn btn-warning mt-2 text-dark fw-semibold" onclick="saveProxyConf()"><i class="fas fa-save me-1"></i> Save Proxy Secrets</button>
 						</div>
 
 						<!-- External App Tokens Tab -->
@@ -701,15 +740,18 @@
 								<label class="form-label fw-semibold">Terms Content (Markdown)</label>
 								<textarea class="form-control font-monospace" id="tos-content" rows="10" placeholder="Enter Terms of Service markdown content..."></textarea>
 							</div>
-							<div class="form-check mb-4">
+							<div class="form-check mb-2">
 								<input class="form-check-input" type="checkbox" id="tos-reset-acceptance">
 								<label class="form-check-label fw-semibold" for="tos-reset-acceptance">Require all users to re-accept these terms upon next login</label>
 							</div>
-							<button class="btn btn-primary" onclick="saveTos()"><i class="fas fa-floppy-disk me-1"></i> Save Terms of Service</button>
-							<div id="tos-result" style="display:none" class="mt-3"></div>
 						</div>
 
 					</div>
+				</div>
+
+				<div class="card-footer bg-light d-flex justify-content-end gap-2 py-3">
+					<button class="btn btn-outline-secondary" onclick="handleReset()"><i class="fas fa-rotate me-1"></i> Reset</button>
+					<button id="btn-save" class="btn btn-primary" onclick="handleSave()"><i class="fas fa-save me-1"></i> Save Configuration</button>
 				</div>
 			</div>
 		</div>
