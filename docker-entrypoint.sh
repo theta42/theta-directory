@@ -220,6 +220,14 @@ syncprov-sessionlog 100
 REPLICATION_BLOCK_PLACEHOLDER
 
 # Access controls
+# - userPassword: admin write, anonymous auth (for bind), self write, nobody
+#   else. NOT readable by anyone — even the service account must not read
+#   password hashes.
+# - everything else: admin write, dedicated service account (cn=ldapclient)
+#   read for SSSD/auth applications, then by * nothing. The default `by * read`
+#   exposed every attribute (including sshPublicKey and other sensitive
+#   fields) to any bound connection; the service account is the only
+#   non-admin reader.
 access to attrs=userPassword
     by dn="BIND_DN_PLACEHOLDER" write
     by anonymous auth
@@ -228,7 +236,8 @@ access to attrs=userPassword
 
 access to *
     by dn="BIND_DN_PLACEHOLDER" write
-    by * read
+    by dn="cn=ldapclient,ou=people,SUFFIX_PLACEHOLDER" read
+    by * none
 SLAPDEOF
 
 # Generate the rootpw hash ({SSHA}, built-in — no module dependency).
@@ -411,7 +420,7 @@ fi
 
 # ── Initialize the directory tree (idempotent) ──────────────────────────────
 # Only seed if the base DN doesn't exist yet, so restarting the container is safe.
-if ! ldapsearch -x -H ldap://localhost:389 -b "$LDAP_BASE_DN" -s base "(objectClass=*)" >/dev/null 2>&1; then
+if ! ldapsearch -x -D "$LDAP_BIND_DN" -w "$LDAP_ADMIN_PASS" -H ldap://localhost:389 -b "$LDAP_BASE_DN" -s base "(objectClass=*)" >/dev/null 2>&1; then
     info "Initializing LDAP directory..."
 
     ldapadd -x -D "$LDAP_BIND_DN" -w "$LDAP_ADMIN_PASS" -H ldap://localhost:389 << EOF

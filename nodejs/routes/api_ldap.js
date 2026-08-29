@@ -91,15 +91,49 @@ router.post('/search', async (req, res, next) => {
     const { base_dn, scope, filter, attributes } = req.body || {};
     if (!filter) return res.status(400).json({ status: 'error', message: 'filter is required' });
 
+    // Pin the search base to the configured user/group/admin bases. An agent
+    // (the SSSD resolution use case) has no business reading outside the
+    // directory trees it authenticates against; an arbitrary base_dn would let
+    // it walk the whole tree including cn=config.
+    const allowedBases = new Set(
+      [conf.userBase, conf.groupBase, conf.adminBase]
+        .filter(Boolean)
+        .map(b => b.toLowerCase())
+    );
+    const rawBase = base_dn || conf.userBase;
+    if (!allowedBases.has(String(rawBase).toLowerCase())) {
+      return res.status(400).json({ status: 'error', message: 'base_dn is not an allowed search base' });
+    }
+
+    // Restrict scope to base or sub. 'whole'/'one' (if ever accepted) would
+    // over-return; default to sub.
+    const ALLOWED_SCOPES = new Set(['base', 'sub']);
+    const rawScope = scope || 'sub';
+    if (!ALLOWED_SCOPES.has(String(rawScope))) {
+      return res.status(400).json({ status: 'error', message: 'scope must be base or sub' });
+    }
+
     const { modifiedFilter, virtualGroups } = interceptVirtualGroups(String(filter));
 
     let entries = await ldap.withClient(async (client) => {
-      const { searchEntries } = await client.search(base_dn || conf.userBase, {
-        scope: scope || 'sub',
+      const { searchEntries } = await client.search(rawBase, {
+        scope: rawScope,
         filter: modifiedFilter,
         attributes: Array.isArray(attributes) && attributes.length ? attributes : undefined,
       });
       return searchEntries;
+    });
+
+    // Force-drop sensitive attributes regardless of what was requested:
+    // userPassword (credential) and sshPrivateKey (private key material) must
+    // never ride the LDAP-over-HTTPS path back to an agent.
+    const DROP_ATTRS = new Set(['userPassword', 'sshprivatekey', 'sshPublicKey']);
+    entries = entries.map(e => {
+      const out = {};
+      for (const k of Object.keys(e)) {
+        if (!DROP_ATTRS.has(k.toLowerCase())) out[k] = e[k];
+      }
+      return out;
     });
 
     entries = postFilterEntries(entries, virtualGroups);

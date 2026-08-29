@@ -99,11 +99,23 @@ async function dispatchCommandClusterWide(agent, command, payload, requiresSigni
     // Spoke -> Master
     const targetUrl = String(cfg.masterUrl).replace(/\/+$/, '') + `/api/agent/nodes/${agent.id}/command`;
     const token = cfg.replicationPushToken || cfg.masterJoinKey;
+    // Sign the forwarded command (H-14): bind uid + path + timestamp so the
+    // master can verify the request was really sent by a holder of this
+    // spoke's push token. No 'admin' default: a missing actor is a hard fail.
+    const fwdAuth = require('../utils/forwarded_auth_hmac');
+    const actorUid = req.user && req.user.uid;
+    if (!actorUid) {
+      throw new Error(`Cannot forward command: no authenticated actor`);
+    }
+    const ts = String(Date.now());
+    const cmdPath = `/api/agent/nodes/${agent.id}/command`;
     const resp = await fetchWithAuthRedirect(targetUrl, {
       method: 'POST',
       headers: {
         Authorization: 'Bearer ' + token,
-        'X-Forwarded-User': (req.user && req.user.uid) || 'admin',
+        'X-Forwarded-User': actorUid,
+        'X-Forwarded-Ts': ts,
+        'X-Forwarded-Mac': fwdAuth.sign(token, actorUid, ts, cmdPath),
         'X-Command-Routed': '1',
         'Content-Type': 'application/json'
       },
@@ -123,14 +135,28 @@ async function dispatchCommandClusterWide(agent, command, payload, requiresSigni
       if (!spoke.endpoint || !spoke.pushToken) continue;
       try {
         const targetUrl = String(spoke.endpoint).replace(/\/+$/, '') + `/api/agent/nodes/${agent.id}/command`;
+        // Sign the forwarded command (H-14): the spoke verifies the HMAC
+        // keyed by its own push token before trusting X-Forwarded-User.
+        const fwdAuth = require('../utils/forwarded_auth_hmac');
+        const actorUid = req.user && req.user.uid;
+        if (!actorUid) {
+          // No resolvable actor — do not invent an 'admin' identity; skip
+          // this spoke rather than attribute the action to a god user.
+          continue;
+        }
+        const ts = String(Date.now());
+        const cmdPath = `/api/agent/nodes/${agent.id}/command`;
+        const signHeaders = {
+          'Authorization': 'Bearer ' + spoke.pushToken,
+          'X-Forwarded-User': actorUid,
+          'X-Forwarded-Ts': ts,
+          'X-Forwarded-Mac': fwdAuth.sign(spoke.pushToken, actorUid, ts, cmdPath),
+          'X-Command-Routed': '1',
+          'Content-Type': 'application/json'
+        };
         const resp = await fetchWithAuthRedirect(targetUrl, {
           method: 'POST',
-          headers: {
-            Authorization: 'Bearer ' + spoke.pushToken,
-            'X-Forwarded-User': (req.user && req.user.uid) || 'admin',
-            'X-Command-Routed': '1',
-            'Content-Type': 'application/json'
-          },
+          headers: signHeaders,
           body: JSON.stringify({ command, payload, isHighRisk: requiresSigning })
         }, { timeoutMs: 5000 });
         if (resp.ok) {
@@ -383,11 +409,12 @@ router.get('/join-keys/:id/agents', async (req, res, next) => {
 
 router.post('/join-keys', async (req, res, next) => {
   try {
-    const { label, expiresInDays } = req.body || {};
+    const { label, expiresInDays, maxUses } = req.body || {};
     const { key, raw } = await AgentJoinKey.issue({
       label: (label && String(label).trim()) || 'default',
       createdBy: req.user.uid,
-      expiresInDays: expiresInDays ? Number(expiresInDays) : null
+      expiresInDays: expiresInDays ? Number(expiresInDays) : null,
+      maxUses: maxUses ? Number(maxUses) : null
     });
     logAgentAudit('join_key_issued', { actor: req.user.uid, label: key.label, keyPrefix: key.keyPrefix });
     replicateOnFinish(res, 'agent-join-key-issued');
@@ -493,7 +520,7 @@ router.post('/nodes/:id/command', async (req, res, next) => {
     const msg = await dispatchCommandClusterWide(agent, command, payload || {}, requiresSigning, req);
 
     logAgentAudit('command', {
-      actor: (req.user && req.user.uid) || 'admin',
+      actor: req.user && req.user.uid,
       agentId: agent.id,
       agentName: agent.name,
       resourceId: agent.resourceId || null,
@@ -579,6 +606,22 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
             existingAgent = matches && matches.find(a => !a.revoked);
           }
           if (existingAgent) {
+            // Contract G-2: re-enrolling an existing host requires presenting
+            // the agent's CURRENT token (?prev_token=). Without this, anyone
+            // holding the join key could collide on the hostname and rotate
+            // the real host's token, taking it over. A missing/incorrect
+            // prev_token is rejected with 4001 (same as bad credential).
+            const prevToken = url.searchParams.get('prev_token');
+            const prevHash = prevToken ? Agent.hashToken(prevToken) : null;
+            const knowsCurrent = prevHash && existingAgent.tokenHash === prevHash;
+            if (!knowsCurrent) {
+              logAgentAudit('join_rejected', {
+                remoteAddr, reason: 'prev_token required for existing agent',
+                agentId: existingAgent.id, agentName: existingAgent.name, hostname
+              });
+              try { ws.close(4001, 'prev_token required: this host is already enrolled'); } catch (e) {}
+              return;
+            }
             const newToken = await existingAgent.rotateToken();
             agent = existingAgent;
             issuedToken = newToken;
@@ -666,24 +709,28 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
             socketPubsub.emitChannel(app.io, 'agent.discovery', { agentId: current.id, payload });
             if (payload.capabilities && payload.capabilities.configure_ldap) {
               const conf = require('@simpleworkjs/conf');
-              const os = require('os');
-              const ssoHost = (conf.stack && conf.stack.ssoHost) || 'sso.laptop-dev.vm42.us';
-              const ldapBaseDn = (conf.stack && conf.stack.ldapBaseDn) || 'dc=laptop-dev,dc=vm42,dc=us';
-              
-              const lanIps = [];
-              const ifaces = os.networkInterfaces();
-              for (const dev in ifaces) {
-                for (const details of ifaces[dev]) {
-                  if (!details.internal && details.family === 'IPv4') lanIps.push(details.address);
-                }
+              const ssoHost = conf.stack && conf.stack.ssoHost;
+              const ldapBaseDn = conf.stack && conf.stack.ldapBaseDn;
+              // Refuse to push SSSD config when stack host/base are unset: a
+              // missing host means this directory has not been told its own
+              // address, and pushing a placeholder (or a dev default) would
+              // point every agent at a host that is not us. The operator must
+              // set stack.ssoHost / stack.ldapBaseDn (Directory → Settings).
+              if (!ssoHost || !ldapBaseDn) {
+                console.error(`[Theta Agent] Auto configure_ldap skipped for "${current.name}": stack.ssoHost / stack.ldapBaseDn not set`);
+                logAgentAudit('configure_ldap_skipped', { agentId: current.id, agentName: current.name, reason: 'stack host/base not configured' });
+                break;
               }
+
+              // URI list is restricted to the local Unix socket, loopback, and
+              // LDAPS on the configured SSO host only. Cleartext network URIs
+              // (ldap:// to a LAN IP or the SSO host on 389) are dropped: SSSD
+              // would happily send bind passwords in the clear, and a LAN IP
+              // is not a stable directory address anyway.
               const uriList = [
                 `ldapi://%2frun%2ftheta%2fldap.sock`,
                 `ldap://127.0.0.1:3890`,
-                `ldap://127.0.0.1:389`,
-                `ldap://${ssoHost}:389`,
                 `ldaps://${ssoHost}:636`,
-                ...lanIps.map(ip => `ldap://${ip}:389`)
               ];
               const ldapUris = [...new Set(uriList)].join(', ');
 

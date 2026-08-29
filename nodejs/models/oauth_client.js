@@ -6,6 +6,26 @@ const crypto = require('crypto');
 const conf = require('@simpleworkjs/conf');
 const UUID = () => crypto.randomUUID();
 
+// OAuth clients are SERVICES with `subType: 'oauth'`, not a kind of their own.
+//
+// A kind is a structural role in the graph -- site, host, service -- and an
+// OAuth client is none of those things structurally: it is one more thing a
+// service exposes, alongside the http endpoint and the ssh port. As a kind it
+// was an outlier that got no access groups (services/resource_groups.js), had
+// no subtype vocabulary at all (0 of 119 templates target it), and needed a
+// special-cased `relation: 'oauth'` edge to hang off the service it belongs to.
+// As a subtype it inherits all of that for free.
+const OAUTH_SUBTYPE = 'oauth';
+
+function isOAuthClient(resource) {
+	return Boolean(
+		resource &&
+		resource.kind === 'service' &&
+		resource.metadata &&
+		resource.metadata.subType === OAUTH_SUBTYPE
+	);
+}
+
 const defaultLifetime = (conf.oauth && conf.oauth.token_lifetime) || {
 	access_token: 3600,
 	refresh_token: 2592000
@@ -25,12 +45,13 @@ class OAuthClient {
 
 		const r = await Resource.create({
 			id: client_id,
-			kind: 'oauth',
+			kind: 'service',
 			name: data.name,
 			slug: slug,
 			description: data.description || '',
 			owner: data.created_by,
 			metadata: {
+				subType: OAUTH_SUBTYPE,
 				client_secret_hash,
 				redirect_uris: data.redirect_uris || [],
 				scopes: data.scopes || ['openid', 'profile', 'email', 'groups'],
@@ -58,7 +79,7 @@ class OAuthClient {
 			// Resource.get() returns null (does not throw) for a missing id —
 			// guard it so a bad/undefined client_id is a clean 404, not a
 			// "Cannot read properties of null (reading 'kind')" 500.
-			if (!r || r.kind !== 'oauth') throw notFound();
+			if (!isOAuthClient(r)) throw notFound();
 		// Map metadata to top-level properties to satisfy routes/oauth.js without rewriting it
 		r.client_id = r.id;
 		r.client_secret_hash = r.metadata.client_secret_hash;
@@ -120,8 +141,11 @@ class OAuthClient {
 	}
 
 	static async list() {
-		const resources = await Resource.list({ where: { kind: 'oauth' } });
-		return Promise.all(resources.map(r => this.get(r.id)));
+		// Filtered in JS, not in the where clause: the discriminator moved from
+		// the `kind` column into `metadata.subType`, which is a JSON blob the
+		// adapters cannot index into portably.
+		const resources = await Resource.list({ where: { kind: 'service' } });
+		return Promise.all(resources.filter(isOAuthClient).map(r => this.get(r.id)));
 	}
 
 	static async listDetail() {
@@ -134,4 +158,4 @@ class OAuthClient {
 	}
 }
 
-module.exports = { OAuthClient };
+module.exports = { OAuthClient, OAUTH_SUBTYPE, isOAuthClient };

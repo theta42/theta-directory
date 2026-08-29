@@ -446,7 +446,8 @@ async function runStateEvaluation() {
 // Rows that are individually malformed are DROPPED rather than failing the
 // whole run: one bad guest out of fifty should not discard the other
 // forty-nine. Anything dropped is reported so it is not silent.
-const CANONICAL_KINDS = new Set(['site', 'host', 'service', 'oauth']);
+// 'oauth' is not here: an OAuth client is a service with `subType: 'oauth'`.
+const CANONICAL_KINDS = new Set(['site', 'host', 'service']);
 
 function validateDiscoveryPayload(payload) {
   if (!payload || typeof payload !== 'object') {

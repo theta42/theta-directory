@@ -6,7 +6,7 @@ class Webhook extends Model {
     name: { type: 'string', isRequired: true },
     url: { type: 'string', isRequired: true },
     events: { type: 'json', default: [] }, // e.g. ['discovery.new_device', 'resource.updated']
-    secret: { type: 'string' },
+    secret: { type: 'string', isPrivate: true },
     isActive: { type: 'boolean', default: true },
     created_on: { type: 'integer' },
   };

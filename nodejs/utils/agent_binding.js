@@ -70,6 +70,43 @@ async function ensureAgentService(hostResource) {
   return service;
 }
 
+// Slugify the way the seed paths do, so a name can be compared against a slug
+// that was built from it. bootstrap.js writes `host_<slug>`; the agent
+// self-enrolment path below writes `host-<slug>`. Both forms are accepted.
+function hostSlugCandidates(name) {
+  const base = String(name || '').toLowerCase().trim()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  return base ? [`host_${base}`, `host-${base}`, base] : [];
+}
+
+// An EXISTING host at `siteId` that is already this machine, or null.
+//
+// A self-enrolling agent reports its hostname, and on any install seeded by
+// bootstrap.js that machine already has a host resource -- the stack host
+// itself is the usual case. Creating a second one unconditionally is how a
+// fresh install ended up with two `theta-suite-718it` hosts, one carrying every
+// service and the other carrying only the agent.
+//
+// Matched on the host's own name or slug, and only among hosts that actually
+// sit under this site: the same hostname at two sites is two machines.
+async function findHostAtSite(siteId, name) {
+  if (!siteId || !name) return null;
+  const { Resource, ResourceEdge } = require('../models/resource');
+
+  const wanted = String(name).toLowerCase().trim();
+  const slugs = new Set(hostSlugCandidates(name));
+
+  const edges = await ResourceEdge.list({ where: { parentId: siteId } }).catch(() => []);
+  for (const edge of edges) {
+    const child = await Resource.get(edge.childId).catch(() => null);
+    if (!child || child.kind !== 'host') continue;
+    const childName = String(child.name || '').toLowerCase().trim();
+    const childSlug = String(child.slug || '').toLowerCase();
+    if (childName === wanted || slugs.has(childSlug)) return child;
+  }
+  return null;
+}
+
 // The host an agent runs on: the parent of the agent's own service resource.
 // Null when the agent is unbound, or bound to something that is not an agent
 // service.
@@ -92,6 +129,8 @@ module.exports = {
   AGENT_SERVICE_SUBTYPE,
   isAgentService,
   agentServiceSlug,
+  hostSlugCandidates,
+  findHostAtSite,
   findAgentService,
   ensureAgentService,
   hostForAgent

@@ -40,6 +40,19 @@ async function auth(req, res, next){
 				const claimedSlug = req.header('x-forwarded-spoke');
 				const slugMatches = !claimedSlug || !spoke || !spoke.siteSlug || claimedSlug === spoke.siteSlug;
 				if (spoke && slugMatches) {
+					// Verify the HMAC signature (H-14): proves the request was
+					// signed by a holder of this spoke's push token, binds it to
+					// this uid + path, and defeats replay beyond the ±5 min window.
+					const fwdAuth = require('../utils/forwarded_auth_hmac');
+					const mac = req.header('x-forwarded-mac');
+					const ts = req.header('x-forwarded-ts');
+					const url = req.originalUrl || req.url || '';
+					const q = url.indexOf('?');
+					const path = q === -1 ? url : url.slice(0, q);
+					const token = isMasterCalling ? cfg.replicationPushToken : (spoke && spoke.pushToken);
+					if (!token || !fwdAuth.verify(token, fwdUser, ts, path, mac)) {
+						return res.status(401).json({ status: 'error', message: 'unauthorized' });
+					}
 					const { User } = require('../models/user');
 					const user = await User.get(fwdUser).catch(() => null);
 					if (user && user.uid) {

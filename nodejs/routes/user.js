@@ -420,6 +420,12 @@ router.get('/export', async function(req, res, next){
 
 router.get('/:uid', async function(req, res, next){
 	try{
+		// Self-or-admin: a user may read their own record, but reading anyone
+		// else's requires app_sso_admin. Without this, every authenticated
+		// user can pull arbitrary profiles (uid enumeration / data access).
+		if (req.params.uid !== req.user.uid) {
+			await permission.byGroup(req.user, ['app_sso_admin', 'app_super_admin']);
+		}
 		return res.json({
 			results:  await User.get(req.params.uid),
 		});

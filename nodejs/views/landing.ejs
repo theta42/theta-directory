@@ -115,8 +115,16 @@
         site:    'fa-solid fa-city',
         host:    'fa-solid fa-server',
         service: 'fa-solid fa-cube',
-        oauth:   'fa-solid fa-key'
+        oauth:   'fa-solid fa-key'  // legacy kind fallback; oauth is a service subtype
     };
+
+    // Kept in step with OAUTH_SUBTYPES in views/directory.ejs. An OAuth client
+    // is a credential registration, not somewhere a person browses to, so it is
+    // filtered out of the catalog rather than offered as a service card.
+    var OAUTH_SUBTYPES = ['oauth', 'oidc-client', 'saml-sp'];
+    function isOAuthSubtype(subType) {
+        return OAUTH_SUBTYPES.indexOf(String(subType || '').toLowerCase()) !== -1;
+    }
 
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, function(c) {
@@ -273,7 +281,7 @@
 
     function renderAll() {
         // Split mine into services and hosts
-        var myServices = state.mine.filter(function(r) { return r.kind === 'service' || r.kind === 'oauth'; });
+        var myServices = state.mine.filter(function(r) { return r.kind === 'service'; });
         var myHosts = state.mine.filter(function(r) { return r.kind === 'host'; });
 
         renderGrid('my-services', myServices, true);
@@ -298,7 +306,11 @@
         var mineIds = {};
         state.mine.forEach(function(r){ mineIds[r.id] = true; });
         state.others = (allRes.results || []).filter(function(r){
-            return !mineIds[r.id] && r.kind !== 'site' && r.kind !== 'oauth' && (r.metadata && r.metadata.managed);
+            // OAuth clients are services with subType 'oauth' now, not a kind: they
+            // are a credential registration, not something to browse to.
+            return !mineIds[r.id] && r.kind !== 'site'
+              && !isOAuthSubtype(r.metadata && r.metadata.subType)
+              && (r.metadata && r.metadata.managed);
         });
 
         // Requests are best-effort: a failure here must not blank the catalog.

@@ -143,15 +143,26 @@ describe('AgentManager PROTOCOL.md v1.2.0 Compliance', () => {
     expect(typeof msg.payload.signature).toBe('string');
 
     const keys = await agentKeys.load();
+    // G-1: signature covers {type, payload}, so verify against the same
+    // envelope the signer used — type bound in, signature omitted.
+    const envelope = { type: 'arbitrary_bash', ...rawPayload };
     const isValid = crypto.verify(
+      null,
+      Buffer.from(agentManager.canonicalize(envelope), 'utf8'),
+      crypto.createPublicKey(keys.publicKeyPem),
+      Buffer.from(msg.payload.signature, 'base64')
+    );
+    expect(isValid).toBe(true);
+    // And it must NOT verify against payload-only (type is bound in).
+    const payloadOnly = crypto.verify(
       null,
       Buffer.from(agentManager.canonicalize(rawPayload), 'utf8'),
       crypto.createPublicKey(keys.publicKeyPem),
       Buffer.from(msg.payload.signature, 'base64')
     );
-    expect(isValid).toBe(true);
+    expect(payloadOnly).toBe(false);
   });
-
+ 
   // The canonical form has to match the Go agent's byte for byte. Go's
   // encoding/json escapes <, > and & by default and JSON.stringify does not, so
   // the agent uses SetEscapeHTML(false); this pins the server's half of that

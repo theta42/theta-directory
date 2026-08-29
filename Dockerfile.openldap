@@ -128,6 +128,7 @@ COPY nodejs/utils ./utils
 COPY nodejs/views ./views
 COPY nodejs/public ./public
 COPY nodejs/plugins ./plugins
+COPY nodejs/test_runner.js ./test_runner.js
 
 # routes/index.js reads path.join(__dirname, '../../tos.md') at boot. With the
 # app flattened into /app, __dirname is /app/routes and ../../ resolves to /,

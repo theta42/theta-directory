@@ -224,12 +224,20 @@ async function startSlapd(argv) {
 // waitForSlapd polls until the directory answers a base search. Restarting the
 // process is not the same as the directory being usable, and returning early
 // would hand the caller a window in which every LDAP call fails.
-async function waitForSlapd(baseDn, { url = 'ldap://localhost:389', timeoutMs = 30000 } = {}) {
+async function waitForSlapd(baseDn, { url = 'ldap://localhost:389', timeoutMs = 30000, bindDn, bindPassword } = {}) {
+  const conf = require('@simpleworkjs/conf');
+  const bDn = bindDn || (conf.ldap && conf.ldap.bindDN) || (conf.app_ldap && conf.app_ldap.bindDN) || (baseDn ? `cn=admin,${baseDn}` : '');
+  const bPw = bindPassword || (conf.ldap && conf.ldap.bindPassword) || (conf.app_ldap && conf.app_ldap.bindPassword) || process.env.LDAP_ADMIN_PASS || '';
   const deadline = Date.now() + timeoutMs;
   let lastErr = null;
   while (Date.now() < deadline) {
     try {
-      await io.execFile('ldapsearch', ['-x', '-H', url, '-b', baseDn, '-s', 'base', '(objectClass=*)'], { timeout: 5000 });
+      const args = ['-x', '-H', url];
+      if (bPw) {
+        args.push('-D', bDn, '-w', bPw);
+      }
+      args.push('-b', baseDn, '-s', 'base', '(objectClass=*)');
+      await io.execFile('ldapsearch', args, { timeout: 5000 });
       return true;
     } catch (e) {
       lastErr = e;
