@@ -1,3 +1,9 @@
+## [2.36.9] - 2026-08-30
+
+### Changed
+- **Directory Modal Footer Layout**: Moved View/Edit mode toggle to bottom-right modal footer alongside Close and Save buttons.
+- **Modal Footer Audit Information**: Formatted `created_on` and `updated_on` timestamps even when `created_by`/`updated_by` are null (such as on discovered or system-provisioned resources).
+
 ## [2.36.8] - 2026-08-29
 
 ### Fixed

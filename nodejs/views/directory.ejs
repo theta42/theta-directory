@@ -339,12 +339,9 @@
     <div class="actionMessage mb-3" style="display:none"></div>
     <input type="hidden" id="res-id">
 
-    <!-- The View/Edit toggle is NOT here. It lives in the modal header, injected
-         by openResourceModal() -- see modeToggleHtml below. It used to sit in
-         this pane, which meant switching to any other tab took the only control
-         that could leave View mode away with it: every field on Details (OAuth
-         Configuration among them), Groups, Children, Secrets and Status was
-         disabled with nothing on screen able to enable it. -->
+    <!-- The View/Edit toggle lives in the modal footer right side, rendered
+         by openResourceModal() -- see modeToggleHtml below. Mode is a property
+         of the whole modal -- every tab is disabled in View mode. -->
 
     <!-- Read-only dashboard. Rendered from the resource, not from the form:
          View mode used to be the edit form with a Save button hidden, and the
@@ -702,12 +699,36 @@
     </div>
   `;
 
-  // The View/Edit switch, injected into the modal HEADER rather than into a tab
-  // pane. Mode is a property of the whole modal -- every tab is disabled in View
-  // mode -- so the control for it cannot live inside one tab's content, or
-  // leaving that tab strands the operator in a read-only form with no way out.
+  // Helper to format audit timestamps in the modal footer even when created_by/updated_by are null
+  function formatResourceAudit(record) {
+    if (!record) return '';
+    let created = '';
+    if (record.created_by && record.created_on) {
+      created = 'Created by ' + esc(record.created_by) + ' on ' + fmtStamp(record.created_on);
+    } else if (record.created_on) {
+      created = 'Created on ' + fmtStamp(record.created_on);
+    } else if (record.created_by) {
+      created = 'Created by ' + esc(record.created_by);
+    }
+
+    let updated = '';
+    if (record.updated_by && record.updated_on) {
+      updated = 'Updated by ' + esc(record.updated_by) + ' on ' + fmtStamp(record.updated_on);
+    } else if (record.updated_on) {
+      updated = 'Updated on ' + fmtStamp(record.updated_on);
+    } else if (record.updated_by) {
+      updated = 'Updated by ' + esc(record.updated_by);
+    }
+
+    const parts = [created, updated].filter(Boolean);
+    if (parts.length === 0) return '';
+    return parts.join(' &middot; ');
+  }
+
+  // The View/Edit switch, rendered in the modal FOOTER to the right rather than
+  // inside a tab pane or header.
   var modeToggleHtml = `
-    <div class="btn-group ms-auto me-2 resource-mode-toggle" role="group" aria-label="View or edit this resource">
+    <div class="btn-group resource-mode-toggle me-2" role="group" aria-label="View or edit this resource">
       <input type="radio" class="btn-check" name="btnradio" id="btnradio1" autocomplete="off" checked onchange="toggleEditMode(false)">
       <label class="btn btn-outline-secondary btn-sm" for="btnradio1"><i class="fa-solid fa-eye me-1"></i>View</label>
       <input type="radio" class="btn-check" name="btnradio" id="btnradio2" autocomplete="off" onchange="toggleEditMode(true)">
@@ -731,23 +752,11 @@
         {id: 'status', label: 'Status', bodyHtml: statusTabHtml(resourcesById[id])},
       ],
       footer: {
-        metaHtml: id ? app.modal.formatAudit(resourcesById[id], {formatDate: fmtStamp}) : '',
-        buttonsHtml: app.modal.footerButtons({onSave: 'saveResource()', saveLabel: 'Save Resource'}),
+        metaHtml: id ? formatResourceAudit(resourcesById[id]) : '',
+        buttonsHtml: (id ? modeToggleHtml : '') + app.modal.footerButtons({onSave: 'saveResource()', saveLabel: 'Save Resource'}),
       },
       url: id ? {path: '/directory/' + resourcesById[id].slug} : null,
     });
-    // Header injection, after open() has rebuilt the modal DOM. Placed before
-    // the close button so it reads as part of the title bar.
-    //
-    // Addressed by #sw-modal, NOT `.modal.show`: Bootstrap adds `show` on the
-    // fade transition, which has not happened yet at this point, so a
-    // `.show`-scoped selector matches nothing and drops the toggle silently.
-    // Remove first: app.modal.open() rebuilds the BODY but reuses the header,
-    // so injecting unconditionally stacked a second toggle on every reopen --
-    // two live pairs of radios sharing one name, where clicking the stale one
-    // left the visible pair showing the wrong mode.
-    $('#sw-modal .modal-header .resource-mode-toggle').remove();
-    $('#sw-modal .modal-header .btn-close').before(modeToggleHtml);
 
     $('#sw-modal-tab-groups-btn, #sw-modal-tab-children-btn, #sw-modal-tab-secrets-btn').closest('li').toggle(!!id);
     // Services an agent registered are gated by their host, not by groups of
