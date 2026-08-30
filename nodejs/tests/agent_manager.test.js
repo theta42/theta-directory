@@ -233,3 +233,83 @@ describe('agent signing key', () => {
     expect(raw.equals(der.subarray(der.length - 32))).toBe(true);
   });
 });
+
+describe('theta-agent docker service reconciliation', () => {
+  const { Resource, ResourceEdge } = require('../models/resource');
+  const { initORM } = require('../models');
+
+  beforeAll(async () => {
+    await initORM();
+  });
+
+  beforeEach(async () => {
+    const all = await Resource.list().catch(() => []);
+    for (const r of all) await r.delete().catch(() => {});
+    const edges = await ResourceEdge.list().catch(() => []);
+    for (const e of edges) await e.delete().catch(() => {});
+  });
+
+  test('reconciles docker container telemetry and binds to existing bootstrap service', async () => {
+    const hostId = crypto.randomUUID();
+    const serviceAgentId = crypto.randomUUID();
+    const proxySvcId = crypto.randomUUID();
+
+    // 1. Create Host resource
+    const hostRes = await Resource.create({
+      id: hostId,
+      kind: 'host',
+      name: 'prod-server',
+      slug: 'host_prod-server',
+      metadata: { subType: 'linux' },
+      created_on: Math.floor(Date.now() / 1000)
+    });
+
+    // 2. Create Agent Service resource under host
+    const agentSvc = await Resource.create({
+      id: serviceAgentId,
+      kind: 'service',
+      name: 'theta-agent',
+      slug: 'svc-prod-server-theta-agent',
+      metadata: { subType: 'theta-agent', hostId },
+      created_on: Math.floor(Date.now() / 1000)
+    });
+    await ResourceEdge.create({ id: crypto.randomUUID(), parentId: hostId, childId: serviceAgentId, relation: 'hosts' });
+
+    // 3. Create existing bootstrap service 'proxy-local'
+    const proxySvc = await Resource.create({
+      id: proxySvcId,
+      kind: 'service',
+      name: 'Proxy',
+      slug: 'proxy-local',
+      metadata: { subType: 'web', hostId, dockerContainer: 'proxy', port: 3000 },
+      created_on: Math.floor(Date.now() / 1000)
+    });
+    await ResourceEdge.create({ id: crypto.randomUUID(), parentId: hostId, childId: proxySvcId, relation: 'hosts' });
+
+    const agent = stubAgent({ name: 'prod-server', resourceId: serviceAgentId });
+
+    // 4. Send telemetry containing 'proxy' (existing) and 'custom-db' (new container)
+    await agentManager.reconcileServicesFromTelemetry(agent, [
+      { name: 'proxy', subtype: 'docker' },
+      { name: 'custom-db', subtype: 'docker' }
+    ]);
+
+    const allServices = await Resource.list({ where: { kind: 'service' } });
+    expect(allServices).toHaveLength(3); // agentSvc + proxySvc + custom-db
+
+    // Proxy service updated with discovery source, not duplicated
+    const updatedProxy = await Resource.get(proxySvcId);
+    expect(updatedProxy.metadata.discovery_sources).toContain('theta-agent');
+    expect(updatedProxy.metadata.dockerContainer).toBe('proxy');
+
+    // New custom-db service created under host
+    const customDb = allServices.find(s => s.name === 'custom-db');
+    expect(customDb).toBeDefined();
+    expect(customDb.metadata.subType).toBe('docker');
+    expect(customDb.metadata.serviceName).toBe('custom-db');
+
+    const edges = await ResourceEdge.list({ where: { childId: customDb.id } });
+    expect(edges).toHaveLength(1);
+    expect(edges[0].parentId).toBe(hostId);
+  });
+});

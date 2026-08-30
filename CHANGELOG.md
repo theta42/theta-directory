@@ -1,3 +1,11 @@
+## [2.36.2] - 2026-08-29
+
+### Removed
+- **Docker Discovery Plugin**: Removed `plugins/discovery/docker.js` and direct Docker socket dependency from the SSO container. Container discovery, metrics, and actions are now handled natively via `theta-agent` host integration.
+
+### Changed
+- **Service Telemetry Reconciliation**: Enhanced `utils/agent_manager.js` to match existing bootstrap service resources (`proxy`, `sso-manager`, `jump-host`) on container/service names, eliminating duplicate child nodes while binding live agent telemetry and control actions.
+
 ## [2.36.1] - 2026-08-29
 
 ### Added
