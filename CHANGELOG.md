@@ -1,3 +1,11 @@
+## [2.36.6] - 2026-08-29
+
+### Added
+- **Resource Admin Endpoints**: Added `GET /api/directory-admin/resources/:id` endpoint (supporting ID and slug lookup) and added `?all=true` query support to `GET /api/directory-admin/resources` to retrieve the complete directory inventory including unmanaged items.
+
+### Fixed
+- **Idempotent Resource Creation**: Made `POST /api/directory-admin/resources` safely update pre-existing discovered items on slug match without failing with unique constraint violations.
+
 ## [2.36.5] - 2026-08-29
 
 ### Added

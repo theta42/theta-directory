@@ -178,19 +178,21 @@ router.get('/resources', async (req, res, next) => {
     // exactly like an empty one, and the top of a collapsed tree showed no
     // status at all.
     let resources = (await Resource.getGraph()).resources;
-    resources = resources.filter(r => {
-      // Sites are structural containers, not discovery output -- always shown.
-      if (r.kind === 'site') return true;
-      // A resource discovery ever touched only belongs in the Directory once
-      // it's explicitly managed (created by an agent, promoted by a user, or
-      // merged into an already-managed resource). Until then it's pending
-      // review in the Discovered Inventory tab. Anything discovery never
-      // touched (created directly through this admin UI) has no
-      // discovery_sources and is always shown.
-      const isDiscovered = r.metadata?.discovery_sources?.length > 0;
-      const isManaged = r.metadata?.managed === true;
-      return !isDiscovered || isManaged;
-    });
+    if (req.query.all !== 'true' && req.query.all !== '1') {
+      resources = resources.filter(r => {
+        // Sites are structural containers, not discovery output -- always shown.
+        if (r.kind === 'site') return true;
+        // A resource discovery ever touched only belongs in the Directory once
+        // it's explicitly managed (created by an agent, promoted by a user, or
+        // merged into an already-managed resource). Until then it's pending
+        // review in the Discovered Inventory tab. Anything discovery never
+        // touched (created directly through this admin UI) has no
+        // discovery_sources and is always shown.
+        const isDiscovered = r.metadata?.discovery_sources?.length > 0;
+        const isManaged = r.metadata?.managed === true;
+        return !isDiscovered || isManaged;
+      });
+    }
     // Even admins never receive secret metadata (e.g. client_secret_hash) over
     // the wire; projectResources strips it unconditionally.
     //
@@ -210,6 +212,19 @@ router.get('/resources', async (req, res, next) => {
       r.secretKeys = r.metadata?.secretKeys || [];
       return r;
     });
+    res.json({ results: projected });
+  } catch (err) { next(err); }
+});
+
+router.get('/resources/:id', async (req, res, next) => {
+  try {
+    let r = await Resource.get(req.params.id).catch(() => null);
+    if (!r) {
+      const bySlug = await Resource.list({ where: { slug: req.params.id } });
+      if (bySlug && bySlug.length > 0) r = bySlug[0];
+    }
+    if (!r) return res.status(404).json({ error: 'Resource not found' });
+    const projected = projectResources([r], { fullMetadata: true })[0];
     res.json({ results: projected });
   } catch (err) { next(err); }
 });
@@ -318,17 +333,29 @@ router.post('/resources', async (req, res, next) => {
     let r;
     if (isOAuth) {
       const { OAuthClient } = require('../models/oauth_client');
-      // Pass created_by explicitly for the wrapper (overrides the generic
-      // assignment above -- this is OAuthClient-wrapper-specific behavior).
       req.body.created_by = req.body.owner;
-      // In the UI we might pass slug, but OAuthClient wrapper expects name
       r = await OAuthClient.add(req.body);
     } else {
-      r = await Resource.create(req.body);
+      const existing = await Resource.list({ where: { slug: req.body.slug } });
+      if (existing && existing.length > 0) {
+        const prev = existing[0];
+        const mergedMeta = { ...(prev.metadata || {}), ...(req.body.metadata || {}) };
+        r = await prev.update({
+          name: req.body.name || prev.name,
+          metadata: mergedMeta,
+          updated_by: req.body.updated_by,
+          updated_on: req.body.updated_on
+        });
+      } else {
+        r = await Resource.create(req.body);
+      }
     }
 
     if ((r.kind === 'host' || r.kind === 'service') && req.body.hostId) {
-      await ResourceEdge.create({ parentId: req.body.hostId, childId: r.id, relation: 'hosts' });
+      const existingEdge = await ResourceEdge.list({ where: { parentId: req.body.hostId, childId: r.id } });
+      if (!existingEdge || existingEdge.length === 0) {
+        await ResourceEdge.create({ parentId: req.body.hostId, childId: r.id, relation: 'hosts' });
+      }
     }
 
     // ── Group provisioning (docs/GROUPS.md) ───────────────────────────────
