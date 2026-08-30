@@ -582,8 +582,9 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
           // specific, and quietly filing it elsewhere is how a host ends up in
           // the wrong site inheriting the wrong access.
           const siteHint = (url.searchParams.get('site') || '').trim();
+          const hasExplicitSite = siteHint && !['default', 'unknown', 'none'].includes(siteHint.toLowerCase());
           let site = null;
-          if (siteHint) {
+          if (hasExplicitSite) {
             site = await resolveSiteHint(siteHint);
             if (!site) {
               logAgentAudit('join_rejected', { remoteAddr, reason: 'site not found', site: siteHint });
