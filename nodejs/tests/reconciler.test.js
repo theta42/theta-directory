@@ -193,4 +193,45 @@ describe('DiscoveryReconciler unresolvable parents', () => {
 
     expect(await parentsOf('docker-theta-suite-sso-manager')).toEqual(['sso-manager-718it']);
   });
+
+  it('prunes redundant direct site edge when a hypervisor parent edge is established for an existing host', async () => {
+    const site = (await Resource.list()).find(r => r.kind === 'site') || await Resource.create({
+      id: crypto.randomUUID(),
+      kind: 'site',
+      name: '718it',
+      slug: 'site_718it',
+      metadata: { isCurrentSite: true }
+    });
+    const existingHost = await Resource.create({
+      id: crypto.randomUUID(),
+      kind: 'host',
+      name: 'theta-suite-718it',
+      slug: 'host_theta-suite-718it',
+      metadata: { ip: '192.168.1.57' }
+    });
+    // Direct site edge from bootstrap
+    await ResourceEdge.create({
+      id: crypto.randomUUID(),
+      parentId: site.id,
+      childId: existingHost.id,
+      relation: 'hosts',
+      source: null
+    });
+
+    expect(await parentsOf('host_theta-suite-718it')).toEqual([site.slug]);
+
+    // Hypervisor discovers LXC 101 matching existingHost by IP
+    await DiscoveryReconciler.reconcile('proxmox-test', {
+      resources: [
+        { kind: 'host', name: 'dl380-0', slug: 'pve-node-dl380-0', metadata: {} },
+        { kind: 'host', name: 'theta-suite-718it', slug: 'lxc-101', metadata: { ip: '192.168.1.57', vmid: 101 } },
+      ],
+      edges: [
+        { parentSlug: 'pve-node-dl380-0', childSlug: 'lxc-101', relation: 'hosts' }
+      ]
+    }, { autoPromote: true });
+
+    // The host should now be parented ONLY by pve-node-dl380-0 (direct site edge pruned)
+    expect(await parentsOf('host_theta-suite-718it')).toEqual(['pve-node-dl380-0']);
+  });
 });

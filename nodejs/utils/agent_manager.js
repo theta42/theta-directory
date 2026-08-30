@@ -439,7 +439,10 @@ class AgentManager {
   // than inventing a second matcher here.
   async applyDiscoveryToDirectory(agent, discovery) {
     try {
-      const { Resource } = require('../models/resource');
+      const { Resource, ResourceEdge } = require('../models/resource');
+      const { normalizeHost, ensureAgentService } = require('./agent_binding');
+      const normalizeMac = (m) => (m ? String(m).toLowerCase().replace(/[^a-f0-9]/g, '') : '');
+
       const hostMetadata = {
         os: discovery.os || undefined,
         kernel: discovery.kernel || undefined,
@@ -458,6 +461,75 @@ class AgentManager {
       // the node that represents the agent.
       let hostRes = await hostForAgent(agent);
       if (hostRes) {
+        // If hostRes was auto-created during enrollment (e.g. host-<name>) while
+        // a richer hypervisor guest or seeded host exists at the same site
+        // (matching MAC, IP, or normalized name), merge into the real host.
+        const incomingMac = normalizeMac(discovery.mac_address);
+        const incomingIps = (discovery.ip_addresses || []).filter(Boolean);
+        const inputName = normalizeHost(discovery.hostname);
+
+        const allHosts = await Resource.list({ where: { kind: 'host' } }).catch(() => []);
+        let realHost = null;
+
+        if (incomingMac && incomingMac.length === 12) {
+          realHost = allHosts.find(r => r.id !== hostRes.id && r.metadata && (
+            (r.metadata.macAddress && normalizeMac(r.metadata.macAddress) === incomingMac) ||
+            (r.metadata.interfaces && r.metadata.interfaces.some(i => i.mac && normalizeMac(i.mac) === incomingMac))
+          ));
+        }
+
+        if (!realHost && incomingIps.length > 0) {
+          realHost = allHosts.find(r => r.id !== hostRes.id && r.metadata && (
+            (r.metadata.ip && incomingIps.includes(r.metadata.ip)) ||
+            (r.metadata.interfaces && r.metadata.interfaces.some(i => i.ip && incomingIps.includes(i.ip)))
+          ));
+        }
+
+        if (!realHost && inputName) {
+          realHost = allHosts.find(r => r.id !== hostRes.id && (
+            (r.name && normalizeHost(r.name) === inputName) ||
+            (r.slug && normalizeHost(r.slug) === inputName)
+          ));
+        }
+
+        if (realHost) {
+          console.log(`[AgentManager] "${agent.name}" adopting existing host ${realHost.slug} (replacing placeholder ${hostRes.slug})`);
+          const placeholderHostId = hostRes.id;
+          const oldServiceRes = await Resource.get(agent.resourceId).catch(() => null);
+
+          // Find or create agent service under realHost
+          const newServiceRes = await ensureAgentService(realHost);
+          await newServiceRes.update({
+            metadata: { ...(newServiceRes.metadata || {}), last_seen: Date.now() },
+            updated_on: nowSeconds()
+          }).catch(() => {});
+          await agent.update({ resourceId: newServiceRes.id }).catch(() => {});
+
+          // Move any other services that were parented to placeholderHostId
+          const childEdges = await ResourceEdge.list({ where: { parentId: placeholderHostId } }).catch(() => []);
+          for (const ce of childEdges) {
+            if (oldServiceRes && ce.childId === oldServiceRes.id) {
+              await ce.delete().catch(() => {});
+              continue;
+            }
+            await ce.update({ parentId: realHost.id }).catch(() => {});
+            const childRes = await Resource.get(ce.childId).catch(() => null);
+            if (childRes && childRes.metadata && childRes.metadata.hostId === placeholderHostId) {
+              await childRes.update({ metadata: { ...childRes.metadata, hostId: realHost.id }, updated_on: nowSeconds() }).catch(() => {});
+            }
+          }
+
+          if (oldServiceRes && oldServiceRes.id !== newServiceRes.id) {
+            await oldServiceRes.delete().catch(() => {});
+          }
+
+          const parentEdges = await ResourceEdge.list({ where: { childId: placeholderHostId } }).catch(() => []);
+          for (const pe of parentEdges) await pe.delete().catch(() => {});
+          await hostRes.delete().catch(() => {});
+
+          hostRes = realHost;
+        }
+
         const serviceRes = await Resource.get(agent.resourceId).catch(() => null);
         if (serviceRes) {
           await serviceRes.update({

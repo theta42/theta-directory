@@ -312,4 +312,80 @@ describe('theta-agent docker service reconciliation', () => {
     expect(edges).toHaveLength(1);
     expect(edges[0].parentId).toBe(hostId);
   });
+
+  test('adopts existing hypervisor guest host when discovery matches MAC address and replaces placeholder host', async () => {
+    const { Resource, ResourceEdge } = require('../models/resource');
+    const pveNodeId = crypto.randomUUID();
+    const lxcGuestId = crypto.randomUUID();
+    const placeholderHostId = crypto.randomUUID();
+    const placeholderAgentSvcId = crypto.randomUUID();
+
+    // 1. Existing Proxmox hypervisor and LXC guest
+    await Resource.create({
+      id: pveNodeId,
+      kind: 'host',
+      name: 'dl380-0',
+      slug: 'pve-node-dl380-0',
+      metadata: { subType: 'proxmox' }
+    });
+    const lxcGuest = await Resource.create({
+      id: lxcGuestId,
+      kind: 'host',
+      name: 'emby',
+      slug: 'lxc-emby-6e65df28bb21',
+      metadata: {
+        subType: 'lxc',
+        vmid: 213,
+        macAddress: '6e:65:df:28:bb:21',
+        ip: '192.168.1.206',
+        interfaces: [{ mac: '6e:65:df:28:bb:21', ip: '192.168.1.206' }]
+      }
+    });
+    await ResourceEdge.create({ id: crypto.randomUUID(), parentId: pveNodeId, childId: lxcGuestId, relation: 'hosts' });
+
+    // 2. Auto-created placeholder host from self-enrollment
+    const placeholderHost = await Resource.create({
+      id: placeholderHostId,
+      kind: 'host',
+      name: 'emby',
+      slug: 'host-emby',
+      metadata: { subType: 'linux', managed: true }
+    });
+    const placeholderAgentSvc = await Resource.create({
+      id: placeholderAgentSvcId,
+      kind: 'service',
+      name: 'Theta Agent',
+      slug: 'svc-emby-theta-agent',
+      metadata: { subType: 'theta-agent', managed: true }
+    });
+    await ResourceEdge.create({ id: crypto.randomUUID(), parentId: placeholderHostId, childId: placeholderAgentSvcId, relation: 'hosts' });
+
+    const agent = stubAgent({ name: 'emby', resourceId: placeholderAgentSvcId });
+
+    // 3. Discovery arrives from agent inside LXC
+    await agentManager.applyDiscoveryToDirectory(agent, {
+      hostname: 'emby',
+      mac_address: '6e:65:df:28:bb:21',
+      ip_addresses: ['192.168.1.206'],
+      os: 'linux ubuntu',
+      kernel: '6.17.13-1-pve',
+      ram_total_gb: 12
+    });
+
+    // 4. Placeholder host should be removed, and agent adopted into lxcGuest
+    const allHosts = await Resource.list({ where: { kind: 'host' } });
+    const hostSlugs = allHosts.map(h => h.slug);
+    expect(hostSlugs).not.toContain('host-emby');
+    expect(hostSlugs).toContain('lxc-emby-6e65df28bb21');
+
+    const updatedGuest = await Resource.get(lxcGuestId);
+    expect(updatedGuest.metadata.discovery_sources).toContain('theta-agent');
+    expect(updatedGuest.metadata.os).toBe('linux ubuntu');
+    expect(updatedGuest.metadata.ram_total_gb).toBe(12);
+
+    // Agent service should now be parented to lxcGuest
+    const guestEdges = await ResourceEdge.list({ where: { parentId: lxcGuestId } });
+    const childIds = guestEdges.map(e => e.childId);
+    expect(childIds).toContain(agent.resourceId);
+  });
 });

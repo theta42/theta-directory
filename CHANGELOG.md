@@ -1,3 +1,13 @@
+## [2.36.12] - 2026-08-30
+
+### Fixed
+- **Agent Host Self-Enrollment & Discovery Adoption**:
+  - `findHostAtSite`: Extended search to traverse the complete site subtree (nested guests under hypervisors/clusters), matching direct and guest hosts by exact name, slug candidates, or normalized guest hostnames.
+  - `applyDiscoveryToDirectory`: Added automatic adoption and reconciliation when an agent is attached to an auto-created placeholder host and reports hardware discovery (MAC, IP, interfaces) matching an existing hypervisor guest. Automatically re-parents services, merges metadata, and prunes the placeholder.
+- **Structural Hypervisor Edge Normalization**:
+  - `DiscoveryReconciler.reconcile`: When a structural hypervisor parent edge (`hypervisorNode -> guestHost`) is established, any redundant direct site parent edge (`site -> guestHost`) is automatically pruned.
+  - `views/directory.ejs`: UI parent resolution now prefers specific hypervisor/host parents over site parents if legacy multiple parent edges exist.
+
 ## [2.36.11] - 2026-08-30
 
 ### Fixed
