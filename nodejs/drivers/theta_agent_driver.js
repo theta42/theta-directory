@@ -64,7 +64,7 @@ class ThetaAgentDriver extends BaseDriver {
     }
 
     const publicAgent = (typeof agent.toPublic === 'function') ? agent.toPublic() : agent;
-    const telemetry = publicAgent.latestTelemetry || {};
+    const telemetry = publicAgent.latestTelemetry || publicAgent.lastTelemetry || agent.latestTelemetry || agent.lastTelemetry || {};
     const subType = ((resource.metadata && resource.metadata.subType) || '').toLowerCase();
 
     const result = {
@@ -72,14 +72,14 @@ class ThetaAgentDriver extends BaseDriver {
       driver: this.name,
       agentId: publicAgent.id || agent.id,
       agentVersion: publicAgent.version || (telemetry && telemetry.version) || 'unknown',
-      lastSeen: publicAgent.lastSeen,
+      lastSeen: publicAgent.lastSeen || publicAgent.last_seen,
       system: {
-        cpu: telemetry.cpu || null,
-        ram: telemetry.memory || null,
-        disk: telemetry.disk || null,
+        cpu: telemetry.cpu_usage_percent != null ? telemetry.cpu_usage_percent : (telemetry.cpu || null),
+        ram: telemetry.ram_usage_percent != null ? telemetry.ram_usage_percent : (telemetry.memory || null),
+        disk: telemetry.disk_usage_percent != null ? telemetry.disk_usage_percent : (telemetry.disk || null),
         disks: telemetry.disks || [],
-        loggedUsers: telemetry.loggedUsers || [],
-        uptime: telemetry.uptime || null
+        loggedUsers: telemetry.logged_users || telemetry.loggedUsers || [],
+        uptime: telemetry.uptime_seconds != null ? telemetry.uptime_seconds : (telemetry.uptime || null)
       }
     };
 
