@@ -1,3 +1,9 @@
+## [2.36.14] - 2026-08-30
+
+### Fixed
+- **Unified Agent Config Push**: Consolidated initial welcome/config push so every connected agent (both newly enrolling and reconnecting) reliably receives the complete config frame containing `site_lan_endpoint`, `site_public_ip`, `site_name`, and `organization_name`.
+- **Dynamic Site Public IP and Name Hints**: Resolved `conf.directory.ssoHost`, `conf.directory.publicDomain`, and `conf.directory.siteName` correctly from configuration and catalog graph, ensuring agents get accurate home detection hints and branding.
+
 ## [2.36.13] - 2026-08-30
 
 ### Fixed
