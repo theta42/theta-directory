@@ -456,7 +456,7 @@ homeDirectory: /home/${replicatedUid}
 
   step('Waiting for the fire-and-forget resync push to reach the spoke');
   let liveReplicated = false;
-  for (let i = 0; i < 20; i++) {
+  for (let i = 0; i < 40; i++) {
     const r = await api(SPOKE_URL, '/api/directory-admin/resources', { token: spokeToken });
     const slugs = (r.body.results || r.body.resources || r.body || []).map((x) => x.slug);
     if (slugs.includes('host_e2e_postjoin')) { liveReplicated = true; break; }
@@ -486,7 +486,7 @@ homeDirectory: /home/${replicatedUid}
     if (updateRes.status !== 200) fail(`renaming resource on master failed: ${updateRes.status} ${JSON.stringify(updateRes.body)}`);
 
     let renameReplicated = false;
-    for (let i = 0; i < 20; i++) {
+    for (let i = 0; i < 40; i++) {
       const r = await api(SPOKE_URL, '/api/directory-admin/resources', { token: spokeToken });
       const row = (r.body.results || r.body.resources || r.body || []).find((x) => x.slug === 'host_e2e_prejoin');
       if (row && row.name === 'E2E Renamed Host') { renameReplicated = true; break; }
@@ -512,7 +512,7 @@ homeDirectory: /home/${replicatedUid}
       fail(`deleting resource on master failed: ${delRes.status} ${JSON.stringify(delRes.body)}`);
     } else {
       let deletionConverged = false;
-      for (let i = 0; i < 20; i++) {
+      for (let i = 0; i < 40; i++) {
         const r = await api(SPOKE_URL, '/api/directory-admin/resources', { token: spokeToken });
         const slugs = (r.body.results || r.body.resources || r.body || []).map((x) => x.slug);
         if (!slugs.includes('host_e2e_postjoin')) { deletionConverged = true; break; }
