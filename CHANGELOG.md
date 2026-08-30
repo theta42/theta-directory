@@ -1,3 +1,8 @@
+## [2.36.3] - 2026-08-29
+
+### Fixed
+- **Directory Resource Update API**: Fixed `PUT /api/directory-admin/resources/:id` parent validation to permit partial metadata and field updates on existing parented resources without requiring `hostId` in the request body.
+
 ## [2.36.2] - 2026-08-29
 
 ### Removed
