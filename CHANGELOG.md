@@ -1,3 +1,10 @@
+## [2.36.15] - 2026-08-30
+
+### Fixed
+- **Directory Page DOM Thrashing & Memory Leak Prevention**:
+  - Debounced `renderTable()` and `renderDiscoveryTable()` (coalescing socket telemetry broadcasts, discovery updates, agent health checks, and filter keystrokes to at most one render per 250-500ms) to stop high-frequency DOM destruction/recreation cycles that ballooned tab memory to 3GB.
+  - Upgraded `jq-repeat` to v2.2.2 with `WeakMap` for `throttleMap` to prevent retaining unreferenced item instances during repeated updates.
+
 ## [2.36.14] - 2026-08-30
 
 ### Fixed

@@ -1,6 +1,6 @@
 {
   "name": "sso-manager-node",
-  "version": "2.36.14",
+  "version": "2.36.15",
   "description": "LDAP management, user directory, and SSO system for Theta Suite",
   "scripts": {
     "test": "npm --prefix nodejs test",

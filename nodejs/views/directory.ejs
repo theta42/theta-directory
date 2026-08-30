@@ -60,7 +60,7 @@
                             <input class="form-check-input" type="checkbox" id="toggle-secrets-only" onchange="renderTable()">
                             <label class="form-check-label small text-muted" for="toggle-secrets-only" title="Filter tree to show only resources with stored secrets"><i class="fa-solid fa-key text-warning me-1"></i>With Secrets</label>
                         </div>
-                        <input type="text" id="search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search resources or keys..." onkeyup="renderTable()" style="width: 210px;">
+                        <input type="text" id="search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search resources or keys..." oninput="scheduleRenderTable(200)" style="width: 210px;">
                         <select id="sort-by" class="form-select form-select-sm shadow-sm" onchange="renderTable()" style="width: 150px;">
                           <option value="name">Name (A-Z)</option>
                           <option value="kind">Kind</option>
@@ -146,7 +146,7 @@
                 <input class="form-check-input" type="checkbox" id="discovery-show-ignored" onchange="renderDiscoveryTable()">
                 <label class="form-check-label small" for="discovery-show-ignored">Show ignored</label>
               </div>
-              <input type="text" id="discovery-search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search resources..." onkeyup="renderDiscoveryTable()" style="width: 250px;">
+              <input type="text" id="discovery-search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search resources..." oninput="scheduleRenderDiscoveryTable(200)" style="width: 250px;">
             </div>
           </div>
           <div class="card-header actionMessage" style="display:none"></div>
@@ -1702,10 +1702,10 @@
       const res = await app.api.get('agent/nodes');
       indexAgents((res && res.agents) || []);
       agentsUnavailable = false;
-      renderTable();
+      scheduleRenderTable(100);
     } catch (e) {
       agentsUnavailable = true;
-      renderTable(); // re-render so dots flip to neutral, not stale green
+      scheduleRenderTable(100); // re-render so dots flip to neutral, not stale green
     }
   }
 
@@ -1788,6 +1788,14 @@
         bodyHtml: '<p class="text-danger">' + ((err && err.message) || 'Lookup failed') + '</p>'
       });
     }
+  }
+  let renderTableTimer = null;
+  function scheduleRenderTable(delay = 250) {
+    if (renderTableTimer) clearTimeout(renderTableTimer);
+    renderTableTimer = setTimeout(function() {
+      renderTableTimer = null;
+      renderTable();
+    }, delay);
   }
 
   function renderTable() {
@@ -3870,6 +3878,14 @@
       renderDiscoveryTable();
     });
   }
+  let renderDiscoveryTimer = null;
+  function scheduleRenderDiscoveryTable(delay = 250) {
+    if (renderDiscoveryTimer) clearTimeout(renderDiscoveryTimer);
+    renderDiscoveryTimer = setTimeout(function() {
+      renderDiscoveryTimer = null;
+      renderDiscoveryTable();
+    }, delay);
+  }
 
   function renderDiscoveryTable() {
     const search = $('#discovery-search-filter').val().toLowerCase();
@@ -5400,7 +5416,11 @@
       const dirAgentSocket = io({ auth: { token: app.auth.getToken() } });
       dirAgentSocket.on('agent.telemetry', function(msg){
         const a = msg && agentsById[msg.agentId];
-        if (a) { a.lastTelemetry = msg.payload; a.isOnline = true; renderTable(); }
+        if (a) {
+          a.lastTelemetry = msg.payload;
+          a.isOnline = true;
+          scheduleRenderTable(500);
+        }
         // Keep an open service-status panel live: re-fetch metrics when the
         // host's telemetry advances. Debounced so bursts collapse to one call.
         if (currentServiceResourceId) {
@@ -5410,7 +5430,11 @@
       });
       dirAgentSocket.on('agent.discovery', function(msg){
         const a = msg && agentsById[msg.agentId];
-        if (a) { a.lastDiscovery = msg.payload; a.isOnline = true; renderTable(); }
+        if (a) {
+          a.lastDiscovery = msg.payload;
+          a.isOnline = true;
+          scheduleRenderTable(500);
+        }
       });
     } catch (e) { /* socket is optional; periodic refresh still runs */ }
   });
