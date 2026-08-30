@@ -667,27 +667,34 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
 
     console.log(`[Theta Agent] "${agent.name}" (${agent.id}) connected from ${remoteAddr}`);
     logAgentAudit('connected', { agentId: agent.id, agentName: agent.name, remoteAddr });
-    // Must stay synchronous, and the listeners below must be attached in this
-    // same tick: the agent sends `discovery` the instant the socket opens, and
-    // `ws` discards messages emitted while no listener is attached.
     agentManager.registerAgent(agent, ws, remoteAddr);
 
-    if (issuedToken) {
-      const publicKey = await agentManager.publicKeyBase64();
+    // Send initial welcome/config payload (credentials on enroll + home detection hints).
+    (async () => {
       try {
-        ws.send(JSON.stringify({
-          type: 'config',
-          payload: {
-            enrolled: true,
-            auth_token: issuedToken,
-            public_key: publicKey
-          }
-        }));
-        console.log(`[Theta Agent] Sent auto-enrollment credentials to "${agent.name}"`);
+        const payload = {
+          message: 'Connected to SSO Manager C2',
+          protocol_version: '1.3.0',
+          agent_id: agent.id
+        };
+        if (issuedToken) {
+          payload.enrolled = true;
+          payload.auth_token = issuedToken;
+          payload.public_key = await agentManager.publicKeyBase64();
+        }
+        Object.assign(payload, await homeDetectHints());
+        const orgName = (conf.name && conf.name !== 'SSO Manager') ? conf.name : ((conf.directory && conf.directory.name) || null);
+        if (orgName) {
+          payload.organization_name = orgName;
+        }
+        ws.send(JSON.stringify({ type: 'config', payload }));
+        if (issuedToken) {
+          console.log(`[Theta Agent] Sent auto-enrollment credentials to "${agent.name}"`);
+        }
       } catch (err) {
-        console.error(`[Theta Agent] Failed to send auto-enrollment config to "${agent.name}":`, err.message);
+        console.error(`[Theta Agent] Failed to send config payload to "${agent.name}":`, err.message);
       }
-    }
+    })();
 
     ws.on('message', async (message) => {
       try {
@@ -830,24 +837,6 @@ refresh_expired_interval = 300
     // signed commands. Handing the public key over here is what removes the
     // last manual step -- an agent installed with only a join key ends up fully
     // configured without anyone copying values between two machines.
-    try {
-      const payload = {
-        message: 'Connected to SSO Manager C2',
-        protocol_version: '1.3.0',
-        agent_id: agent.id
-      };
-      if (issuedToken) {
-        payload.enrolled = true;
-        payload.auth_token = issuedToken;
-        payload.public_key = await agentManager.publicKeyBase64();
-      }
-      Object.assign(payload, await homeDetectHints());
-      // White-label branding for the agent (tray + Windows logon tile).
-      if (conf.name && conf.name !== 'SSO Manager') {
-        payload.organization_name = conf.name;
-      }
-      ws.send(JSON.stringify({ type: 'config', payload }));
-    } catch (e) {}
   });
 };
 
@@ -893,13 +882,14 @@ async function homeDetectHints() {
 
   try {
     const { Resource } = require('../models/resource');
-    const hosts = await Resource.list({ where: { kind: 'host' } }).catch(() => []);
-    const stackHost = hosts.find(h => h.slug && (h.slug.startsWith('host_theta-suite') || h.slug.startsWith('host-theta-suite') || (h.metadata && h.metadata.managed)));
+    const graph = await Resource.getGraph().catch(() => ({ resources: [] }));
+    const resources = graph.resources || [];
+    const stackHost = resources.find(h => h.kind === 'host' && h.slug && (h.slug.startsWith('host_theta-suite') || h.slug.startsWith('host-theta-suite') || (h.metadata && h.metadata.managed)));
     if (stackHost && stackHost.metadata && stackHost.metadata.ip) {
       lanEndpoints.push(`${stackHost.metadata.ip}:443`);
     }
 
-    const sites = await Resource.list({ where: { kind: 'site' } }).catch(() => []);
+    const sites = resources.filter(r => r.kind === 'site');
     const local = sites.find((s) => s.metadata && s.metadata.isCurrentSite) || sites[0];
     const ip = local && local.metadata &&
       (local.metadata.public_ip || local.metadata.ip || local.metadata.address);
@@ -908,7 +898,9 @@ async function homeDetectHints() {
     if (ip && !isPrivateIp(String(ip).trim())) {
       pubIp = String(ip).trim();
     } else {
-      const hostToResolve = conf.ssoHost || (localSite && localSite.gatewayEndpoint && localSite.gatewayEndpoint.split(':')[0]) || conf.publicDomain;
+      const ssoHost = (conf.directory && conf.directory.ssoHost) || conf.ssoHost || (conf.stack && conf.stack.ssoHost);
+      const publicDomain = (conf.directory && conf.directory.publicDomain) || conf.publicDomain;
+      const hostToResolve = ssoHost || (localSite && localSite.gatewayEndpoint && localSite.gatewayEndpoint.split(':')[0]) || publicDomain;
       if (hostToResolve) {
         const cleanHost = hostToResolve.replace(/^https?:\/\//, '').split(':')[0].split('/')[0];
         pubIp = await new Promise(r => dns.lookup(cleanHost, { family: 4 }, (err, addr) => r(addr || null))).catch(() => null);
@@ -917,7 +909,13 @@ async function homeDetectHints() {
     if (pubIp && !isPrivateIp(pubIp)) {
       hints.site_public_ip = pubIp;
     }
-  } catch (e) { /* best-effort fallback */ }
+    const siteName = (conf.directory && conf.directory.siteName) || conf.siteName || (conf.stack && conf.stack.siteName) || (local && local.name);
+    if (siteName) {
+      hints.site_name = siteName;
+    }
+  } catch (e) {
+    console.error('[Theta Agent] Error computing home detect hints:', e);
+  }
 
   if (lanEndpoints.length > 0) {
     hints.site_lan_endpoint = lanEndpoints.join(',');
