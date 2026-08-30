@@ -20,7 +20,9 @@
 // never something to guess past.
 async function resolveSiteHint(hint) {
   const wanted = String(hint || '').trim();
-  if (!wanted) return null;
+  if (!wanted || wanted.toLowerCase() === 'default' || wanted.toLowerCase() === 'unknown' || wanted.toLowerCase() === 'none') {
+    return null;
+  }
 
   const { Resource } = require('../models/resource');
   const sites = await Resource.list({ where: { kind: 'site' } }).catch(() => []);
@@ -45,7 +47,8 @@ async function currentSite() {
 // which callers must treat as "do not file it anywhere" -- never as "use the
 // first site you can find".
 async function resolveAgentSite({ location, public_ip: publicIp } = {}) {
-  if (location && location !== 'default') {
+  const loc = String(location || '').trim().toLowerCase();
+  if (loc && loc !== 'default' && loc !== 'unknown' && loc !== 'none') {
     const byHint = await resolveSiteHint(location);
     if (byHint) return byHint;
     console.warn(`[agent-site] agent reported location "${location}", which matches no site row`);

@@ -55,6 +55,7 @@ URL=""
 TOKEN=""
 JOIN_KEY=""
 PUBLIC_KEY=""
+LOCATION=""
 B64_CONFIG=""
 INSTALL_SSSD=0
 
@@ -66,6 +67,10 @@ while [ $# -gt 0 ]; do
       ;;
     --token)
       TOKEN="$2"
+      shift 2
+      ;;
+    --location|--site)
+      LOCATION="$2"
       shift 2
       ;;
     # Base64 of the SSO's raw Ed25519 public key. The agent verifies high-risk
@@ -162,7 +167,7 @@ server_url: "$URL"
 auth_token: "$TOKEN"
 join_key: "$JOIN_KEY"
 public_key: "$PUBLIC_KEY"
-location: "unknown"
+location: "${LOCATION:-default}"
 capabilities:
   telemetry: true
   configure_ldap: true
@@ -189,6 +194,15 @@ else
   fi
   if [ -n "$PUBLIC_KEY" ]; then
     sed -i "s|^public_key:.*|public_key: \"$PUBLIC_KEY\"|" "$CONFIG_FILE"
+  fi
+  if [ -n "$LOCATION" ]; then
+    if grep -q '^location:' "$CONFIG_FILE"; then
+      sed -i "s|^location:.*|location: \"$LOCATION\"|" "$CONFIG_FILE"
+    else
+      echo "location: \"$LOCATION\"" >> "$CONFIG_FILE"
+    fi
+  elif grep -q '^location:[[:space:]]*"\{0,1\}unknown"\{0,1\}' "$CONFIG_FILE"; then
+    sed -i 's|^location:.*|location: "default"|' "$CONFIG_FILE"
   fi
 fi
 # Ensure theta-secrets & theta groups exist for non-root secret access
