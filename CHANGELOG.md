@@ -1,3 +1,11 @@
+## [2.36.13] - 2026-08-30
+
+### Fixed
+- **Home-Detection Hints**:
+  - `homeDetectHints`: Dynamically resolves site public IP (via `dns.lookup` on `ssoHost` / gateway endpoint) when site resource lacks `public_ip` metadata.
+  - `site_lan_endpoint`: Enriches LAN endpoint hints with the stack host's reverse proxy address (`${ip}:443`) in addition to DNS resolver (`${dnsHost}:53`) so on-LAN agents immediately detect home.
+  - Foreign key constraint safety when importing replicated agents before their resource row exists.
+
 ## [2.36.12] - 2026-08-30
 
 ### Fixed

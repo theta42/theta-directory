@@ -873,25 +873,55 @@ refresh_expired_interval = 300
 // agent's connection.
 async function homeDetectHints() {
   const hints = {};
+  const lanEndpoints = [];
+  const dns = require('dns');
+  const conf = require('@simpleworkjs/conf');
+  const isPrivateIp = (ip) => {
+    if (!ip) return false;
+    return /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|169\.254\.|fc00:|fd00:|fe80::)/.test(ip);
+  };
+
+  let localSite = null;
   try {
     const roster = require('../utils/mesh_roster');
     const siteId = roster.localSiteId();
     if (siteId) {
-      const site = await roster.bySiteId(siteId);
-      // dnsHost is a host ON the LAN, not its shadow address -- the shadow is
-      // reachable over the mesh and so proves nothing about being home.
-      if (site && site.dnsHost) hints.site_lan_endpoint = `${site.dnsHost}:53`;
+      localSite = await roster.bySiteId(siteId);
+      if (localSite && localSite.dnsHost) lanEndpoints.push(`${localSite.dnsHost}:53`);
     }
   } catch (e) { /* no mesh yet */ }
 
   try {
     const { Resource } = require('../models/resource');
-    const sites = await Resource.list({ where: { kind: 'site' } });
+    const hosts = await Resource.list({ where: { kind: 'host' } }).catch(() => []);
+    const stackHost = hosts.find(h => h.slug && (h.slug.startsWith('host_theta-suite') || h.slug.startsWith('host-theta-suite') || (h.metadata && h.metadata.managed)));
+    if (stackHost && stackHost.metadata && stackHost.metadata.ip) {
+      lanEndpoints.push(`${stackHost.metadata.ip}:443`);
+    }
+
+    const sites = await Resource.list({ where: { kind: 'site' } }).catch(() => []);
     const local = sites.find((s) => s.metadata && s.metadata.isCurrentSite) || sites[0];
     const ip = local && local.metadata &&
       (local.metadata.public_ip || local.metadata.ip || local.metadata.address);
-    if (ip) hints.site_public_ip = String(ip).trim();
-  } catch (e) { /* no site resource yet */ }
+
+    let pubIp = null;
+    if (ip && !isPrivateIp(String(ip).trim())) {
+      pubIp = String(ip).trim();
+    } else {
+      const hostToResolve = conf.ssoHost || (localSite && localSite.gatewayEndpoint && localSite.gatewayEndpoint.split(':')[0]) || conf.publicDomain;
+      if (hostToResolve) {
+        const cleanHost = hostToResolve.replace(/^https?:\/\//, '').split(':')[0].split('/')[0];
+        pubIp = await new Promise(r => dns.lookup(cleanHost, { family: 4 }, (err, addr) => r(addr || null))).catch(() => null);
+      }
+    }
+    if (pubIp && !isPrivateIp(pubIp)) {
+      hints.site_public_ip = pubIp;
+    }
+  } catch (e) { /* best-effort fallback */ }
+
+  if (lanEndpoints.length > 0) {
+    hints.site_lan_endpoint = lanEndpoints.join(',');
+  }
 
   return hints;
 }
