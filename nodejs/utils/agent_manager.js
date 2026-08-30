@@ -231,26 +231,42 @@ class AgentManager {
       return;
     }
 
+    const allServices = await Resource.list({ where: { kind: 'service' } }).catch(() => []);
+    const hostEdges = await ResourceEdge.list({ where: { parentId: hostRes.id } }).catch(() => []);
+    const childIds = new Set(hostEdges.map(e => e.childId));
+
     for (const svc of services) {
       const name = (typeof svc === 'string') ? svc : (svc && svc.name);
       if (!name) continue;
       const subtype = (svc && (svc.subtype || svc.subType)) || 'systemd';
       const slug = `svc-${hostRes.slug.replace(/^host-/, '')}-${subtype}-${name.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`;
 
-      // Match on subtype+name so units/containers/processes of the same name
-      // don't collide. A generic `serviceName` field is authoritative.
-      let serviceRes = (await Resource.list({ where: { kind: 'service' } }).catch(() => []))
-        .find(r => r.metadata && r.metadata.subType === subtype && r.metadata.hostId === hostRes.id && r.metadata.serviceName === name);
+      // Match on host parentage and serviceName / dockerContainer / systemdService / unit name.
+      // This prevents duplicating existing bootstrap services (e.g. proxy, sso-manager)
+      // while accurately binding agent telemetry and controls.
+      let serviceRes = allServices.find(r => {
+        const isChildOfHost = (r.metadata && r.metadata.hostId === hostRes.id) || childIds.has(r.id);
+        if (!isChildOfHost) return false;
+        const meta = r.metadata || {};
+        return meta.serviceName === name
+          || meta.dockerContainer === name
+          || meta.systemdService === name
+          || (meta.subType === subtype && r.name === name)
+          || (r.slug === slug);
+      });
 
       if (!serviceRes) {
         const metadata = {
           subType: subtype,
           serviceName: name,
+          dockerContainer: subtype === 'docker' ? name : undefined,
           hostId: hostRes.id,
           managed: true,
           discovery_sources: ['theta-agent'],
           last_seen: Date.now()
         };
+        for (const k of Object.keys(metadata)) if (metadata[k] === undefined) delete metadata[k];
+
         serviceRes = await Resource.create({
           id: crypto.randomUUID(),
           kind: 'service',
@@ -259,6 +275,16 @@ class AgentManager {
           metadata: metadata,
           created_on: Math.floor(Date.now() / 1000)
         }).catch(() => null);
+        if (serviceRes) allServices.push(serviceRes);
+      } else {
+        const meta = { ...(serviceRes.metadata || {}) };
+        const sources = new Set(meta.discovery_sources || []);
+        sources.add('theta-agent');
+        meta.discovery_sources = [...sources];
+        meta.last_seen = Date.now();
+        if (subtype === 'docker' && !meta.dockerContainer) meta.dockerContainer = name;
+        if (!meta.serviceName) meta.serviceName = name;
+        await serviceRes.update({ metadata: meta, updated_on: nowSeconds() }).catch(() => {});
       }
 
       if (serviceRes) {

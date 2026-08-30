@@ -1,6 +1,6 @@
 {
   "name": "t42-theta-directory",
-  "version": "2.36.1",
+  "version": "2.36.2",
   "description": "LDAP management, user directory, and SSO system for Theta Suite",
   "scripts": {
     "test": "npm --prefix nodejs test",
