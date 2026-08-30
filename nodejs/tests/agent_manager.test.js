@@ -275,13 +275,13 @@ describe('theta-agent docker service reconciliation', () => {
     });
     await ResourceEdge.create({ id: crypto.randomUUID(), parentId: hostId, childId: serviceAgentId, relation: 'hosts' });
 
-    // 3. Create existing bootstrap service 'proxy-local'
+    // 3. Create existing bootstrap service 'proxy-local' (subType: 'docker')
     const proxySvc = await Resource.create({
       id: proxySvcId,
       kind: 'service',
-      name: 'Proxy',
-      slug: 'proxy-local',
-      metadata: { subType: 'web', hostId, dockerContainer: 'proxy', port: 3000 },
+      name: 'proxy',
+      slug: 'svc-host_prod-server-docker-proxy',
+      metadata: { subType: 'docker', hostId, dockerContainer: 'proxy', serviceName: 'proxy' },
       created_on: Math.floor(Date.now() / 1000)
     });
     await ResourceEdge.create({ id: crypto.randomUUID(), parentId: hostId, childId: proxySvcId, relation: 'hosts' });

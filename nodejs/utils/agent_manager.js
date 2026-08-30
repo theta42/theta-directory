@@ -241,18 +241,19 @@ class AgentManager {
       const subtype = (svc && (svc.subtype || svc.subType)) || 'systemd';
       const slug = `svc-${hostRes.slug.replace(/^host-/, '')}-${subtype}-${name.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`;
 
-      // Match on host parentage and serviceName / dockerContainer / systemdService / unit name.
-      // This prevents duplicating existing bootstrap services (e.g. proxy, sso-manager)
-      // while accurately binding agent telemetry and controls.
+      // Match on host parentage and matching subtype + serviceName / dockerContainer / systemdService / name.
+      // This matches existing agent-managed services of the same subtype without hijacking
+      // other service types (e.g. a web application service vs a docker container service).
       let serviceRes = allServices.find(r => {
         const isChildOfHost = (r.metadata && r.metadata.hostId === hostRes.id) || childIds.has(r.id);
         if (!isChildOfHost) return false;
+        if (r.slug === slug) return true;
         const meta = r.metadata || {};
+        if (meta.subType !== subtype) return false;
         return meta.serviceName === name
           || meta.dockerContainer === name
           || meta.systemdService === name
-          || (meta.subType === subtype && r.name === name)
-          || (r.slug === slug);
+          || r.name === name;
       });
 
       if (!serviceRes) {
