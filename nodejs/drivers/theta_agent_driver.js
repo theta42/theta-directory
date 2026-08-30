@@ -89,12 +89,12 @@ class ThetaAgentDriver extends BaseDriver {
     } else if (subType === 'wireguard') {
       result.wireguard = telemetry.wireguard || { peers: [], interfaces: [] };
     } else if (subType === 'systemd' || subType === 'docker' || subType === 'podman' || subType === 'process' || subType === 'systemd-timer' || subType === 'cron' || subType === 'lxc' || subType === 'kvm' || subType === 'libvirt') {
-      const targetService = (resource.metadata && (resource.metadata.serviceName || resource.metadata.systemdService || resource.metadata.dockerContainer || resource.metadata.installPath || resource.name)) || resource.slug;
+      const targetService = (resource.metadata && (resource.metadata.serviceName || resource.metadata.systemdService || resource.metadata.dockerContainer || resource.metadata.installPath)) || resource.name || resource.slug;
       // Live status + resource usage come from the telemetry stream (per
       // registered service), falling back to active:true so a freshly created
       // resource still reads healthy before the next 30s tick lands.
       const live = (telemetry.services || []).find(s =>
-        s.name === targetService || s.name === (resource.metadata && resource.metadata.serviceName) || s.name === (resource.metadata && resource.metadata.systemdService) || s.name === (resource.metadata && resource.metadata.dockerContainer)
+        s.name === targetService || s.name === resource.name || s.name === (resource.metadata && resource.metadata.serviceName) || s.name === (resource.metadata && resource.metadata.systemdService) || s.name === (resource.metadata && resource.metadata.dockerContainer)
       );
       result.service = {
         name: targetService,

@@ -1,3 +1,8 @@
+## [2.36.7] - 2026-08-29
+
+### Fixed
+- **Live Service Metrics Target Resolution**: Fixed `targetService` resolution and telemetry lookup in `drivers/theta_agent_driver.js` so service resources correctly match their reported container/service telemetry and populate live CPU, RAM, uptime, and substate.
+
 ## [2.36.6] - 2026-08-29
 
 ### Added
