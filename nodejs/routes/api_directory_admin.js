@@ -383,48 +383,37 @@ router.post('/resources', async (req, res, next) => {
 
 router.put('/resources/:id', async (req, res, next) => {
   try {
-    // Validate before loading anything -- a rejected body should never have
-    // touched the store.
-    if (req.body.kind !== 'site' && req.body.kind !== 'Site' && !req.body.hostId) {
-      return res.status(400).json({ error: 'Only Site resources can be top-level. All other resource types must have a parent resource.' });
-    }
-    if (req.body.kind === 'host' && !req.body.hostId) {
-      return res.status(400).json({ error: 'Hosts must have a parent Site or Host' });
-    }
-    if (req.body.kind === 'service' && !req.body.hostId) {
-      return res.status(400).json({ error: 'Services must have a parent Host' });
-    }
     // OAuthClient is a wrapper over the same `resource` row, but its .update()
     // handles the oauth-specific body fields (redirect_uris, scopes,
     // token_lifetime) that a bare Resource would drop into metadata unvalidated.
-    //
-    // Keyed off the STORED subtype, not the body: a PUT that only changes the
-    // name carries no metadata, and reading the discriminator from the request
-    // would silently downgrade an OAuth client to a plain resource update and
-    // drop its redirect URIs.
     const { OAuthClient, isOAuthClient } = require('../models/oauth_client');
     const stored = await Resource.get(req.params.id).catch(() => null);
+    if (!stored) return res.status(404).json({ error: 'Not found' });
     const model = isOAuthClient(stored) ? OAuthClient : Resource;
     const r = await model.get(req.params.id);
     if (!r) return res.status(404).json({ error: 'Not found' });
 
-    // Merge BEFORE validating: a PUT may carry only the fields the form
-    // changed, and the merged object is what actually gets stored.
-    if (req.body.metadata && typeof req.body.metadata === 'object') {
-      req.body.metadata = { ...(r.metadata || {}), ...req.body.metadata };
-    }
+    const effectiveKind = req.body.kind || r.kind;
 
     let parentResource = null;
     if (req.body.hostId) {
       parentResource = await Resource.get(req.body.hostId).catch(() => null);
-    } else if (req.body.kind !== 'site' && req.body.kind !== 'Site') {
+    } else if (effectiveKind !== 'site' && effectiveKind !== 'Site') {
       // No explicit hostId on the body: the resource is not being reparented,
       // so validate against the parent it already has.
       const existingEdges = await ResourceEdge.list({ where: { childId: req.params.id } });
       const parentEdge = existingEdges.find(e => e.relation === 'hosts') || existingEdges[0];
       if (parentEdge) {
         parentResource = await Resource.get(parentEdge.parentId).catch(() => null);
+      } else {
+        return res.status(400).json({ error: 'Only Site resources can be top-level. All other resource types must have a parent resource.' });
       }
+    }
+
+    // Merge BEFORE validating: a PUT may carry only the fields the form
+    // changed, and the merged object is what actually gets stored.
+    if (req.body.metadata && typeof req.body.metadata === 'object') {
+      req.body.metadata = { ...(r.metadata || {}), ...req.body.metadata };
     }
     const subtypeErr = await validateSubtype(
       req.body, req.body.metadata || r.metadata || {}, parentResource);
