@@ -1,3 +1,8 @@
+## [2.36.8] - 2026-08-29
+
+### Fixed
+- **Telemetry Resolution & Field Mapping**: Supported both `lastTelemetry` and `latestTelemetry` in `drivers/theta_agent_driver.js`, correctly reading live Docker/systemd service states, CPU %, RAM bytes, and uptime.
+
 ## [2.36.7] - 2026-08-29
 
 ### Fixed
