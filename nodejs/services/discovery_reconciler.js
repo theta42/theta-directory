@@ -407,6 +407,42 @@ class DiscoveryReconciler {
       }
     }
 
+    // Reconcile stale resources previously discovered by this source:
+    // When a structural discovery source reports an inventory of resources and edges (e.g. Proxmox, Docker),
+    // any resource that previously carried this discovery_source but is no longer reported in this run
+    // has vanished from the underlying host/hypervisor.
+    if (resources.length > 0) {
+      const reportedIds = new Set(resources.map(r => r._actualId).filter(Boolean));
+      for (const res of allRes) {
+        const meta = res.metadata || {};
+        const sources = meta.discovery_sources || [];
+        if (!sources.includes(sourceName) || reportedIds.has(res.id)) continue;
+
+        const otherSources = sources.filter(s => s !== sourceName);
+        const isManual = res.created_by || sources.includes('manual') || res.kind === 'site';
+
+        if (otherSources.length > 0 || isManual) {
+          await res.update({
+            metadata: { ...meta, discovery_sources: otherSources },
+            updated_on: Math.floor(Date.now() / 1000)
+          }).catch(() => {});
+        } else if (edges.length > 0) {
+          // Exclusively discovered by this source which emits parent-child topology (e.g. Proxmox, Docker).
+          // The device has been removed from the underlying hypervisor/host.
+          const [asChild, asParent] = await Promise.all([
+            ResourceEdge.list({ where: { childId: res.id } }).catch(() => []),
+            ResourceEdge.list({ where: { parentId: res.id } }).catch(() => [])
+          ]);
+          for (const e of [...asChild, ...asParent]) await e.delete().catch(() => {});
+          const links = await ResourceGroup.list({ where: { resourceId: res.id } }).catch(() => []);
+          for (const l of links) await l.delete().catch(() => {});
+          await res.delete().catch(() => {});
+          WebhookEmitter.emit('discovery.device_purged', res.toJSON ? res.toJSON() : res);
+          console.log(`[DiscoveryReconciler] ${sourceName}: purged vanished discovered resource '${res.slug}'`);
+        }
+      }
+    }
+
     // AutoPromote access group generation has been removed from Reconciler.
     // Virtual LDAP Groups will handle inherited access based on the graph.
 

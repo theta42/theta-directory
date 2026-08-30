@@ -1,3 +1,8 @@
+## [2.36.10] - 2026-08-30
+
+### Fixed
+- **Auto-Purge Vanished Discovered Resources**: During discovery reconciliation for structural sources (Proxmox, Docker, etc.), any resource previously created by that discovery source that is no longer reported in the inventory payload is now automatically purged along with its pruned edges, preventing deleted guests/containers from lingering as parentless orphaned root nodes in the directory graph.
+
 ## [2.36.9] - 2026-08-30
 
 ### Changed

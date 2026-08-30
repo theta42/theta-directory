@@ -95,6 +95,43 @@ describe('DiscoveryReconciler', () => {
     const groups = await ResourceGroup.list({ where: { resourceId: resource.id } });
     expect(groups.map((g) => g.groupCn).sort()).toEqual([]);
   });
+
+  it('purges vanished discovered resources when a structural discovery source no longer reports them', async () => {
+    // 1. Initial discovery with node and two LXCs
+    const payload1 = {
+      resources: [
+        { kind: 'host', name: 'Node 1', slug: 'pve-node-1', metadata: {} },
+        { kind: 'host', name: 'LXC 101', slug: 'lxc-101', metadata: {} },
+        { kind: 'host', name: 'LXC 102', slug: 'lxc-102', metadata: {} },
+      ],
+      edges: [
+        { parentSlug: 'pve-node-1', childSlug: 'lxc-101', relation: 'hosts' },
+        { parentSlug: 'pve-node-1', childSlug: 'lxc-102', relation: 'hosts' },
+      ]
+    };
+    await DiscoveryReconciler.reconcile('pve-plugin', payload1, { autoPromote: true });
+
+    let all = await Resource.list();
+    expect(all.map(r => r.slug).sort()).toEqual(expect.arrayContaining(['lxc-101', 'lxc-102', 'pve-node-1']));
+
+    // 2. LXC 102 was deleted on Proxmox -> next discovery payload only contains LXC 101
+    const payload2 = {
+      resources: [
+        { kind: 'host', name: 'Node 1', slug: 'pve-node-1', metadata: {} },
+        { kind: 'host', name: 'LXC 101', slug: 'lxc-101', metadata: {} },
+      ],
+      edges: [
+        { parentSlug: 'pve-node-1', childSlug: 'lxc-101', relation: 'hosts' },
+      ]
+    };
+    await DiscoveryReconciler.reconcile('pve-plugin', payload2, { autoPromote: true });
+
+    all = await Resource.list();
+    const slugs = all.map(r => r.slug);
+    expect(slugs).toContain('pve-node-1');
+    expect(slugs).toContain('lxc-101');
+    expect(slugs).not.toContain('lxc-102');
+  });
 });
 
 // A plugin naming a parent that does not exist used to fail twice over: the
