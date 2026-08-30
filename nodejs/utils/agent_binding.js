@@ -70,6 +70,19 @@ async function ensureAgentService(hostResource) {
   return service;
 }
 
+// Normalize host names/slugs by removing common prefixes and random hex suffixes
+function normalizeHost(name) {
+  if (!name) return '';
+  return String(name).toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/:\d+$/, '')
+    .replace(/^(lxc-|vm-|host[-_]|pve-node-|pve-)/, '')
+    .replace(/-[a-f0-9]{12}$/, '')
+    .replace(/-[a-f0-9]{8}$/, '')
+    .replace(/[^a-z0-9_-]/g, '')
+    .replace(/[._-](local|lan|internal|home)$/, '');
+}
+
 // Slugify the way the seed paths do, so a name can be compared against a slug
 // that was built from it. bootstrap.js writes `host_<slug>`; the agent
 // self-enrolment path below writes `host-<slug>`. Both forms are accepted.
@@ -82,29 +95,54 @@ function hostSlugCandidates(name) {
 // An EXISTING host at `siteId` that is already this machine, or null.
 //
 // A self-enrolling agent reports its hostname, and on any install seeded by
-// bootstrap.js that machine already has a host resource -- the stack host
-// itself is the usual case. Creating a second one unconditionally is how a
-// fresh install ended up with two `theta-suite-718it` hosts, one carrying every
-// service and the other carrying only the agent.
+// bootstrap.js or discovered by a hypervisor (e.g. Proxmox LXC/VM guest), that
+// machine already has a host resource.
 //
-// Matched on the host's own name or slug, and only among hosts that actually
-// sit under this site: the same hostname at two sites is two machines.
+// Searches the entire subtree under `siteId` (both direct site children and
+// nested guests under hypervisors/clusters) matching by exact name, slug
+// candidates, or normalized guest hostnames.
 async function findHostAtSite(siteId, name) {
   if (!siteId || !name) return null;
   const { Resource, ResourceEdge } = require('../models/resource');
 
   const wanted = String(name).toLowerCase().trim();
+  const wantedNorm = normalizeHost(name);
   const slugs = new Set(hostSlugCandidates(name));
 
-  const edges = await ResourceEdge.list({ where: { parentId: siteId } }).catch(() => []);
-  for (const edge of edges) {
-    const child = await Resource.get(edge.childId).catch(() => null);
-    if (!child || child.kind !== 'host') continue;
-    const childName = String(child.name || '').toLowerCase().trim();
-    const childSlug = String(child.slug || '').toLowerCase();
-    if (childName === wanted || slugs.has(childSlug)) return child;
+  const queue = [siteId];
+  const visited = new Set([siteId]);
+  let exactMatch = null;
+  let normalizedMatch = null;
+
+  while (queue.length > 0) {
+    const currentParentId = queue.shift();
+    const edges = await ResourceEdge.list({ where: { parentId: currentParentId } }).catch(() => []);
+    for (const edge of edges) {
+      if (visited.has(edge.childId)) continue;
+      visited.add(edge.childId);
+
+      const child = await Resource.get(edge.childId).catch(() => null);
+      if (!child) continue;
+
+      if (child.kind === 'host') {
+        const childName = String(child.name || '').toLowerCase().trim();
+        const childSlug = String(child.slug || '').toLowerCase();
+        const childNormName = normalizeHost(child.name);
+        const childNormSlug = normalizeHost(child.slug);
+
+        if (childName === wanted || slugs.has(childSlug)) {
+          return child; // Exact direct/slug match
+        }
+        if (!normalizedMatch && wantedNorm && (childNormName === wantedNorm || childNormSlug === wantedNorm)) {
+          normalizedMatch = child;
+        }
+
+        // Enqueue host in case it has hypervisor/guest child hosts
+        queue.push(child.id);
+      }
+    }
   }
-  return null;
+  return exactMatch || normalizedMatch || null;
 }
 
 // The host an agent runs on: the parent of the agent's own service resource.
@@ -129,6 +167,7 @@ module.exports = {
   AGENT_SERVICE_SUBTYPE,
   isAgentService,
   agentServiceSlug,
+  normalizeHost,
   hostSlugCandidates,
   findHostAtSite,
   findAgentService,

@@ -78,6 +78,26 @@ describe('agent host adoption', () => {
       await expect(find('site1', 'theta-suite-718it')).resolves.toBeNull();
     });
 
+    test('adopts nested hypervisor guest host under site, by name', async () => {
+      const pve = { id: 'pve1', kind: 'host', slug: 'pve-dl380-0', name: 'dl380-0' };
+      const lxc = { id: 'lxc1', kind: 'host', slug: 'lxc-emby-6e65df28bb21', name: 'emby' };
+      const find = load([site, pve, lxc], [
+        { parentId: 'site1', childId: 'pve1' },
+        { parentId: 'pve1', childId: 'lxc1' }
+      ]);
+      await expect(find('site1', 'emby')).resolves.toMatchObject({ id: 'lxc1' });
+    });
+
+    test('adopts nested hypervisor guest matching normalized slug', async () => {
+      const pve = { id: 'pve1', kind: 'host', slug: 'pve-dl380-0', name: 'dl380-0' };
+      const lxc = { id: 'lxc1', kind: 'host', slug: 'lxc-emby-6e65df28bb21', name: 'Container 213' };
+      const find = load([site, pve, lxc], [
+        { parentId: 'site1', childId: 'pve1' },
+        { parentId: 'pve1', childId: 'lxc1' }
+      ]);
+      await expect(find('site1', 'emby')).resolves.toMatchObject({ id: 'lxc1' });
+    });
+
     test('the same hostname at another site is a different machine', async () => {
       const other = { id: 'site2', kind: 'site', slug: 'site_other' };
       const find = load([site, other, seeded], [{ parentId: 'site1', childId: 'h1' }]);

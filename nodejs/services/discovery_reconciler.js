@@ -374,6 +374,21 @@ class DiscoveryReconciler {
         });
         existingEdges.push(created);
       }
+
+      // If a guest host is structurally parented under a hypervisor node, prune
+      // any redundant direct parent edge from the enclosing site resource.
+      if (edge.relation === 'hosts') {
+        const redundantSiteEdges = existingEdges.filter(e => e.childId === childId && e.relation === 'hosts' && e.parentId !== parentId);
+        for (const rse of redundantSiteEdges) {
+          const parentRes = allRes.find(r => r.id === rse.parentId);
+          if (parentRes && parentRes.kind === 'site') {
+            await rse.delete().catch(() => {});
+            existingEdges = existingEdges.filter(e => e.id !== rse.id);
+            console.log(`[DiscoveryReconciler] pruned redundant direct site edge ${rse.parentId} -> ${childId}`);
+          }
+        }
+      }
+
       parentedSlugs.add(edge.childSlug);
       currentEdgeKeys.add(`${parentId}|${childId}|${edge.relation}`);
     }

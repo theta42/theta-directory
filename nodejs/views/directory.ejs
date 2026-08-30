@@ -899,8 +899,11 @@
       rawResources = [];
       for (const r of resResources.results) {
         r.hostName = '—';
-        r.parentId = null;
-        const parentEdge = allEdges.find(e => e.childId === r.id);
+        const childEdges = allEdges.filter(e => e.childId === r.id);
+        const parentEdge = childEdges.find(e => {
+          const p = resourcesById[e.parentId];
+          return p && p.kind !== 'site';
+        }) || childEdges[0];
         if (parentEdge) {
            r.parentId = parentEdge.parentId;
            const parent = resourcesById[parentEdge.parentId];
@@ -1217,7 +1220,11 @@
     }
 
     let place = '';
-    const parentEdge = allEdges.find(e => e.childId === r.id && e.relation === 'hosts');
+    const childHostEdges = allEdges.filter(e => e.childId === r.id && e.relation === 'hosts');
+    const parentEdge = childHostEdges.find(e => {
+      const p = resourcesById[e.parentId];
+      return p && p.kind !== 'site';
+    }) || childHostEdges[0];
     const parent = parentEdge ? resourcesById[parentEdge.parentId] : null;
     if (parent) {
       place += fieldRow('Parent', '<a href="#" onclick="openEditModal(\'' + parent.id + '\'); return false;">'
@@ -3420,7 +3427,11 @@
     $('#oauth-rotate-container').toggle(isOAuthSubtype(r.metadata && r.metadata.subType));
     
     // Find parent host
-    const parentEdge = allEdges.find(e => e.childId === r.id && e.relation === 'hosts');
+    const childHostEdges = allEdges.filter(e => e.childId === r.id && e.relation === 'hosts');
+    const parentEdge = childHostEdges.find(e => {
+      const p = resourcesById[e.parentId];
+      return p && p.kind !== 'site';
+    }) || childHostEdges[0];
     populateHostDropdown(parentEdge ? parentEdge.parentId : '');
     toggleFormFields();
 
