@@ -439,16 +439,6 @@
         </small>
       </div>
     </div>
-
-    <!-- Live service status (kind === 'service'). Populated by
-         loadServiceStatus() when the modal opens. -->
-    <div id="service-live-container" style="display: none;">
-      <hr>
-      <h6 class="text-muted">Live status &amp; metrics</h6>
-      <div id="service-live-body" class="service-live-body">
-        <div class="text-muted small"><i class="fa-solid fa-spinner fa-spin me-1"></i>Loading live status…</div>
-      </div>
-    </div>
     </div><!-- /#edit-resource-form -->
   `;
 
@@ -847,6 +837,14 @@
     // (utils/socket_pubsub.js); anything else never arrives.
     app.subscribe(/^model:Resource:/, reload);
     app.subscribe(/^model:ResourceGroup:/, reload);
+    app.subscribe(/^agent:telemetry:/, function(){
+      if (currentServiceResourceId) {
+        clearTimeout(serviceStatusTimer);
+        serviceStatusTimer = setTimeout(function(){
+          loadResourceStatus(currentServiceResourceId);
+        }, 1000);
+      }
+    });
 
     // The Discovery Plugins tab renders from its own fetch, so it reloads
     // separately. (views/plugins.ejs is dead — /plugins redirects here and the
@@ -1377,28 +1375,17 @@
 
   // Status tab body for the resource modal.
   function statusTabHtml(resource) {
-    if (!resource) return '';
-    const md = resource.metadata || {};
+    return `<div id="resource-status-container" class="p-0">
+      <div class="text-center text-muted py-4">
+        <i class="fa-solid fa-spinner fa-spin fa-2x mb-2 text-primary"></i>
+        <div class="small">Loading status & telemetry…</div>
+      </div>
+    </div>`;
+  }
 
-    function statusBadgeClass(status) {
-      if (status === 'ok') return 'bg-success';
-      if (status === 'warning') return 'bg-warning text-dark';
-      if (status === 'critical' || status === 'error') return 'bg-danger';
-      return 'bg-secondary';
-    }
-
-    const statusHeader = md.status ? `
-      <div class="alert alert-light border mb-3 d-flex align-items-center">
-        <div class="me-3 fs-3"><span class="badge ${statusBadgeClass(md.status)}">${esc(md.status).toUpperCase()}</span></div>
-        <div>
-          <h6 class="mb-1 fw-bold">Computed Status</h6>
-          <p class="mb-0 small text-muted">${esc(md.status_message || 'Telemetry evaluation passing')}</p>
-        </div>
-      </div>` : '';
-
-    const agent = resource.agent;
+  function hostTelemetryHtml(agent) {
     if (!agent) {
-      return statusHeader + `
+      return `
         <div class="p-3 text-center text-muted">
           <i class="fa-solid fa-microchip fa-3x mb-3"></i>
           <h6>No telemetry available</h6>
@@ -1504,7 +1491,7 @@
       loggedUsersHtml = `<div class="small text-muted p-2"><i class="fa-solid fa-user-slash me-1"></i>No active logged-in user sessions.</div>`;
     }
 
-    return statusHeader + `<div class="p-3">
+    return `<div class="p-0">
       <div class="mb-3 d-flex justify-content-between align-items-center">
         <h5 class="mb-0">
           ${esc(agent.name || agent.hostname || 'unknown')} ${online}
@@ -3037,29 +3024,123 @@
   // 'service'). Called when the modal opens and re-called on every agent
   // telemetry frame so the panel stays live. Falls back to the last good data
   // (or a clear message) rather than throwing when the agent is offline.
-  async function loadServiceStatus(id) {
+  async function loadResourceStatus(id) {
     const r = resourcesById[id];
-    const $body = $('#service-live-body');
-    if (!r || !$body.length) return;
+    const $container = $('#resource-status-container');
+    if (!r || !$container.length) return;
 
-    try {
-      const res = await app.api.get(`directory-admin/resources/${id}/driver-metrics`);
-      const m = (res && res.metrics) || {};
-      $body.html(serviceStatusHtml(r, m));
-      const $container = $('#service-live-container');
-      if ($container.length) $container.show();
-    } catch (err) {
-      $body.html(
-        '<div class="text-muted small"><i class="fa-solid fa-triangle-exclamation me-1"></i>Live status unavailable: ' +
-        esc((err && err.message) || 'agent offline or not bound') + '</div>'
-      );
+    const md = r.metadata || {};
+
+    function statusBadgeClass(status) {
+      if (status === 'ok') return 'bg-success';
+      if (status === 'warning') return 'bg-warning text-dark';
+      if (status === 'critical' || status === 'error') return 'bg-danger';
+      return 'bg-secondary';
     }
+
+    const statusHeader = md.status ? `
+      <div class="alert alert-light border mb-3 d-flex align-items-center">
+        <div class="me-3 fs-3"><span class="badge ${statusBadgeClass(md.status)}">${esc(md.status).toUpperCase()}</span></div>
+        <div>
+          <h6 class="mb-1 fw-bold">Computed Status</h6>
+          <p class="mb-0 small text-muted">${esc(md.status_message || 'Telemetry evaluation passing')}</p>
+        </div>
+      </div>` : '';
+
+    // A. Service resources or BMC (iLO)
+    if (r.kind === 'service' || (md.subType === 'ilo')) {
+      try {
+        const res = await app.api.get(`directory-admin/resources/${id}/driver-metrics`);
+        const m = (res && res.metrics) || {};
+        $container.html(statusHeader + serviceStatusHtml(r, m));
+      } catch (err) {
+        $container.html(statusHeader + `
+          <div class="card border shadow-sm p-3">
+            <div class="d-flex justify-content-between align-items-center mb-2">
+              <h6 class="mb-0 fw-bold"><i class="fa-solid fa-cube me-1"></i>${esc(r.name)}</h6>
+              <span class="badge bg-secondary">Offline / Unbound</span>
+            </div>
+            <p class="text-muted small mb-0">
+              <i class="fa-solid fa-circle-info me-1"></i>
+              Live driver metrics unavailable: ${esc((err && err.message) || 'No agent reported on this service.')}
+            </p>
+          </div>
+        `);
+      }
+      return;
+    }
+
+    // B. Host resources
+    if (r.kind === 'host') {
+      let agent = r.agent;
+      if (!agent) {
+        const childEdges = allEdges.filter(e => e.parentId === r.id);
+        for (const ce of childEdges) {
+          const childRes = resourcesById[ce.childId];
+          if (childRes && agentsByResource[childRes.id]) {
+            agent = agentsByResource[childRes.id];
+            break;
+          }
+        }
+        if (!agent && agentsById) {
+          agent = Object.values(agentsById).find(a => a.resourceId === r.id);
+        }
+      }
+
+      if (agent) {
+        $container.html(statusHeader + hostTelemetryHtml(agent));
+      } else {
+        $container.html(statusHeader + `
+          <div class="p-4 text-center text-muted">
+            <i class="fa-solid fa-microchip fa-3x mb-3 text-secondary"></i>
+            <h5>No Agent Telemetry</h5>
+            <p class="small text-muted mb-3">Install and enroll <code>theta-agent</code> on this host to stream real-time CPU, RAM, Disk, and container metrics.</p>
+            <div class="bg-light p-2 rounded font-monospace small d-inline-block border">
+              curl -sSL https://${location.host}/install.sh | bash
+            </div>
+          </div>
+        `);
+      }
+      return;
+    }
+
+    // C. Site resources
+    if (r.kind === 'site') {
+      const childEdges = allEdges.filter(e => e.parentId === r.id);
+      const childHosts = childEdges.map(e => resourcesById[e.childId]).filter(Boolean);
+      let okCount = 0, warnCount = 0, critCount = 0, unkCount = 0;
+      childHosts.forEach(h => {
+        const s = (h.metadata && (h.metadata.status || h.metadata.bubbled_status)) || 'unknown';
+        if (s === 'ok') okCount++;
+        else if (s === 'warning') warnCount++;
+        else if (s === 'critical' || s === 'error') critCount++;
+        else unkCount++;
+      });
+      $container.html(statusHeader + `
+        <div class="card border shadow-sm p-3">
+          <h5 class="mb-3 fw-bold"><i class="fa-solid fa-network-wired text-primary me-2"></i>Site Health Summary</h5>
+          <div class="row g-2 mb-3">
+            <div class="col-3 text-center"><div class="badge bg-success p-2 w-100 fs-6">${okCount} Healthy</div></div>
+            <div class="col-3 text-center"><div class="badge bg-warning text-dark p-2 w-100 fs-6">${warnCount} Warning</div></div>
+            <div class="col-3 text-center"><div class="badge bg-danger p-2 w-100 fs-6">${critCount} Critical</div></div>
+            <div class="col-3 text-center"><div class="badge bg-secondary p-2 w-100 fs-6">${unkCount} Unknown</div></div>
+          </div>
+          <p class="text-muted small mb-0">Total child hosts: <strong>${childHosts.length}</strong></p>
+        </div>
+      `);
+      return;
+    }
+
+    // Fallback
+    $container.html(statusHeader + `
+      <div class="p-3 text-center text-muted">
+        <i class="fa-solid fa-circle-info fa-2x mb-2"></i>
+        <p class="small mb-0">No active telemetry driver configured for this resource.</p>
+      </div>
+    `);
   }
 
-  // Render a service resource's live status card from the driver-metrics
-  // response. Handles the different per-subtype shapes (active/cpu/mem/restarts
-  ///uptime for systemd/docker/podman/process; next_run/last_run for schedules;
-  //status for VMs).
+  // Render a service resource's live status card from the driver-metrics response.
   function serviceStatusHtml(r, m) {
     const meta = r.metadata || {};
     const subType = meta.subType || 'systemd';
@@ -3103,16 +3184,65 @@
       extra += `<div class="mt-2"><span class="badge bg-info">${esc(svc.status)}</span></div>`;
     }
 
+    // Subtype-specific metrics (ZFS, WireGuard)
+    if (m.zfs && m.zfs.pools && m.zfs.pools.length > 0) {
+      extra += `
+        <div class="mt-3 border-top pt-2">
+          <h6 class="fw-bold small text-primary"><i class="fa-solid fa-database me-1"></i> ZFS Storage Pools</h6>
+          <div class="table-responsive">
+            <table class="table table-sm small mb-0 align-middle">
+              <thead><tr><th>Pool</th><th>Health</th><th>Size</th><th>Alloc</th><th>Free</th><th>Frag</th></tr></thead>
+              <tbody>
+                ${m.zfs.pools.map(p => `<tr>
+                  <td><code>${esc(p.name)}</code></td>
+                  <td><span class="badge ${p.health === 'ONLINE' ? 'bg-success' : 'bg-warning text-dark'}">${esc(p.health)}</span></td>
+                  <td>${esc(p.size || 'N/A')}</td>
+                  <td>${esc(p.alloc || 'N/A')}</td>
+                  <td>${esc(p.free || 'N/A')}</td>
+                  <td>${esc(p.frag || 'N/A')}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+
+    if (m.wireguard && m.wireguard.peers && m.wireguard.peers.length > 0) {
+      extra += `
+        <div class="mt-3 border-top pt-2">
+          <h6 class="fw-bold small text-primary"><i class="fa-solid fa-shield-halved me-1"></i> WireGuard Peers (${m.wireguard.peers.length})</h6>
+          <div class="table-responsive">
+            <table class="table table-sm small mb-0 align-middle">
+              <thead><tr><th>Peer</th><th>Allowed IPs</th><th>Endpoint</th><th>Last Handshake</th><th>Tx / Rx</th></tr></thead>
+              <tbody>
+                ${m.wireguard.peers.map(p => `<tr>
+                  <td><code title="${esc(p.public_key)}">${esc(p.public_key ? p.public_key.substring(0, 10) + '…' : 'Peer')}</code></td>
+                  <td><code>${esc(p.allowed_ips || '—')}</code></td>
+                  <td>${esc(p.endpoint || '—')}</td>
+                  <td>${p.latest_handshake ? moment(p.latest_handshake * 1000).fromNow() : 'never'}</td>
+                  <td>${fmtBytes(p.transfer_tx)} / ${fmtBytes(p.transfer_rx)}</td>
+                </tr>`).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+
+    const driverBadge = m.driver ? `<span class="badge bg-dark font-monospace small"><i class="fa-solid fa-microchip me-1"></i>${esc(m.driver)}</span>` : '';
+
     return `
       <div class="card mb-0 border shadow-sm">
         <div class="card-body p-3">
           <div class="d-flex justify-content-between align-items-center mb-2">
-            <strong><i class="fa-solid fa-cube me-1"></i>${esc(r.name)}</strong>
+            <div>
+              <strong class="fs-6"><i class="fa-solid fa-cube me-1"></i>${esc(r.name)}</strong>
+              ${driverBadge}
+            </div>
             ${badge(svc.active !== false)}
           </div>
           <div class="row g-2">
             ${row('Sub type', esc(subType))}
-            ${row('State', esc(svc.substate || svc.status || 'N/A'))}
+            ${row('State', esc(svc.substate || svc.status || (svc.active ? 'running' : 'inactive')))}
             ${row('CPU', (svc.cpu_usage_percent != null && svc.cpu_usage_percent >= 0)
               ? esc(svc.cpu_usage_percent.toFixed(1)) + '%' : 'N/A')}
             ${row('Memory', fmtBytes(svc.memory_bytes))}
@@ -3121,20 +3251,19 @@
           </div>
           ${extra}
           ${serviceControlsHtml(r, svc, m)}
+          <div class="mt-3 border-top pt-2">
+            <details>
+              <summary class="text-muted small" style="cursor:pointer;"><i class="fa-solid fa-code me-1"></i>Raw Telemetry & Driver Facts</summary>
+              <pre class="bg-dark text-light p-2 rounded small mt-1 mb-0 font-monospace" style="max-height: 200px; overflow-y: auto;">${esc(JSON.stringify(m, null, 2))}</pre>
+            </details>
+          </div>
         </div>
       </div>`;
   }
 
-  // Subtypes whose start/stop/restart means something on the host. Mirrors
-  // ThetaAgentDriver.CONTROLLABLE_SUBTYPES -- a timer, a cron entry or a VM has
-  // no systemctl lifecycle, and offering a button that can only fail is worse
-  // than offering none.
+  // Subtypes whose start/stop/restart means something on the host.
   const CONTROLLABLE_SERVICE_SUBTYPES = new Set(['systemd', 'docker', 'podman', 'openrc']);
 
-  // Start / stop / restart for a registered service, over the agent's signed
-  // command channel. Disabled (with the reason in the tooltip) rather than
-  // hidden when the agent is offline, so the buttons do not appear and vanish
-  // as an agent reconnects.
   function serviceControlsHtml(r, svc, m) {
     const subType = ((r.metadata || {}).subType || 'systemd').toLowerCase();
     if (!CONTROLLABLE_SERVICE_SUBTYPES.has(subType)) return '';
@@ -3148,8 +3277,6 @@
          title="${esc(why || label)}"
          onclick="serviceAction('${r.id}', '${action}')"><i class="fa-solid ${icon} me-1"></i>${esc(label)}</button>`;
 
-    // reload is systemd-only; containers have no equivalent and the driver
-    // refuses it rather than quietly restarting instead.
     const reloadBtn = subType === 'systemd'
       ? btn('Reload', 'reload', 'btn-outline-secondary', 'fa-rotate', offline || !active,
             offline ? reason : (active ? 'Re-read the unit\'s configuration' : 'Not running'))
@@ -3169,9 +3296,6 @@
       </div>`;
   }
 
-  // Send a lifecycle action to a service, through the same generic
-  // driver-action endpoint the iLO power buttons use. stop and restart
-  // interrupt something that is running, so they are confirmed; start is not.
   async function serviceAction(resourceId, action) {
     const r = resourcesById[resourceId];
     const target = serviceTargetName(r) || (r && r.name) || 'this service';
@@ -3186,22 +3310,15 @@
         { action: 'service_action', subAction: action });
       const result = res && res.result;
       if (result && result.status === 'error') throw new Error(result.message);
-      // The agent answers with the command's own stderr in `error` even when
-      // the frame itself succeeded -- surfacing that is the difference between
-      // "dispatched" and "worked".
       const inner = result && result.result;
       if (inner && inner.error) throw new Error(inner.error);
       app.messages.action(`'${action}' completed on ${target}.`, $('#res-modal'), 'success');
-      // systemd takes a moment to settle; re-read rather than guess.
-      setTimeout(function(){ loadServiceStatus(resourceId); }, 1500);
+      setTimeout(function(){ loadResourceStatus(resourceId); }, 1500);
     } catch (err) {
       app.messages.action(err.message || `Could not ${action} ${target}`, $('#res-modal'), 'danger');
     }
   }
 
-  // Render an iLO host's live power/health state (kind === 'host', subType
-  // === 'ilo') plus its power-control buttons. m.ilo comes from
-  // drivers/ilo_driver.js's getMetrics -- a real Redfish read, not a mock.
   function iloStatusHtml(r, m) {
     const ilo = m.ilo || {};
     const on = ilo.powerState === 'On';
@@ -3238,9 +3355,6 @@
       </div>`;
   }
 
-  // Power-control button handler for an iLO host -- POSTs to the same
-  // generic driver-action endpoint agentDesktopControl() uses, with an
-  // action name drivers/ilo_driver.js maps to a Redfish ResetType.
   async function iloAction(resourceId, action) {
     const labels = { power_on: 'power on', reboot: 'gracefully reboot', shutdown: 'gracefully shut down', force_off: 'force off (hard power-cut)' };
     const confirmed = await app.messages.confirm(`Are you sure you want to ${labels[action] || action} this server via iLO?`, $('#res-modal'), 'danger');
@@ -3250,7 +3364,7 @@
       const res = await app.api.post(`directory-admin/resources/${resourceId}/driver-action`, { action });
       if (res && res.result && res.result.status === 'error') throw new Error(res.result.message);
       app.messages.action(`iLO '${action}' dispatched.`, $('#res-modal'), 'success');
-      setTimeout(function(){ loadServiceStatus(resourceId); }, 2000);
+      setTimeout(function(){ loadResourceStatus(resourceId); }, 2000);
     } catch (err) {
       app.messages.action(err.message || 'iLO action failed', $('#res-modal'), 'danger');
     }
@@ -3307,25 +3421,9 @@
     loadResourceSecrets(r.id);
     await loadLdapGroups();
 
-    // Live status/metrics for service resources, and for an iLO host (same
-    // driver-metrics endpoint, a different response shape -- see
-    // serviceStatusHtml's subType === 'ilo' branch). Tracked so telemetry
-    // frames can re-render just the open panel.
-    // ilo.js reports kind: 'bmc', not 'host' -- see its comment for why
-    // (keeping the generic reconciler from ever folding an iLO's own
-    // out-of-band address into the server's real host resource).
-    const isIloBmc = (r.metadata || {}).subType === 'ilo';
-    const showLive = r.kind === 'service' || isIloBmc;
-    currentServiceResourceId = showLive ? id : null;
-    const $svc = $('#service-live-container');
-    if ($svc.length) {
-      if (showLive) {
-        loadServiceStatus(id);
-      } else {
-        currentServiceResourceId = null;
-        $svc.hide();
-      }
-    }
+    // Populate Status tab dynamically with live driver telemetry & metrics
+    currentServiceResourceId = id;
+    loadResourceStatus(id);
   }
 
   var currentResourceSecretsList = [];

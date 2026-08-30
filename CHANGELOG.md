@@ -1,3 +1,11 @@
+## [2.36.5] - 2026-08-29
+
+### Added
+- **Resource Modal Status Tab Telemetry**: Refactored the Status tab on resource modals (`views/directory.ejs`) to dynamically render live telemetry for all resource kinds (services, docker containers, hosts, sites). Integrated live driver metrics (`/api/directory-admin/resources/:id/driver-metrics`) for services and containers, showing CPU/RAM/uptime/restarts, state, ZFS/WireGuard/iLO/Timer extras, lifecycle service controls (Start, Stop, Restart, Reload), computed status, and raw telemetry inspection.
+
+### Fixed
+- **Docker Container Service Reconciliation**: Refined `reconcileServicesFromTelemetry` in `utils/agent_manager.js` to match services by exact subtype, ensuring registered Docker containers (`proxy`, `sso-manager`, `openbao`, `bao-renewer`) are tracked and maintained as distinct `subType: 'docker'` service resources.
+
 ## [2.36.4] - 2026-08-29
 
 ### Fixed
