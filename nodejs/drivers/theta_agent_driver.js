@@ -63,16 +63,16 @@ class ThetaAgentDriver extends BaseDriver {
       };
     }
 
-    const publicAgent = agent.toPublic();
+    const publicAgent = (typeof agent.toPublic === 'function') ? agent.toPublic() : agent;
     const telemetry = publicAgent.latestTelemetry || {};
     const subType = ((resource.metadata && resource.metadata.subType) || '').toLowerCase();
 
     const result = {
       status: 'online',
       driver: this.name,
-      agentId: agent.id,
-      agentVersion: agent.version || (telemetry && telemetry.version) || 'unknown',
-      lastSeen: agent.lastSeen,
+      agentId: publicAgent.id || agent.id,
+      agentVersion: publicAgent.version || (telemetry && telemetry.version) || 'unknown',
+      lastSeen: publicAgent.lastSeen,
       system: {
         cpu: telemetry.cpu || null,
         ram: telemetry.memory || null,
