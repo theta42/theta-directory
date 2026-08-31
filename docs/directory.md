@@ -55,30 +55,32 @@ still work for granting access to anyone else.
 Access does not outlive the enrolment: revoking or deleting an agent clears the
 binding and removes the host from every access projection immediately.
 
-## Resource Metadata
+## Resource Metadata & Dynamic Schemas
 
-Resources carry a flexible `metadata` JSON object that can store essential context for your applications. The UI natively supports the following metadata fields:
+Resources carry a flexible `metadata` JSON object that stores context for your applications. Rather than cluttering every resource with hardcoded fields, the Directory renders fields **dynamically based on the selected Subtype Template** (e.g. `web`, `systemd`, `docker`, `ssh`, `git-repo`, `lxc`, `vm`).
 
-### Common Metadata
-- **Sub Type**: Free-form text to categorize the resource (e.g., `proxmox_node`, `linux`, `lxc`, `web`).
-- **IP Address**: The internal IP address of the resource.
-- **MAC Address**: The hardware address of the primary interface.
-- **Host / URI Address**: The FQDN or URL of the resource (e.g., `https://emby.home.arpa`).
-- **Production Environment**: A boolean toggle indicating if the resource is in production.
+### Optional Names and Slugs
+- **Name**: Optional. If omitted, defaults sensibly based on the resource subtype and kind (e.g. `Lxc host`, `Ssh service`).
+- **Slug**: Optional. Auto-derived from the name or kind with automatic collision resistance (e.g. `app_custom_portal_1a2b3c`).
 
-### Host Metadata
-- **VMID**: The hypervisor VM or Container ID (e.g. `101`).
-- **OS**: The operating system name (e.g. `Ubuntu 22.04.3 LTS`).
-- **Kernel**: The kernel version string (e.g. `5.15.0-100-generic`).
+### Dynamic Subtype Schemas
+Each subtype template specifies the exact fields it needs on the **Details** tab:
+- **Web Application (`web`)**: Internal Port, External Port, Base / Public URL, Reachable Externally, Public (No Auth), Git Repo, Install Path, Systemd Unit.
+- **Systemd Service (`systemd`)**: Systemd Unit Name (e.g. `nginx.service`), Listening Port, Working Directory / Install Path.
+- **SSH Service (`ssh`)**: SSH Listening Port (default 22), Systemd Unit Name (`sshd.service`).
+- **Docker / Podman Container (`docker`, `podman`)**: Container Name, Image, Mapped Host Port.
+- **Git Repository App (`git-repo`)**: Git Repository URL, Branch (`main`), Install Path (`/opt/...`), Systemd Service.
+- **Port Forward (`port-forward`)**: Target Internal Port, Source External Port, Protocol (`tcp`/`udp`), Reachable Externally.
+- **Hypervisors & Guests (`proxmox`, `lxc`, `vm`)**: Cores, Total RAM, Total Disk, VMID, Node, Power State, Network Interfaces, and Tags.
 
-### Service Metadata
-- **Internal Port**: The local port the service binds to (e.g. `8080`).
-- **External Port**: The reverse-proxy or external port (defaults to Internal Port if left blank).
-- **Public (No Auth)**: Indicates if the service is exposed publicly without authentication.
-- **External Reachable**: Indicates if the service is accessible outside the VPN/local network.
-- **Git Repo**: The source code repository for the service (e.g. `https://github.com/...`).
-- **Install Path**: The filesystem path where the service is installed (e.g. `/opt/app`).
-- **Systemd Service**: The systemd unit name for the service (e.g. `app.service`).
+## Live Status, Monitoring & Parent Rollups
+
+1. **SSH Service Monitoring**:
+   - For `subType: 'ssh'`, the Directory actively evaluates the SSH daemon. If `theta-agent` is enrolled on the host, it monitors the `sshd.service` unit. If monitored remotely without an agent, it executes non-blocking TCP connectivity and protocol banner probing.
+2. **Proxmox Guest Controls & Live Stats**:
+   - For `lxc` containers and `vm` guests discovered via Proxmox, operators can view real-time CPU, RAM, Disk, and Uptime metrics, and trigger power actions directly from the resource modal (`Start`, `Stop`, `Reboot`, `Shutdown`).
+3. **Parent Status & Workload Rollup**:
+   - When viewing any Host or Site modal, all child workloads, services, VMs, and containers roll up into a unified **Child Workloads & Status Rollup** dashboard, showing aggregate health tallies (Healthy / Warning / Critical / Unknown), child network addresses, and quick click-through navigation.
 
 ### Who sees which metadata
 

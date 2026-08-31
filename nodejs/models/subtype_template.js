@@ -248,7 +248,11 @@ class SubtypeTemplate extends Model {
       // discovery, never corrected by hand.
       unit('theta-agent', 'Theta Agent', 'The agent enrolment itself, bound to this host.', 'fa-solid fa-shield-halved'),
       unit('systemd', 'Systemd Unit', 'A systemd service on the host.', 'fa-solid fa-gears',
-        { properties: { unitName: { type: 'string', description: 'Unit name (e.g. nginx.service)' } } }),
+        { properties: {
+            unitName: { type: 'string', description: 'Unit name (e.g. nginx.service)' },
+            port: portField('Listening Port (optional)'),
+            installPath: { type: 'string', description: 'Working Directory / Install Path (optional)' }
+          } }),
       unit('systemd-timer', 'Systemd Timer', 'A systemd timer on the host.', 'fa-solid fa-clock',
         { properties: { unitName: { type: 'string', description: 'Timer name (e.g. backup.timer)' } } }),
       unit('openrc', 'OpenRC Service', 'An OpenRC service on the host.', 'fa-solid fa-gears',
@@ -265,12 +269,14 @@ class SubtypeTemplate extends Model {
       unit('docker', 'Docker Container', 'A Docker container on the host.', 'fa-brands fa-docker',
         { properties: {
             containerName: { type: 'string', description: 'Container name' },
-            image: { type: 'string', description: 'Image' }
+            image: { type: 'string', description: 'Image' },
+            port: portField('Mapped Host Port (optional)')
           } }),
       unit('podman', 'Podman Container', 'A Podman container on the host.', 'fa-brands fa-docker',
         { properties: {
             containerName: { type: 'string', description: 'Container name' },
-            image: { type: 'string', description: 'Image' }
+            image: { type: 'string', description: 'Image' },
+            port: portField('Mapped Host Port (optional)')
           } }),
 
       // What a network scan concluded nothing from. NOT ssh_capable: an
@@ -294,8 +300,19 @@ class SubtypeTemplate extends Model {
             }, required: ['targetPort', 'sourcePort'] }),
         inherits_host_access: true,
         status_rules: unitRules },
-      app('ssh', 'SSH', 'An SSH endpoint on this host.', 'fa-solid fa-terminal',
-        { properties: { port: portField('SSH port', 22) } }),
+      app('ssh', 'SSH Service', 'An SSH endpoint and daemon on this host.', 'fa-solid fa-terminal',
+        { properties: {
+            port: portField('SSH Port', 22),
+            unitName: { type: 'string', description: 'Systemd Unit Name (optional)', default: 'sshd.service' }
+          } }, 'Remote access'),
+      app('git-repo', 'Git Repository App', 'A self-hosted application installed from a git repository.', 'fa-solid fa-code-branch',
+        { properties: {
+            gitRepo: { type: 'string', description: 'Git Repository URL' },
+            branch: { type: 'string', description: 'Branch', default: 'main' },
+            installPath: { type: 'string', description: 'Install Path (e.g. /opt/app)' },
+            systemdService: { type: 'string', description: 'Associated Systemd Service' },
+            port: portField('Listening Port (optional)')
+          } }, 'Developer'),
 
       // OAuth/OIDC clients. A service, not a kind of its own -- see
       // models/oauth_client.js. `valid_parent_types` is ['host', 'service']
@@ -340,7 +357,16 @@ class SubtypeTemplate extends Model {
       app('http', 'HTTP Service', 'An HTTP endpoint on this host.', 'fa-solid fa-globe',
         { properties: { port: portField('HTTP port', 80), address: { type: 'string', description: 'Base URL' } } }),
       app('web', 'Web Application', 'A web application in the catalog.', 'fa-solid fa-globe',
-        { properties: { port: portField('Port'), address: { type: 'string', description: 'Base URL' } } }),
+        { properties: {
+            port: portField('Internal Port (e.g. 8080)'),
+            externalPort: portField('External Port (optional)'),
+            address: { type: 'string', description: 'Base / Public URL (https://...)' },
+            isExternalReachable: { type: 'boolean', description: 'Reachable Externally' },
+            isPublic: { type: 'boolean', description: 'Public (No Auth)' },
+            gitRepo: { type: 'string', description: 'Git Repository URL (optional)' },
+            installPath: { type: 'string', description: 'Install Path (e.g. /opt/app)' },
+            systemdService: { type: 'string', description: 'Systemd Unit Name (optional)' }
+          } }, 'Web'),
       app('wireguard', 'WireGuard Tunnel', 'A WireGuard tunnel endpoint.', 'fa-solid fa-shield-halved',
         { properties: { port: portField('Listen port', 51820) } }),
       app('postgresql', 'PostgreSQL', 'A PostgreSQL database server.', 'fa-solid fa-database',

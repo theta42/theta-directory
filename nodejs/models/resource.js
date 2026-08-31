@@ -257,8 +257,8 @@ class Resource extends Model {
   static fields = {
     id: { type: 'uuid', primaryKey: true },
     kind: { type: 'string', isRequired: true },
-    name: { type: 'string', isRequired: true },
-    slug: { type: 'string', isRequired: true, unique: true },
+    name: { type: 'string' },
+    slug: { type: 'string', unique: true },
     owner: { type: 'string' },
     description: { type: 'text' },
     metadata: { type: 'json', default: {} },
@@ -274,6 +274,29 @@ class Resource extends Model {
     edgesAsChild: { type: 'hasMany', model: 'ResourceEdge', remoteKey: 'childId' },
     groups: { type: 'hasMany', model: 'ResourceGroup', remoteKey: 'resourceId' }
   };
+
+  static async create(data = {}) {
+    const payload = { ...data };
+    if (!payload.kind) payload.kind = 'service';
+    if (!payload.name || !String(payload.name).trim()) {
+      const subType = (payload.metadata && payload.metadata.subType) || '';
+      payload.name = subType
+        ? `${subType.charAt(0).toUpperCase() + subType.slice(1)} ${payload.kind}`
+        : `New ${payload.kind.charAt(0).toUpperCase() + payload.kind.slice(1)}`;
+    }
+    if (!payload.slug || !String(payload.slug).trim()) {
+      const prefix = payload.kind === 'service' ? 'app_' : payload.kind === 'host' ? 'host_' : 'site_';
+      const clean = String(payload.name).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+      const baseSlug = prefix + (clean || 'resource');
+      let candidate = baseSlug;
+      const existing = await this.list({ where: { slug: candidate } }).catch(() => []);
+      if (existing && existing.length > 0) {
+        candidate = `${baseSlug}_${crypto.randomBytes(3).toString('hex')}`;
+      }
+      payload.slug = candidate;
+    }
+    return super.create(payload);
+  }
 
   // Walk parent ResourceEdges from resourceId up to the nearest ancestor
   // whose kind === 'site', returning its slug (or null if none exists -- a

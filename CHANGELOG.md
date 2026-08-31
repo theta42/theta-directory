@@ -1,3 +1,14 @@
+## [2.36.16] - 2026-08-30
+
+### Fixed
+- **Multi-Site WireGuard Client & Exit Grant Replication**:
+  - `POST /api/site/export`: Export `MeshClient` and `MeshExitGrant` models alongside cluster roster and catalog resources.
+  - `routes/api_site.js`: Adopt remote `meshClients` and `meshExitGrants` on spoke join and live resync (`meshClients.adoptClients`), enabling remote spoke gateways to know which cluster devices exit through them.
+  - `utils/mesh_clients.js`: Added `adoptClients` and proactive live replication notifications (`replicateToSpokes('mesh-client-changed')`) on all client and exit grant mutations (`enroll`, `setExit`, `grantExit`, `revokeExit`).
+  - `middleware/spoke_write_proxy.js`: Added `/api/mesh/clients`, `/api/mesh/exit-grants`, and `/api/v1/agent/mesh` routes to `FORWARD_PATHS` to ensure spoke mutations proxy directly to master.
+- **Proxmox Driver and Discovery Updates**:
+  - Enhanced guest hardware discovery, interface MAC matching, and optional resource field handling.
+
 ## [2.36.15] - 2026-08-30
 
 ### Fixed

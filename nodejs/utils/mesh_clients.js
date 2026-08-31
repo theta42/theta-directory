@@ -89,7 +89,15 @@ async function enroll({ uid, name, siteId, publicKey, source, agentId }) {
 	}, { label: `mesh client enroll: ${uid}/${name}` });
 
 	// privateKey rides along on the RESULT only; it was never written.
+	notifyReplication('mesh-client-enrolled');
 	return { client, privateKey };
+}
+
+function notifyReplication(reason) {
+	try {
+		const { replicateToSpokes } = require('./site_replicate');
+		replicateToSpokes(reason);
+	} catch (_) {}
 }
 
 /** Devices owned by one user. */
@@ -125,6 +133,7 @@ async function allowedExits(uid) {
 async function setExit(client, exitSiteId, { actorUid, isAdmin } = {}) {
 	if (exitSiteId === null || exitSiteId === undefined || exitSiteId === '') {
 		await client.update({ exitSiteId: null });
+		notifyReplication('mesh-client-exit-changed');
 		return client;
 	}
 	const target = Number(exitSiteId);
@@ -137,6 +146,7 @@ async function setExit(client, exitSiteId, { actorUid, isAdmin } = {}) {
 	}
 	await client.update({ exitSiteId: target });
 	if (actorUid) client._lastActor = actorUid;
+	notifyReplication('mesh-client-exit-changed');
 	return client;
 }
 
@@ -144,9 +154,11 @@ async function grantExit(uid, siteId, grantedBy) {
 	assertSiteId(siteId);
 	const existing = (await MeshExitGrant.list({ where: { uid, siteId: Number(siteId) } }))[0];
 	if (existing) return existing;
-	return MeshExitGrant.create({
+	const grant = await MeshExitGrant.create({
 		id: crypto.randomUUID(), uid, siteId: Number(siteId), grantedBy: grantedBy || '', createdAt: now()
 	});
+	notifyReplication('mesh-exit-grant-changed');
+	return grant;
 }
 
 async function revokeExit(uid, siteId) {
@@ -158,6 +170,7 @@ async function revokeExit(uid, siteId) {
 		await client.update({ exitSiteId: null });
 	}
 	await existing.delete();
+	notifyReplication('mesh-exit-grant-revoked');
 	return true;
 }
 
@@ -211,7 +224,84 @@ async function pushConfigToAgent(client) {
 	}
 }
 
+/**
+ * Adopt client devices and exit grants carried in a master export.
+ *
+ * This allows spoke gateways to learn which devices across the cluster
+ * exit through this site, and which exit grants exist.
+ */
+async function adoptClients(meshClients = [], meshExitGrants = []) {
+	let adoptedClients = 0;
+	let adoptedGrants = 0;
+
+	if (Array.isArray(meshClients) && meshClients.length) {
+		const existingClients = await MeshClient.list();
+		const byId = new Map(existingClients.map((c) => [c.id, c]));
+		const byKey = new Map(existingClients.map((c) => [c.publicKey, c]));
+
+		for (const row of meshClients) {
+			if (!row.publicKey || !row.assignedIp) continue;
+			const siteId = Number(row.siteId);
+			if (!siteId) continue;
+
+			const fields = {
+				uid: row.uid || '',
+				name: row.name || '',
+				siteId,
+				assignedIp: row.assignedIp,
+				publicKey: row.publicKey,
+				exitSiteId: row.exitSiteId === null || row.exitSiteId === undefined || row.exitSiteId === '' ? null : Number(row.exitSiteId),
+				source: row.source || 'manual',
+				agentId: row.agentId || null,
+				createdAt: Number(row.createdAt || 0),
+				lastSeenAt: Number(row.lastSeenAt || 0)
+			};
+
+			const match = (row.id && byId.get(row.id)) || byKey.get(row.publicKey);
+			if (match) {
+				await match.update(fields);
+			} else {
+				await MeshClient.create({
+					id: row.id || crypto.randomUUID(),
+					...fields
+				});
+			}
+			adoptedClients++;
+		}
+	}
+
+	if (Array.isArray(meshExitGrants) && meshExitGrants.length) {
+		const existingGrants = await MeshExitGrant.list();
+		const byKey = new Map(existingGrants.map((g) => [`${g.uid}|${g.siteId}`, g]));
+
+		for (const row of meshExitGrants) {
+			if (!row.uid || !row.siteId) continue;
+			const siteId = Number(row.siteId);
+			const key = `${row.uid}|${siteId}`;
+			const fields = {
+				uid: row.uid,
+				siteId,
+				grantedBy: row.grantedBy || '',
+				createdAt: Number(row.createdAt || 0)
+			};
+
+			const match = byKey.get(key);
+			if (match) {
+				await match.update(fields);
+			} else {
+				await MeshExitGrant.create({
+					id: row.id || crypto.randomUUID(),
+					...fields
+				});
+			}
+			adoptedGrants++;
+		}
+	}
+
+	return { adopted: adoptedClients, grants: adoptedGrants };
+}
+
 module.exports = {
 	nextFreeIp, enroll, listForUser, allowedExits, setExit, grantExit, revokeExit,
-	pushConfigToAgent, MAX_CLIENT_INDEX
+	pushConfigToAgent, adoptClients, MAX_CLIENT_INDEX
 };

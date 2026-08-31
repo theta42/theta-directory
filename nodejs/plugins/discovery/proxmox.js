@@ -257,6 +257,10 @@ module.exports = {
           status: node.status,
           sourceId: `${node.node}`,
           node: node.node,
+          cores: node.maxcpu || undefined,
+          ram_total_gb: node.maxmem ? Math.round((node.maxmem / (1024 * 1024 * 1024)) * 10) / 10 : undefined,
+          disk_total_gb: node.maxdisk ? Math.round((node.maxdisk / (1024 * 1024 * 1024)) * 10) / 10 : undefined,
+          uptime: node.uptime || undefined,
           interfaces: nodeIfaces.toArray(),
           macAddress: nodeIfaces.primaryMac(),
           ip: nodeIfaces.primaryIp()
@@ -303,13 +307,14 @@ module.exports = {
 
         // Enrich from VM config: the MAC is declared there whether or not the
         // guest agent answered, so a stopped VM still gets a stable identity.
+        let vmConf = null;
         try {
             const configRes = await fetch(`${url}/api2/json/nodes/${node.node}/qemu/${vm.vmid}/config`, { headers, agent });
             if (configRes.ok) {
-                const confData = (await configRes.json()).data;
+                vmConf = (await configRes.json()).data || null;
                 for (let i = 0; i < 10; i++) {
-                    if (confData[`net${i}`]) {
-                        const m = confData[`net${i}`].match(/(?:virtio|e1000e?|rtl8139|vmxnet3)=([0-9a-fA-F:]{17})/);
+                    if (vmConf && vmConf[`net${i}`]) {
+                        const m = vmConf[`net${i}`].match(/(?:virtio|e1000e?|rtl8139|vmxnet3)=([0-9a-fA-F:]{17})/);
                         if(m) ifaces.add(m[1], [], `net${i}`);
                     }
                 }
@@ -318,6 +323,9 @@ module.exports = {
 
         const interfaces = ifaces.toArray();
         const vmSlug = guestSlug('vm', vm.name, vm.vmid, ifaces.primaryMac());
+
+        const vmTags = vm.tags ? String(vm.tags).split(/[;, ]+/).filter(Boolean) : (vmConf && vmConf.tags ? String(vmConf.tags).split(/[;, ]+/).filter(Boolean) : []);
+        const vmCores = vm.cpus || (vmConf && vmConf.cores ? Number(vmConf.cores) * Number(vmConf.sockets || 1) : undefined);
 
         resources.push({
           // Always a host; `subType: 'template'` is what marks it as one.
@@ -332,6 +340,12 @@ module.exports = {
             sourceId: `${node.node}/qemu/${vm.vmid}`,
             node: node.node,
             powerState: vm.status,
+            cores: vmCores || undefined,
+            ram_total_gb: vm.maxmem ? Math.round((vm.maxmem / (1024 * 1024 * 1024)) * 10) / 10 : undefined,
+            disk_total_gb: vm.maxdisk ? Math.round((vm.maxdisk / (1024 * 1024 * 1024)) * 10) / 10 : undefined,
+            uptime: vm.uptime || undefined,
+            tags: vmTags.length ? vmTags : undefined,
+            ostype: (vmConf && vmConf.ostype) || undefined,
             interfaces,
             macAddress: ifaces.primaryMac(),
             ip: ifaces.primaryIp()
@@ -351,12 +365,13 @@ module.exports = {
 
         // Enrich from LXC config. Each netN line carries its own hwaddr and ip,
         // so read them off the same line instead of into parallel lists.
+        let lxcConf = null;
         try {
             const configRes = await fetch(`${url}/api2/json/nodes/${node.node}/lxc/${lxc.vmid}/config`, { headers, agent });
             if (configRes.ok) {
-                const confData = (await configRes.json()).data;
+                lxcConf = (await configRes.json()).data || null;
                 for (let i = 0; i < 10; i++) {
-                    const line = confData[`net${i}`];
+                    const line = lxcConf && lxcConf[`net${i}`];
                     if (!line) continue;
                     const hwMatch = line.match(/hwaddr=([0-9a-fA-F:]{17})/);
                     // `ip=` is either a CIDR address or the literal `dhcp`/`manual`.
@@ -388,6 +403,11 @@ module.exports = {
         const interfaces = ifaces.toArray();
         const lxcSlug = guestSlug('lxc', lxc.name, lxc.vmid, ifaces.primaryMac());
 
+        const lxcTags = lxc.tags ? String(lxc.tags).split(/[;, ]+/).filter(Boolean) : (lxcConf && lxcConf.tags ? String(lxcConf.tags).split(/[;, ]+/).filter(Boolean) : []);
+        const lxcCores = lxc.cpus || (lxcConf && lxcConf.cores ? Number(lxcConf.cores) : undefined);
+        const lxcRamGb = lxc.maxmem ? Math.round((lxc.maxmem / (1024 * 1024 * 1024)) * 10) / 10 : (lxcConf && lxcConf.memory ? Math.round((lxcConf.memory / 1024) * 10) / 10 : undefined);
+        const lxcSwapGb = lxc.maxswap ? Math.round((lxc.maxswap / (1024 * 1024 * 1024)) * 10) / 10 : (lxcConf && lxcConf.swap ? Math.round((lxcConf.swap / 1024) * 10) / 10 : undefined);
+
         resources.push({
           // Always a host; `subType: 'template'` is what marks it as one.
           kind: 'host',
@@ -399,6 +419,13 @@ module.exports = {
             sourceId: `${node.node}/lxc/${lxc.vmid}`,
             node: node.node,
             powerState: lxc.status,
+            cores: lxcCores || undefined,
+            ram_total_gb: lxcRamGb || undefined,
+            swap_total_gb: lxcSwapGb || undefined,
+            disk_total_gb: lxc.maxdisk ? Math.round((lxc.maxdisk / (1024 * 1024 * 1024)) * 10) / 10 : undefined,
+            uptime: lxc.uptime || undefined,
+            tags: lxcTags.length ? lxcTags : undefined,
+            ostype: (lxcConf && lxcConf.ostype) || undefined,
             interfaces,
             macAddress: ifaces.primaryMac(),
             ip: ifaces.primaryIp()
