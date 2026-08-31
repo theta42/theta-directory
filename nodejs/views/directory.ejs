@@ -353,13 +353,13 @@
 
     <div class="row mb-3">
       <div class="col-6">
-        <label class="form-label">Name</label>
-        <input type="text" id="res-name" class="form-control shadow-sm">
+        <label class="form-label">Name <small class="text-muted">(optional)</small></label>
+        <input type="text" id="res-name" class="form-control shadow-sm" placeholder="Auto-generated if empty">
       </div>
       <div class="col-6">
-        <label class="form-label">Slug</label>
-        <input type="text" id="res-slug" class="form-control shadow-sm font-monospace" readonly>
-        <div class="form-text">Derived from the name; read-only.</div>
+        <label class="form-label">Slug <small class="text-muted">(optional)</small></label>
+        <input type="text" id="res-slug" class="form-control shadow-sm font-monospace" placeholder="Auto-generated from name/kind">
+        <div class="form-text">Unique system identifier. Derived from name if blank.</div>
       </div>
     </div>
 
@@ -381,17 +381,6 @@
         <label class="form-label">Sub Type</label>
         <input type="text" id="res-subtype" class="form-control shadow-sm" placeholder="Pick a template above, or type a custom subtype">
         <div class="form-text mb-2 text-muted"><i class="fa-solid fa-circle-info me-1 text-primary"></i>Subtype-specific configuration fields are configured on the <strong>Details</strong> tab.</div>
-      </div>
-    </div>
-
-    <div class="row mb-3">
-      <div class="col-6">
-        <label class="form-label">IP Address</label>
-        <input type="text" id="res-ip" class="form-control shadow-sm font-monospace" placeholder="192.168.1.x">
-      </div>
-      <div class="col-6">
-        <label class="form-label">Host / URI Address</label>
-        <input type="text" id="res-address" class="form-control shadow-sm font-monospace" placeholder="https://... or comma-separated IPs">
       </div>
     </div>
 
@@ -442,10 +431,10 @@
   var detailsTabHtml = `
     <div class="row mb-3" id="site-details-container" style="display: none;">
       <div class="col-12">
-        <div class="form-check">
+        <div class="form-check form-switch">
           <input class="form-check-input" type="checkbox" id="res-is-current-site">
           <label class="form-check-label" for="res-is-current-site">
-            Mark as Current Site
+            <strong>Mark as Current Site</strong>
           </label>
         </div>
       </div>
@@ -470,48 +459,6 @@
           <span class="badge bg-secondary font-monospace small" id="subtype-schema-slug-badge"></span>
         </div>
         <div class="card-body py-3" id="dynamic-form-fields"></div>
-      </div>
-    </div>
-    
-    <div class="row mb-3" id="host-details-container" style="display: none;">
-      <div class="col-4">
-        <label class="form-label">VMID</label>
-        <input type="number" id="res-vmid" class="form-control shadow-sm" placeholder="e.g. 101">
-      </div>
-      <div class="col-4">
-        <label class="form-label">MAC Address</label>
-        <input type="text" id="res-mac" class="form-control shadow-sm font-monospace" placeholder="00:00:00:00:00:00">
-      </div>
-      <div class="col-4">
-        <label class="form-label">OS / Kernel</label>
-        <input type="text" id="res-os" class="form-control shadow-sm" placeholder="Ubuntu / 5.15">
-      </div>
-    </div>
-
-    <div class="row mb-3" id="service-ports-container" style="display: none;">
-      <div class="col-6">
-        <label class="form-label">Internal Port</label>
-        <input type="number" id="res-port" class="form-control shadow-sm" placeholder="e.g. 8080">
-      </div>
-      <div class="col-6">
-        <label class="form-label">External Port</label>
-        <input type="number" id="res-external-port" class="form-control shadow-sm" placeholder="e.g. 443">
-        <small class="text-muted">Same as Internal if empty</small>
-      </div>
-    </div>
-
-    <div class="row mb-3" id="service-details-container" style="display: none;">
-      <div class="col-4">
-        <label class="form-label">Git Repo</label>
-        <input type="text" id="res-git-repo" class="form-control shadow-sm" placeholder="https://github.com/...">
-      </div>
-      <div class="col-4">
-        <label class="form-label">Install Path</label>
-        <input type="text" id="res-install-path" class="form-control shadow-sm" placeholder="/opt/app">
-      </div>
-      <div class="col-4">
-        <label class="form-label">Systemd Service</label>
-        <input type="text" id="res-systemd" class="form-control shadow-sm" placeholder="app.service">
       </div>
     </div>
 
@@ -548,21 +495,6 @@
           <i class="fa-solid fa-arrows-rotate"></i> Rotate Client Secret
         </button>
         <small class="d-block text-muted mt-1">Rotating the secret will break any currently running clients until they are updated.</small>
-      </div>
-    </div>
-
-    <div class="row mb-3">
-      <div class="col-6" id="external-container" style="display: none;">
-        <div class="form-check form-switch mt-2">
-          <input class="form-check-input" type="checkbox" id="res-is-external">
-          <label class="form-check-label" for="res-is-external"><strong>External Reachable</strong></label>
-        </div>
-      </div>
-      <div class="col-6" id="public-container" style="display: none;">
-        <div class="form-check form-switch mt-2">
-          <input class="form-check-input" type="checkbox" id="res-is-public">
-          <label class="form-check-label" for="res-is-public"><strong>Public (No Auth)</strong></label>
-        </div>
       </div>
     </div>
   `;
@@ -1042,15 +974,8 @@
 
       
       // The metadata keys the main resource form already renders an input for.
-      // A template that declares one of these is not wrong -- `port` really is
-      // part of what an `ssh` service is -- but it must not get a SECOND
-      // control here bound to the same key. Keep in step with the `metadata`
-      // object built in saveResource().
       var PLATFORM_METADATA_KEYS = new Set([
-        'subType', 'ip', 'address', 'vmid', 'macAddress', 'os', 'port',
-        'externalPort', 'gitRepo', 'installPath', 'systemdService', 'icon',
-        'tagline', 'environment', 'isExternalReachable', 'isPublic',
-        'isCurrentSite'
+        'subType', 'icon', 'tagline', 'environment', 'isCurrentSite'
       ]);
 
       // Dynamic subtype schema renderer based on SubtypeTemplate
@@ -1259,6 +1184,45 @@
         : fieldRow('Access', '<span class="text-muted">No group grants this resource.</span>', { html: true });
     }
 
+    let rollup = '';
+    if (kids.length) {
+      let healthyCount = 0, warnCount = 0, critCount = 0, unkCount = 0;
+      let rows = '';
+      kids.forEach(k => {
+        const kmd = k.metadata || {};
+        const kStatus = kmd.status || kmd.bubbled_status || (kmd.powerState === 'running' ? 'ok' : (kmd.powerState === 'stopped' ? 'warning' : 'unknown'));
+        if (kStatus === 'ok') healthyCount++;
+        else if (kStatus === 'warning') warnCount++;
+        else if (kStatus === 'critical' || kStatus === 'error') critCount++;
+        else unkCount++;
+
+        const kStyle = STATUS_STYLE[kStatus] || { color: '#6c757d', title: 'Unknown' };
+        const ktmpl = subtypeTemplates.find(t => t.slug === (kmd.subType || ''));
+        const kIcon = (ktmpl && ktmpl.icon) || (k.kind === 'host' ? 'fa-solid fa-server' : 'fa-solid fa-cube');
+        const kAddr = kmd.ip || kmd.address || (kmd.port ? ':' + kmd.port : (kmd.vmid ? 'VMID ' + kmd.vmid : '—'));
+
+        rows += '<tr>'
+          + '<td><i class="' + kIcon + ' text-primary me-2"></i><a href="#" onclick="openEditModal(\'' + k.id + '\'); return false;">' + esc(k.name) + '</a> <small class="text-muted font-monospace">(' + esc(k.slug) + ')</small></td>'
+          + '<td><span class="badge bg-light text-dark border">' + esc((ktmpl && ktmpl.name) || kmd.subType || k.kind) + '</span></td>'
+          + '<td><span class="badge" style="background:' + kStyle.color + '">' + esc(String(kStatus).toUpperCase()) + '</span></td>'
+          + '<td class="font-monospace small text-muted">' + esc(kAddr) + '</td>'
+          + '</tr>';
+      });
+
+      rollup = '<div class="row g-2 mb-3">'
+        + '<div class="col-3 text-center"><div class="badge bg-success p-2 w-100">' + healthyCount + ' Healthy</div></div>'
+        + '<div class="col-3 text-center"><div class="badge bg-warning text-dark p-2 w-100">' + warnCount + ' Warning</div></div>'
+        + '<div class="col-3 text-center"><div class="badge bg-danger p-2 w-100">' + critCount + ' Critical</div></div>'
+        + '<div class="col-3 text-center"><div class="badge bg-secondary p-2 w-100">' + unkCount + ' Unknown</div></div>'
+        + '</div>'
+        + '<div class="table-responsive">'
+        + '<table class="table table-sm table-hover align-middle mb-0">'
+        + '<thead class="table-light"><tr><th>Resource</th><th>Subtype</th><th>Status</th><th>Address / Info</th></tr></thead>'
+        + '<tbody>' + rows + '</tbody>'
+        + '</table>'
+        + '</div>';
+    }
+
     let discovery = '';
     discovery += fieldRow('Managed', md.managed ? 'yes' : 'no');
     if (Array.isArray(md.discovery_sources) && md.discovery_sources.length) {
@@ -1268,6 +1232,7 @@
 
     return sectionCard('Identity', 'fa-solid fa-id-card', identity)
       + sectionCard('Placement', 'fa-solid fa-sitemap', place)
+      + (rollup ? sectionCard('Child Workloads & Status Rollup', 'fa-solid fa-layer-group', rollup) : '')
       + sectionCard(tmpl ? tmpl.name + ' Configuration' : (md.subType ? md.subType + ' Configuration' : 'Subtype Configuration'), 'fa-solid fa-shapes', custom)
       + sectionCard('Network', 'fa-solid fa-network-wired', network)
       + sectionCard('Platform', 'fa-solid fa-microchip', platform)
@@ -3072,11 +3037,20 @@
       </div>` : '';
 
     // A. Service resources or BMC (iLO)
-    if (r.kind === 'service' || (md.subType === 'ilo')) {
+    // A. Service resources, BMC (iLO), Proxmox guests, SSH, or Network appliances
+    if (r.kind === 'service' || ['ilo', 'proxmox', 'hypervisor', 'server-proxmox', 'lxc', 'proxmox-lxc', 'vm', 'kvm', 'proxmox-kvm', 'ssh', 'wireguard', 'pfsense', 'unifi_ap', 'unifi_switch'].includes(md.subType)) {
       try {
         const res = await app.api.get(`directory-admin/resources/${id}/driver-metrics`);
         const m = (res && res.metrics) || {};
-        $container.html(statusHeader + serviceStatusHtml(r, m));
+        if (['lxc', 'proxmox-lxc', 'vm', 'kvm', 'proxmox-kvm'].includes(md.subType)) {
+          $container.html(statusHeader + proxmoxGuestStatusHtml(r, m));
+        } else if (md.subType === 'ssh') {
+          $container.html(statusHeader + sshStatusHtml(r, m));
+        } else if (md.subType === 'ilo') {
+          $container.html(statusHeader + iloStatusHtml(r, m));
+        } else {
+          $container.html(statusHeader + serviceStatusHtml(r, m));
+        }
       } catch (err) {
         $container.html(statusHeader + `
           <div class="card border shadow-sm p-3">
@@ -3111,19 +3085,22 @@
         }
       }
 
+      const rollupHtml = childrenRollupHtml(r);
+
       if (agent) {
-        $container.html(statusHeader + hostTelemetryHtml(agent));
+        $container.html(statusHeader + hostTelemetryHtml(agent) + rollupHtml);
       } else {
-        $container.html(statusHeader + `
-          <div class="p-4 text-center text-muted">
+        const noAgentMsg = `
+          <div class="p-4 text-center text-muted mb-3">
             <i class="fa-solid fa-microchip fa-3x mb-3 text-secondary"></i>
-            <h5>No Agent Telemetry</h5>
+            <h5>No Direct Agent Telemetry</h5>
             <p class="small text-muted mb-3">Install and enroll <code>theta-agent</code> on this host to stream real-time CPU, RAM, Disk, and container metrics.</p>
             <div class="bg-light p-2 rounded font-monospace small d-inline-block border">
               curl -sSL https://${location.host}/install.sh | bash
             </div>
           </div>
-        `);
+        `;
+        $container.html(statusHeader + (rollupHtml ? rollupHtml : noAgentMsg));
       }
       return;
     }
@@ -3141,7 +3118,7 @@
         else unkCount++;
       });
       $container.html(statusHeader + `
-        <div class="card border shadow-sm p-3">
+        <div class="card border shadow-sm p-3 mb-3">
           <h5 class="mb-3 fw-bold"><i class="fa-solid fa-network-wired text-primary me-2"></i>Site Health Summary</h5>
           <div class="row g-2 mb-3">
             <div class="col-3 text-center"><div class="badge bg-success p-2 w-100 fs-6">${okCount} Healthy</div></div>
@@ -3151,7 +3128,7 @@
           </div>
           <p class="text-muted small mb-0">Total child hosts: <strong>${childHosts.length}</strong></p>
         </div>
-      `);
+      ` + childrenRollupHtml(r));
       return;
     }
 
@@ -3161,7 +3138,197 @@
         <i class="fa-solid fa-circle-info fa-2x mb-2"></i>
         <p class="small mb-0">No active telemetry driver configured for this resource.</p>
       </div>
-    `);
+    ` + childrenRollupHtml(r));
+  }
+
+  function childrenRollupHtml(r) {
+    const kids = allEdges.filter(e => e.parentId === r.id).map(e => resourcesById[e.childId]).filter(Boolean);
+    if (!kids.length) return '';
+
+    let healthyCount = 0, warnCount = 0, critCount = 0, unkCount = 0;
+    let rows = '';
+    kids.forEach(k => {
+      const kmd = k.metadata || {};
+      const kStatus = kmd.status || kmd.bubbled_status || (kmd.powerState === 'running' ? 'ok' : (kmd.powerState === 'stopped' ? 'warning' : 'unknown'));
+      if (kStatus === 'ok') healthyCount++;
+      else if (kStatus === 'warning') warnCount++;
+      else if (kStatus === 'critical' || kStatus === 'error') critCount++;
+      else unkCount++;
+
+      const kStyle = STATUS_STYLE[kStatus] || { color: '#6c757d', title: 'Unknown' };
+      const ktmpl = subtypeTemplates.find(t => t.slug === (kmd.subType || ''));
+      const kIcon = (ktmpl && ktmpl.icon) || (k.kind === 'host' ? 'fa-solid fa-server' : 'fa-solid fa-cube');
+      const kAddr = kmd.ip || kmd.address || (kmd.port ? ':' + kmd.port : (kmd.vmid ? 'VMID ' + kmd.vmid : '—'));
+
+      rows += `<tr>
+        <td><i class="${kIcon} text-primary me-2"></i><a href="#" onclick="openEditModal('${k.id}'); return false;">${esc(k.name)}</a> <small class="text-muted font-monospace">(${esc(k.slug)})</small></td>
+        <td><span class="badge bg-light text-dark border">${esc((ktmpl && ktmpl.name) || kmd.subType || k.kind)}</span></td>
+        <td><span class="badge" style="background:${kStyle.color}">${esc(String(kStatus).toUpperCase())}</span></td>
+        <td class="font-monospace small text-muted">${esc(kAddr)}</td>
+        <td class="text-end">
+          <button class="btn btn-outline-primary btn-sm py-0 px-2" onclick="openEditModal('${k.id}'); return false;">View</button>
+        </td>
+      </tr>`;
+    });
+
+    return `
+      <div class="card border shadow-sm p-3 mt-3">
+        <div class="d-flex justify-content-between align-items-center mb-2">
+          <h6 class="fw-bold mb-0 text-primary"><i class="fa-solid fa-layer-group me-1"></i>Child Resources & Services (${kids.length})</h6>
+        </div>
+        <div class="row g-2 mb-3">
+          <div class="col-3 text-center"><div class="badge bg-success p-2 w-100">${healthyCount} Healthy</div></div>
+          <div class="col-3 text-center"><div class="badge bg-warning text-dark p-2 w-100">${warnCount} Warning</div></div>
+          <div class="col-3 text-center"><div class="badge bg-danger p-2 w-100">${critCount} Critical</div></div>
+          <div class="col-3 text-center"><div class="badge bg-secondary p-2 w-100">${unkCount} Unknown</div></div>
+        </div>
+        <div class="table-responsive">
+          <table class="table table-sm table-hover align-middle mb-0">
+            <thead class="table-light"><tr><th>Resource</th><th>Subtype</th><th>Status</th><th>Address / Info</th><th class="text-end">Action</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  }
+
+  function proxmoxGuestStatusHtml(r, m) {
+    const stats = m.guestStats || {};
+    const on = stats.status === 'running' || stats.status === 'online';
+    const isLxc = stats.type === 'lxc' || ((r.metadata && r.metadata.subType) || '').includes('lxc');
+
+    const fmtBytes = (b) => {
+      if (b == null || b === 0) return '0 B';
+      if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GiB';
+      if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MiB';
+      if (b >= 1024) return (b / 1024).toFixed(0) + ' KiB';
+      return b + ' B';
+    };
+
+    const fmtDur = (s) => {
+      if (s == null || s === 0) return '0s';
+      const d = moment.duration(s, 'seconds');
+      if (d.asDays() >= 1) return Math.floor(d.asDays()) + 'd ' + d.hours() + 'h';
+      if (d.asHours() >= 1) return Math.floor(d.asHours()) + 'h ' + d.minutes() + 'm';
+      return Math.floor(d.asMinutes()) + 'm ' + d.seconds() + 's';
+    };
+
+    const btn = (label, action, cls, icon, disabled, why) =>
+      `<button type="button" class="btn btn-sm ${cls} me-1 mb-1" ${disabled ? 'disabled' : ''}
+         title="${esc(why || label)}"
+         onclick="proxmoxAction('${r.id}', '${action}')"><i class="fa-solid ${icon} me-1"></i>${esc(label)}</button>`;
+
+    return `
+      <div class="card mb-0 border shadow-sm">
+        <div class="card-body p-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>
+              <strong class="fs-6"><i class="fa-solid fa-server me-1"></i>${esc(r.name)}</strong>
+              <span class="badge bg-secondary ms-1">VMID ${esc(stats.vmid || r.metadata.vmid || 'N/A')}</span>
+              <span class="badge bg-info ms-1">${isLxc ? 'LXC Container' : 'QEMU VM'}</span>
+            </div>
+            <span class="badge ${on ? 'bg-success' : 'bg-danger'}">${on ? 'Running' : 'Stopped'}</span>
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6 col-md-3"><div class="text-muted small">CPU Usage</div><div class="fw-semibold">${stats.cpuUsagePct != null ? stats.cpuUsagePct + '%' : 'N/A'} ${stats.cores ? '(' + stats.cores + ' cores)' : ''}</div></div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Memory</div><div class="fw-semibold">${fmtBytes(stats.memoryUsedBytes)} / ${fmtBytes(stats.memoryTotalBytes)}</div></div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Disk Usage</div><div class="fw-semibold">${fmtBytes(stats.diskUsedBytes)} / ${fmtBytes(stats.diskTotalBytes)}</div></div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Uptime</div><div class="fw-semibold">${fmtDur(stats.uptimeSeconds)}</div></div>
+          </div>
+          <hr class="my-3">
+          <div class="d-flex align-items-center flex-wrap">
+            ${btn('Start', 'start', 'btn-success', 'fa-play', on, on ? 'Already running' : 'Start container/VM')}
+            ${btn('Reboot', 'reboot', 'btn-warning', 'fa-arrows-rotate', !on, !on ? 'Guest is stopped' : 'Reboot guest')}
+            ${btn('Shutdown', 'shutdown', 'btn-outline-danger', 'fa-power-off', !on, !on ? 'Already stopped' : 'Graceful shutdown')}
+            ${btn('Stop', 'stop', 'btn-danger', 'fa-stop', !on, !on ? 'Already stopped' : 'Hard stop')}
+          </div>
+          <div class="mt-3 border-top pt-2">
+            <details>
+              <summary class="text-muted small" style="cursor:pointer;"><i class="fa-solid fa-code me-1"></i>Raw Proxmox Facts</summary>
+              <pre class="bg-dark text-light p-2 rounded small mt-1 mb-0 font-monospace" style="max-height: 200px; overflow-y: auto;">${esc(JSON.stringify(m, null, 2))}</pre>
+            </details>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function proxmoxAction(resourceId, action) {
+    const r = resourcesById[resourceId];
+    const target = (r && r.name) || 'guest';
+    const labels = { start: 'start', reboot: 'reboot', shutdown: 'gracefully shut down', stop: 'hard stop (immediate power-off)' };
+    if (action === 'stop' || action === 'shutdown' || action === 'reboot') {
+      const confirmed = await app.messages.confirm(`Are you sure you want to ${labels[action] || action} ${target}?`, $('#res-modal'), action === 'stop' ? 'danger' : 'warning');
+      if (!confirmed) return;
+    }
+    try {
+      app.messages.action(`Sending '${action}' to Proxmox for ${target}...`, $('#res-modal'), 'info');
+      const res = await app.api.post(`directory-admin/resources/${resourceId}/driver-action`, { action });
+      if (res && res.result && res.result.status === 'error') throw new Error(res.result.message);
+      app.messages.action(`Proxmox command '${action}' dispatched for ${target}.`, $('#res-modal'), 'success');
+      setTimeout(function(){ loadResourceStatus(resourceId); }, 1500);
+    } catch (err) {
+      app.messages.action(err.message || 'Proxmox action failed', $('#res-modal'), 'danger');
+    }
+  }
+
+  function sshStatusHtml(r, m) {
+    const ssh = m.ssh || {};
+    const online = m.status === 'online' || ssh.reachable;
+    const badge = `<span class="badge ${online ? 'bg-success' : 'bg-danger'}">${online ? 'Listening / Reachable' : 'Offline / Unreachable'}</span>`;
+
+    const btn = (label, action, cls, icon, disabled, why) =>
+      `<button type="button" class="btn btn-sm ${cls} me-1 mb-1" ${disabled ? 'disabled' : ''}
+         title="${esc(why || label)}"
+         onclick="sshAction('${r.id}', '${action}')"><i class="fa-solid ${icon} me-1"></i>${esc(label)}</button>`;
+
+    return `
+      <div class="card mb-0 border shadow-sm">
+        <div class="card-body p-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <div>
+              <strong class="fs-6"><i class="fa-solid fa-terminal me-1"></i>${esc(r.name)}</strong>
+              <span class="badge bg-dark font-monospace small ms-1">Port ${esc(ssh.port || 22)}</span>
+            </div>
+            ${badge}
+          </div>
+          <div class="row g-2 mb-2">
+            <div class="col-6 col-md-3"><div class="text-muted small">Host / IP</div><div class="fw-semibold font-monospace">${esc(ssh.host || 'N/A')}</div></div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Port</div><div class="fw-semibold">${esc(ssh.port || 22)}</div></div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Response Time</div><div class="fw-semibold">${ssh.responseTimeMs != null ? ssh.responseTimeMs + ' ms' : 'N/A'}</div></div>
+            <div class="col-6 col-md-3"><div class="text-muted small">Protocol Banner</div><div class="fw-semibold font-monospace small text-truncate" title="${esc(ssh.banner || '')}">${esc(ssh.banner || 'None')}</div></div>
+          </div>
+          ${ssh.agentService ? `
+            <div class="alert alert-light border p-2 mb-2 small">
+              <i class="fa-solid fa-shield-halved text-success me-1"></i> Managed by theta-agent: unit <code>${esc(ssh.agentService.unitName)}</code> is <strong>${esc(ssh.agentService.active ? 'active' : 'inactive')}</strong> (${esc(ssh.agentService.subState || '')})
+            </div>
+          ` : ''}
+          <hr class="my-3">
+          <div class="d-flex align-items-center flex-wrap">
+            ${btn('Test / Probe Port', 'probe', 'btn-primary', 'fa-satellite-dish', false, 'Re-test TCP connection and banner')}
+            ${ssh.agentService ? btn('Restart SSH Daemon', 'restart', 'btn-warning', 'fa-arrows-rotate', false, 'Restart sshd via agent') : ''}
+          </div>
+          <div class="mt-3 border-top pt-2">
+            <details>
+              <summary class="text-muted small" style="cursor:pointer;"><i class="fa-solid fa-code me-1"></i>Raw Probe Facts</summary>
+              <pre class="bg-dark text-light p-2 rounded small mt-1 mb-0 font-monospace" style="max-height: 200px; overflow-y: auto;">${esc(JSON.stringify(m, null, 2))}</pre>
+            </details>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  async function sshAction(resourceId, action) {
+    try {
+      app.messages.action(`Executing '${action}' on SSH service...`, $('#res-modal'), 'info');
+      const res = await app.api.post(`directory-admin/resources/${resourceId}/driver-action`, { action });
+      if (res && res.result && res.result.status === 'error') throw new Error(res.result.message);
+      app.messages.action((res && res.result && res.result.message) || `SSH '${action}' completed.`, $('#res-modal'), 'success');
+      setTimeout(function(){ loadResourceStatus(resourceId); }, 1000);
+    } catch (err) {
+      app.messages.action(err.message || 'SSH action failed', $('#res-modal'), 'danger');
+    }
   }
 
   // Render a service resource's live status card from the driver-metrics response.
@@ -3286,7 +3453,7 @@
   }
 
   // Subtypes whose start/stop/restart means something on the host.
-  const CONTROLLABLE_SERVICE_SUBTYPES = new Set(['systemd', 'docker', 'podman', 'openrc']);
+  const CONTROLLABLE_SERVICE_SUBTYPES = new Set(['systemd', 'docker', 'podman', 'openrc', 'ssh']);
 
   function serviceControlsHtml(r, svc, m) {
     const subType = ((r.metadata || {}).subType || 'systemd').toLowerCase();
@@ -3676,29 +3843,19 @@
     }
 
     const id = $('#res-id').val();
+    const existingMeta = (id && resourcesById[id] && resourcesById[id].metadata) ? { ...resourcesById[id].metadata } : {};
     const data = {
-      name: $('#res-name').val(),
-      slug: $('#res-slug').val(),
+      name: ($('#res-name').val() || '').trim() || undefined,
+      slug: ($('#res-slug').val() || '').trim() || undefined,
       kind: $('#res-kind').val(),
       hostId: ['host', 'service'].includes($('#res-kind').val()) ? $('#res-host-id').val() : undefined,
       description: $('#res-description').val(),
       metadata: {
-        subType: $('#res-subtype').val(),
-        ip: $('#res-ip').val(),
-        address: $('#res-address').val(),
-        vmid: $('#res-vmid').val(),
-        macAddress: $('#res-mac').val(),
-        os: $('#res-os').val(),
-        port: $('#res-port').val(),
-        externalPort: $('#res-external-port').val() || $('#res-port').val(),
-        gitRepo: $('#res-git-repo').val(),
-        installPath: $('#res-install-path').val(),
-        systemdService: $('#res-systemd').val(),
-        icon: $('#res-icon').val().trim(),
-        tagline: $('#res-tagline').val().trim(),
+        ...existingMeta,
+        subType: $('#res-subtype').val() || undefined,
+        icon: ($('#res-icon').val() || '').trim(),
+        tagline: ($('#res-tagline').val() || '').trim(),
         environment: $('#res-environment').val() || undefined,
-        isExternalReachable: $('#res-is-external').is(':checked'),
-        isPublic: $('#res-is-public').is(':checked'),
         isCurrentSite: $('#res-is-current-site').is(':checked')
       }
     };

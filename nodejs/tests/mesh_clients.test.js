@@ -294,3 +294,37 @@ describe('enrolment guards', () => {
 		await expect(clients.enroll({ uid: 'a', name: 'x', siteId: 300 })).rejects.toThrow(/site id must be an integer/);
 	});
 });
+
+describe('adoptClients', () => {
+	test('adopts clients and grants from master export', async () => {
+		const exportedClients = [
+			{ id: 'c-1', uid: 'william', name: 'laptop', siteId: 1, assignedIp: '10.1.128.3', publicKey: PUBKEY_A, exitSiteId: 2 }
+		];
+		const exportedGrants = [
+			{ id: 'g-1', uid: 'william', siteId: 2, grantedBy: 'admin' }
+		];
+
+		const res = await clients.adoptClients(exportedClients, exportedGrants);
+		expect(res).toEqual({ adopted: 1, grants: 1 });
+		expect(mockRows.clients).toHaveLength(1);
+		expect(mockRows.clients[0].assignedIp).toBe('10.1.128.3');
+		expect(mockRows.clients[0].exitSiteId).toBe(2);
+		expect(mockRows.grants).toHaveLength(1);
+		expect(mockRows.grants[0].siteId).toBe(2);
+	});
+
+	test('updates existing client if already present', async () => {
+		mockRows.clients.push(new mockFakeRow({
+			id: 'c-1', uid: 'william', name: 'laptop', siteId: 1, assignedIp: '10.1.128.3', publicKey: PUBKEY_A, exitSiteId: null
+		}, 'clients'));
+
+		const updated = [
+			{ id: 'c-1', uid: 'william', name: 'laptop', siteId: 1, assignedIp: '10.1.128.3', publicKey: PUBKEY_A, exitSiteId: 2 }
+		];
+
+		const res = await clients.adoptClients(updated, []);
+		expect(res.adopted).toBe(1);
+		expect(mockRows.clients[0].exitSiteId).toBe(2);
+	});
+});
+

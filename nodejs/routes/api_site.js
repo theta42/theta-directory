@@ -39,7 +39,9 @@ const User = require('../models/user');
 const { Agent, AgentJoinKey } = require('../models/agent');
 const { UserVerification } = require('../models/verification');
 const { ApiToken } = require('../models/api_token');
+const { MeshClient, MeshExitGrant } = require('../models/mesh_client');
 const siteConfig = require('../utils/site_config');
+const meshClients = require('../utils/mesh_clients');
 const {
   importDirectory, ldapAddArgs, baseDnFrom, siteIsFresh,
   stripOperationalAttrs, summarizeLdapAddResult
@@ -159,7 +161,7 @@ router.post('/export', async (req, res, next) => {
     // meshSites: the cluster roster. Without it a spoke has no idea any other
     // site exists, its gateway builds no peers, and the mesh silently only
     // works at whichever site happens to be the master.
-    const [ldif, resources, edges, signingKey, meshSites, agents, baoSecrets, userVerifications, apiTokens, agentJoinKeys, subtypeTemplates] = await Promise.all([
+    const [ldif, resources, edges, signingKey, meshSites, agents, baoSecrets, userVerifications, apiTokens, agentJoinKeys, subtypeTemplates, meshClients, meshExitGrants] = await Promise.all([
       slurpLdif(),
       Resource.list(),
       ResourceEdge.list(),
@@ -178,12 +180,9 @@ router.post('/export', async (req, res, next) => {
       UserVerification.listDetail().catch(() => []),
       ApiToken.list().catch(() => []),
       AgentJoinKey.list().catch(() => []),
-      // Keep this LAST, and add anything new after it. The destructuring
-      // above is positional: inserting a promise anywhere but the end
-      // silently shifts every later binding by one, which here means the
-      // signing key, the mesh roster, the agent fleet and the API tokens all
-      // arrive under each other's names -- a corrupt spoke join, not an error.
-      SubtypeTemplate.list().catch(() => [])
+      SubtypeTemplate.list().catch(() => []),
+      MeshClient.list().catch(() => []),
+      MeshExitGrant.list().catch(() => [])
     ]);
 
     await key.update({ use_count: (key.use_count || 0) + 1, last_used_on: Math.floor(Date.now() / 1000) }).catch(() => {});
@@ -201,6 +200,8 @@ router.post('/export', async (req, res, next) => {
       agents: (agents || []).map(a => (a.toReplica ? a.toReplica() : (a.toJSON ? a.toJSON() : a))),
       agentJoinKeys: (agentJoinKeys || []).map(k => (k.toReplica ? k.toReplica() : (k.toJSON ? k.toJSON() : k))),
       subtypeTemplates: (subtypeTemplates || []).map(t => (t.toJSON ? t.toJSON() : t)),
+      meshClients: (meshClients || []).map(c => (c.toJSON ? c.toJSON() : c)),
+      meshExitGrants: (meshExitGrants || []).map(g => (g.toJSON ? g.toJSON() : g)),
       baoSecrets: baoSecrets || [],
       userVerifications: userVerifications || [],
       apiTokens: (apiTokens || []).map(t => (t.toReplica ? t.toReplica() : (t.toJSON ? t.toJSON() : t))),
@@ -1175,6 +1176,17 @@ async function adoptFromMaster({ masterUrl, joinKey, seedLdap = false }) {
   } catch (e) {
     rosterNote = `failed: ${e.message}`;
     console.warn(`[site] could not adopt the cluster roster: ${e.message}`);
+  }
+
+  // 1c. Adopt the cluster clients and exit grants, so this site's gateway knows
+  //     which devices across the cluster exit through this site.
+  let clientsNote = 'no clients in export';
+  try {
+    const { adopted, grants } = await meshClients.adoptClients(exportData.meshClients, exportData.meshExitGrants);
+    clientsNote = `${adopted} client(s), ${grants} grant(s) adopted`;
+  } catch (e) {
+    clientsNote = `failed: ${e.message}`;
+    console.warn(`[site] could not adopt mesh clients: ${e.message}`);
   }
 
   // 2. Adopt the LDAP tree.

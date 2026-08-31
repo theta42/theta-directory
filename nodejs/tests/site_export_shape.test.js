@@ -49,6 +49,10 @@ jest.mock('../models/verification', () => ({
 jest.mock('../models/api_token', () => ({
   ApiToken: { list: async () => [{ __source: 'apiTokens', toReplica: () => ({ __source: 'apiTokens' }) }] }
 }));
+jest.mock('../models/mesh_client', () => ({
+  MeshClient: { list: async () => [{ __source: 'meshClients', toJSON: () => ({ __source: 'meshClients' }) }] },
+  MeshExitGrant: { list: async () => [{ __source: 'meshExitGrants', toJSON: () => ({ __source: 'meshExitGrants' }) }] }
+}));
 jest.mock('../utils/agent_keys', () => ({
   load: async () => ({ privateKeyPem: 'PRIVATE', publicKeyPem: 'PUBLIC' }),
   status: () => ({ available: true })
@@ -58,6 +62,9 @@ jest.mock('../utils/mesh_roster', () => ({
   roster: async () => [{ __source: 'meshSites', toJSON: () => ({ __source: 'meshSites' }) }],
   bySiteId: async () => null,
   adoptRoster: async () => ({ adopted: 0 })
+}));
+jest.mock('../utils/mesh_clients', () => ({
+  adoptClients: async () => ({ adopted: 0, grants: 0 })
 }));
 jest.mock('../utils/site_replicate', () => ({ replicateToSpokes: () => {}, pushResync: () => {} }));
 jest.mock('../utils/ldap_reconcile', () => ({ reconcileSoon: () => {} }));
@@ -100,6 +107,8 @@ test('every export field carries the source it is named after', async () => {
     agents: 'agents',
     agentJoinKeys: 'agentJoinKeys',
     subtypeTemplates: 'subtypeTemplates',
+    meshClients: 'meshClients',
+    meshExitGrants: 'meshExitGrants',
     userVerifications: 'userVerifications',
     apiTokens: 'apiTokens'
   };

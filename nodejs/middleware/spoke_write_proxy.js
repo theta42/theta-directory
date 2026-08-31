@@ -79,7 +79,12 @@ const FORWARD_PATHS = [
   /^\/api\/agent\/enroll(\/|$)/,
   /^\/api\/agent\/nodes(\/|$)/,
   /^\/api\/agent\/join-keys(\/|$)/,
-  /^\/api\/api-token(\/|$)/
+  /^\/api\/api-token(\/|$)/,
+  /^\/api\/mesh\/clients(\/|$)/,
+  /^\/api\/mesh\/exit-grants(\/|$)/,
+  /^\/api\/mesh\/sites(\/|$)/,
+  /^\/api\/mesh\/hub(\/|$)/,
+  /^\/api\/v1\/agent\/mesh(\/|$)/
 ];
 
 // Carve-outs inside the paths above, for the two operations that are about
