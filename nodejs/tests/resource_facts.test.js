@@ -116,5 +116,26 @@ describe('resource_facts', () => {
       const { groups } = ResourceFacts.buildResourceFactsMesh({ resource: { id: 'h', metadata: {} }, selfLive: null, children: [] });
       expect(groups).toEqual([]);
     });
+
+    // The overlap-reconciliation fix: a concept with only self entries (no
+    // child contributed anything comparable) restates exactly what the
+    // calling status card already showed above this card -- drop it.
+    test('omits a concept whose only entries are self, static or live', () => {
+      const selfLive = { memory: [{ source: 'proxmox', kind: 'live', role: 'used', unit: 'bytes', value: 1000000000, observedAt: 1, resourceId: 'host1', resourceName: 'emby' }] };
+      // A child exists, but contributes nothing to the memory concept.
+      const childSvc = { resource: { id: 'svc1', name: 'theta-agent', metadata: {} }, live: null };
+
+      const { groups } = ResourceFacts.buildResourceFactsMesh({ resource: host, selfLive, children: [childSvc] });
+      expect(groups.find((g) => g.concept === 'memory')).toBeUndefined();
+    });
+
+    test('keeps a concept where only a child contributes -- new information, not a restatement', () => {
+      const childSvc = { resource: { id: 'svc1', name: 'emby-server', metadata: {} }, live: { memory: [{ source: 'theta-agent', kind: 'live', role: 'used', unit: 'bytes', value: 1000000000, observedAt: 2, resourceId: 'svc1', resourceName: 'emby-server' }] } };
+
+      const { groups } = ResourceFacts.buildResourceFactsMesh({ resource: host, selfLive: null, children: [childSvc] });
+      const memory = groups.find((g) => g.concept === 'memory');
+      expect(memory).toBeDefined();
+      expect(memory.entries).toHaveLength(1);
+    });
   });
 });

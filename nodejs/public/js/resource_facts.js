@@ -188,6 +188,14 @@
       if (child.needsOwnFetch) skippedChildrenCount++;
     });
 
+    // A concept where every entry is self's own (static or live) restates
+    // exactly what the calling status card already showed above this card,
+    // with nothing to compare it against -- drop it. A concept with at
+    // least one child entry keeps its self entries too: that comparison is
+    // the actual point of this mesh (a host's own live memory figure
+    // disagreeing with a child service's, the motivating case this was
+    // built for), not something to suppress just because self also shows up.
+    const selfId = resource && resource.id;
     const groups = FACT_CONCEPTS
       .map((concept) => ({
         concept,
@@ -195,7 +203,7 @@
         entries: buckets[concept],
         conflict: detectConflict(buckets[concept])
       }))
-      .filter((g) => g.entries.length > 0);
+      .filter((g) => g.entries.length > 0 && g.entries.some((e) => e.resourceId !== selfId));
 
     return { groups, skippedChildrenCount };
   }

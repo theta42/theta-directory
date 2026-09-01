@@ -98,6 +98,14 @@ kind (static vs. live), *same* role (total vs. used vs. a plain percentage),
 and *same* unit disagree by more than 10%. A live percentage is never
 compared against a static byte total; they're answering different questions.
 
+A concept with only self entries — nothing a child contributed is comparable
+against it — is dropped from the output entirely (`buildResourceFactsMesh`'s
+`groups` filter). It would otherwise just restate whatever number the calling
+Status-tab renderer (`proxmoxGuestStatusHtml`, `hostTelemetryHtml`) already
+showed immediately above this card, with nothing to compare it against. A
+concept with at least one child entry keeps the self entry too — that
+comparison, not the self number alone, is the reason this mesh exists.
+
 This is a pure, read-time transform. Most of a child's live data is already
 resident client-side (agent-bound children, via the same telemetry the
 tree's status dots already use) and costs no extra call. For a Proxmox-guest
@@ -125,11 +133,6 @@ separate control-rendering path for meshed children.
 - Live facts from an `ssh`/`ilo`/network-appliance/hypervisor-node child, or a
   guest child beyond the 5-per-host eager-fetch cap (see above) — either
   nothing to gain from fetching, or bounded on purpose.
-- Reconciling `hostTelemetryHtml`/`proxmoxGuestStatusHtml`/`serviceStatusHtml`'s
-  own summary numbers with the meshed card below them — both are shown today,
-  which can look like double-counting on a host with few children. Rewriting
-  those three existing renderers to stop duplicating is real surgery on
-  complex code, not part of this pass.
 - A resolution policy beyond "flag disagreement and show both." Nothing here
   picks a winner; that's deliberate — see the framing at the top of this
   document.
