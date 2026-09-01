@@ -421,9 +421,13 @@ you a non-privileged requester if you also administer the site.
 
 ## Planned: not built yet
 
-Two of the goals at the top of this document have no implementation. They are
-recorded here as work, with the design questions that have to be answered first,
-so nobody has to rediscover the shape of them.
+Two of the goals at the top of this document were recorded here as having no
+implementation. Both turned out to be corrections rather than open work by
+the time they were revisited: "Active sessions" was already built and just
+never rendered for a Proxmox guest, and "Agent-pulled configuration" had
+~90% of its mechanism already in place, needing only a connect-time trigger
+and validate-then-apply to close the Proxy/TLS-material case. What's left of
+each, genuinely still unbuilt, is listed under its own heading below.
 
 ### Active sessions — corrected: this was never actually unbuilt
 
@@ -459,33 +463,57 @@ What's still genuinely unbuilt:
 - **Windows and containers.** `loginctl` covers systemd hosts. Windows needs
   a different call, and a container has no sessions at all — unchanged.
 
-### Agent-pulled configuration
+### Agent-pulled configuration — corrected: Proxy/TLS material is now built
 
 > "Allow theta-agent to pull and apply configurations (similar to an ACME
 > client) from the proxy."
 
-Also unbuilt, and the design is genuinely open. What exists already and overlaps:
-the mesh config push (`utils/mesh_client_conf.js`), the secret-rendering targets
-in `agent.yml`, and the LDAP/SSSD configuration the agent already applies.
+This section previously listed four open design questions and no
+implementation. `theta-agent` already had ~90% of the mechanism in place —
+`secrets.go`'s `renderSecrets`/`renderOne` reads each configured
+`SecretTarget.Template`, fetches referenced `{{ bao "path#key" }}` values over
+the same bearer-token REST pattern used everywhere else outside the WS
+session, renders, and writes atomically. It was only ever *triggered* by an
+operator's signed `render_secrets` WS command — never automatically, so an
+agent that was offline when a push went out just stayed stale until someone
+noticed. Closed the gap, not rebuilt the mechanism, scoped explicitly to
+Proxy/TLS material (v2.21.8):
 
-Open questions:
-
-- **What is pulled?** Proxy/TLS material is the stated example, but the same
-  mechanism could carry firewall rules, SSSD config or service definitions —
-  and "the agent applies arbitrary config from the server" is a much larger
-  security surface than "the agent fetches a certificate".
-- **Pull or push?** The ACME analogy implies the agent polls and reconciles,
-  which survives an agent being offline. The mesh path pushes today. Two
-  mechanisms doing the same job would be worse than either.
-- **What authorises it?** The agent's enrolment token authenticates the agent.
-  It does not currently express *which* configuration that agent is entitled to.
-- **What happens on a bad config?** An agent that renders a broken proxy config
-  and reloads is an outage it caused. Needs a validate-then-apply step and a
-  rollback, which is most of the actual work.
+- **What is pulled?** Proxy/TLS material only, reusing the existing
+  secret-rendering targets in `agent.yml` — not a general "apply arbitrary
+  config from the server" surface. Firewall rules, SSSD config, service
+  definitions remain out of scope.
+- **Pull or push?** Hybrid. The existing signed push is unchanged. Every
+  successful WebSocket connect now also triggers `renderSecrets` in the
+  background (`connectWebSocket`, gated by the same `secrets` capability),
+  so an agent that missed a push while offline self-heals on reconnect
+  instead of needing a second push. This is a connect-time catch-up, not an
+  independent poll loop while the connection stays up — still a gap if a
+  secret changes mid-session and the agent doesn't reconnect for a while.
+- **What authorises it?** Nothing new was authorised, because nothing new
+  needed to be: `cfg.Capabilities.Secrets` gates it locally exactly as the
+  command path already did, and the REST fetch for actual secret values goes
+  through the Directory's existing access control on those paths.
+- **What happens on a bad config?** Validate-then-apply, not full rollback.
+  Rendered content that looks like PEM (`-----BEGIN`) must decode as
+  non-empty PEM or the render is rejected — old file kept, reload skipped —
+  closing the specific failure this now matters more for (a template
+  referencing a not-yet-existing secret path rendering an empty string over
+  a live cert, which used to only ever happen on an explicit operator
+  command and now can happen on any reconnect). Every successful render also
+  backs up what it replaced to `<target>.bak`. What's still explicitly out
+  of scope: generic config-type validation beyond PEM, and automatic
+  rollback/retry — an operator restoring the `.bak` by hand is the
+  deliberately minimal recovery path, not "solve config rollback generally."
 
 ## Remaining gaps / risks
 
-- The two items above, which are features rather than defects.
+- **A directory-wide "who is logged in anywhere" pane, retention/privacy for
+  session history, and Windows/container session support** — see "Active
+  sessions" above; the per-host view is built, these are not.
+- **Agent-pulled configuration beyond Proxy/TLS material** — a true
+  independent poll loop, generic config types, and automatic rollback are
+  still open; see above.
 
 Closed since the list above was written:
 
