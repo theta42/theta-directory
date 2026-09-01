@@ -1712,27 +1712,31 @@
       return '<span class="badge bg-light text-dark border" title="No LDAP group gates this resource">no groups</span>';
     }
 
-    let html = '';
-    if (direct.length) {
-      html += '<span class="badge bg-primary" title="Granted directly on this resource&#10;' + groupTitle(direct) +
-        '"><i class="fa-solid fa-user-group"></i> ' + summary.memberCount + '</span>';
-      html += ' <small class="text-muted">' + direct.length + ' group' + (direct.length === 1 ? '' : 's') + '</small>';
-    }
-    if (inherited.length) {
-      html += (html ? ' ' : '') +
-        '<span class="badge bg-secondary" title="Inherited from a parent resource&#10;' + groupTitle(inherited) +
-        '"><i class="fa-solid fa-arrow-turn-down"></i> ' + inherited.length + ' inherited</span>';
-      if (!direct.length) {
-        html += ' <span class="badge bg-primary" title="' + groupTitle(inherited) +
-          '"><i class="fa-solid fa-user-group"></i> ' + summary.memberCount + '</span>';
-      }
-    }
     const dangling = direct.concat(inherited).filter(g => !g.exists);
-    if (dangling.length) {
-      html += ' <span class="badge bg-warning text-dark" title="Linked group missing in LDAP: ' +
-        dangling.map(g => g.cn).join(', ') + '">!</span>';
+    const danglingBadge = dangling.length
+      ? ' <span class="badge bg-warning text-dark" title="Linked group missing in LDAP: ' + dangling.map(g => g.cn).join(', ') + '">!</span>'
+      : '';
+
+    // No grant of its own: this row carries nothing an operator did here
+    // specifically, only what it inherited from an ancestor -- the common
+    // case for every resource under a granted site, and the reason this
+    // column used to read "2 groups · N inherited" identically down fifty
+    // rows in a row. A direct grant is the actual exception and is worth a
+    // full badge; inherited-only collapses to one neutral marker, full
+    // detail still one hover away via the same groupTitle tooltip.
+    if (!direct.length) {
+      return '<span class="badge bg-light text-muted border" title="Inherited only&#10;' + groupTitle(inherited) +
+        '"><i class="fa-solid fa-arrow-turn-down"></i> inherited</span>' + danglingBadge;
     }
-    return html;
+
+    let html = '<span class="badge bg-primary" title="Granted directly on this resource&#10;' + groupTitle(direct) +
+      '"><i class="fa-solid fa-user-group"></i> ' + summary.memberCount + '</span>';
+    html += ' <small class="text-muted">' + direct.length + ' group' + (direct.length === 1 ? '' : 's') + '</small>';
+    if (inherited.length) {
+      html += ' <span class="badge bg-secondary" title="Also inherited from a parent resource&#10;' + groupTitle(inherited) +
+        '"><i class="fa-solid fa-arrow-turn-down"></i> ' + inherited.length + ' inherited</span>';
+    }
+    return html + danglingBadge;
   }
 
   // Reverse lookup: what can a given user reach? The question an access-control
@@ -3099,7 +3103,7 @@
         // kind), which never showed anything about its children before.
         let meshHtml = '', sessionsHtml = '';
         if (r.kind === 'host') {
-          meshHtml = resourceFactsMeshHtml(r, isProxmoxGuest ? ResourceFacts.factsFromProxmoxGuestSnapshot(m, r.id, r.name) : null);
+          meshHtml = await resourceFactsMeshHtml(r, isProxmoxGuest ? ResourceFacts.factsFromProxmoxGuestSnapshot(m, r.id, r.name) : null);
           // Sessions are a fact about the host, not about which driver backs
           // its Status tab -- a Proxmox guest with a bound agent has them
           // exactly like a plain host does, but this branch never rendered
@@ -3130,7 +3134,7 @@
     if (r.kind === 'host') {
       const agent = resolveHostAgent(r);
       const selfLive = agent ? ResourceFacts.factsFromAgentHostSnapshot(agent, r.id, r.name) : null;
-      const meshHtml = resourceFactsMeshHtml(r, selfLive);
+      const meshHtml = await resourceFactsMeshHtml(r, selfLive);
 
       if (agent) {
         $container.html(statusHeader + hostTelemetryHtml(agent) + meshHtml);
@@ -3237,18 +3241,21 @@
   // Start/Stop/Restart/Reload buttons into this card via the existing
   // serviceControlsHtml -- no new control-rendering code.
   //
-  // Purely a read-time render: nothing here writes back to a resource, and
-  // it makes zero new network calls in v1 -- a child that would need its own
-  // on-demand driver-metrics fetch (ssh/ilo/proxmox-guest) is named in a
-  // "N more children have their own live data" note instead of fetched.
-  function resourceFactsMeshHtml(r, selfLive) {
+  // Purely a read-time render: nothing here writes back to a resource. v1
+  // made zero new network calls; v2 (this) adds a bounded, parallel fetch for
+  // Proxmox-guest children with no other live source -- the only child
+  // subtype where the fetch actually yields a comparable cpu/memory/disk
+  // fact (proxmox_driver.js's node/cluster-level responses use a different
+  // shape than guestStats, and ssh/ilo/wireguard/network-appliance children
+  // have nothing in this vocabulary to report at all), capped so a host with
+  // many such children can't turn every modal-open into a fetch storm.
+  const MESH_EAGER_FETCH_SUBTYPES = new Set(['lxc', 'proxmox-lxc', 'vm', 'kvm', 'proxmox-kvm']);
+  const MESH_NOTE_ONLY_SUBTYPES = new Set(['ssh', 'ilo', 'proxmox', 'hypervisor', 'server-proxmox', 'wireguard', 'pfsense', 'unifi_ap', 'unifi_switch']);
+  const MESH_MAX_EAGER_FETCHES = 5;
+
+  async function resourceFactsMeshHtml(r, selfLive) {
     const kids = ResourceStatus.childrenOf(r.id, allEdges, resourcesById);
     if (!kids.length) return '';
-
-    const NEEDS_OWN_FETCH_SUBTYPES = new Set([
-      'ssh', 'ilo', 'proxmox', 'lxc', 'proxmox-lxc', 'vm', 'kvm', 'proxmox-kvm',
-      'wireguard', 'pfsense', 'unifi_ap', 'unifi_switch'
-    ]);
 
     const children = kids.map(k => {
       const kmd = k.metadata || {};
@@ -3258,9 +3265,25 @@
         resource: k,
         svc, agent,
         live,
-        needsOwnFetch: !live && NEEDS_OWN_FETCH_SUBTYPES.has(kmd.subType)
+        fetchable: !live && MESH_EAGER_FETCH_SUBTYPES.has(kmd.subType),
+        needsOwnFetch: !live && MESH_NOTE_ONLY_SUBTYPES.has(kmd.subType)
       };
     });
+
+    const fetchable = children.filter(c => c.fetchable);
+    const toFetch = fetchable.slice(0, MESH_MAX_EAGER_FETCHES);
+    if (toFetch.length) {
+      await Promise.all(toFetch.map(async (c) => {
+        try {
+          const res = await app.api.get(`directory-admin/resources/${c.resource.id}/driver-metrics`);
+          c.live = ResourceFacts.factsFromProxmoxGuestSnapshot((res && res.metrics) || {}, c.resource.id, c.resource.name);
+        } catch (err) {
+          c.needsOwnFetch = true; // fetch failed -- still surface it in the note rather than silently dropping it
+        }
+      }));
+    }
+    // Over the cap: not attempted, but still worth naming in the note.
+    fetchable.slice(MESH_MAX_EAGER_FETCHES).forEach(c => { c.needsOwnFetch = true; });
 
     const { groups, skippedChildrenCount } = ResourceFacts.buildResourceFactsMesh({ resource: r, selfLive, children });
 

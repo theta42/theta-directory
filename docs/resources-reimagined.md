@@ -486,15 +486,17 @@ Open questions:
 ## Remaining gaps / risks
 
 - The two items above, which are features rather than defects.
-- **The Access column is repetitive.** Because everything inherits from its
-  site, nearly every row reads "2 groups · N inherited". It is accurate and it
-  is noise; it probably wants collapsing to the exceptions. Still open.
 
 Closed since the list above was written:
 
-- ~~No fleet-level summary~~ — `renderFleetSummary()` (v2.36.17) shows a
+- ~~No fleet-level summary~~ — `renderFleetSummary()` (v2.36.18) shows a
   healthy/warning/critical/unknown host count above the tree, always visible,
   not just per-site.
+- ~~The Access column is repetitive.~~ (v2.36.19) `accessCellHtml` now shows
+  the full group/member badges only for a resource with a *direct* grant of
+  its own — the actual exception. Inherited-only (the common case for
+  everything under a granted site) collapses to one neutral "↳ inherited"
+  marker; the full group list is still one hover away.
 - ~~The modal is titled "Edit Resource" even in View mode~~ — fixed; the
   title now tracks View vs. Edit.
 - ~~Nothing surfaces "these N resources were classified by a scan and nobody

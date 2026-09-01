@@ -1,3 +1,11 @@
+## [2.36.19] - 2026-09-01
+
+### Changed
+- **Access Column Collapsed to the Exceptions**: `accessCellHtml` used to show the same "N groups · M inherited" badge pair on every row that inherits access from its site — accurate, and pure noise across an estate of any size. A resource with a *direct* grant of its own (the actual exception) still shows the full badges; inherited-only now collapses to a single neutral "↳ inherited" marker, full group/member detail still one hover away.
+
+### Added
+- **Live Facts From Proxmox-Guest Children**: The Status tab's meshed facts card now fetches live `cpu`/`memory`/`disk` data for a Proxmox-guest child (LXC/VM/KVM) that has no other live source, bounded to 5 such children per host and run in parallel — closing the v1 scope boundary documented in `docs/resource-facts.md`. `ssh`/`ilo`/network-appliance/hypervisor-node children are still not fetched, since they have nothing in this vocabulary to report regardless.
+
 ## [2.36.18] - 2026-09-01
 
 ### Fixed
