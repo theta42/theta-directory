@@ -82,6 +82,7 @@
 					</div>
 				</div>
                 <div class="card-header actionMessage" style="display:none"></div>
+                <div id="fleet-summary" class="px-3 pt-2 d-flex flex-wrap gap-2 align-items-center"></div>
                 <div class="p-3 pb-0 text-muted small border-bottom">
                     <i class="fa-solid fa-circle-info"></i> Manage infrastructure, services, and their relationships.
                     <a href="/docs/directory" class="text-reset float-end" title="Help"><i class="fa-solid fa-circle-question"></i></a>
@@ -107,6 +108,7 @@
                   </a>
                   {{#hasSecret}}<span class="badge bg-warning text-dark me-1" title="Has stored secrets in OpenBao"><i class="fa-solid fa-key me-1"></i>Secret</span>{{/hasSecret}}
                   <span class="badge bg-secondary me-1">{{kind}}{{#metadata.subType}} ({{metadata.subType}}){{/metadata.subType}}</span>
+                  {{#isGuessedSubtype}}<span class="badge bg-warning text-dark border me-1" title="Classified by a scan, not confirmed by an operator"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>Guessed</span>{{/isGuessedSubtype}}
                   {{#metadata.environment}}<span class="badge bg-danger me-1">{{metadata.environment}}</span>{{/metadata.environment}}
                   {{#inheritedEnv}}<span class="badge bg-light text-danger border border-danger me-1" title="Inherited: something under this resource is {{inheritedEnv}}">{{inheritedEnv}}</span>{{/inheritedEnv}}
                   {{#isArchived}}<span class="badge bg-secondary me-1" title="Not seen since garbage collection ran; hidden from access and jump targets until it is discovered again or promoted">archived</span>{{/isArchived}}
@@ -1110,7 +1112,16 @@
     identity += fieldRow('Name', r.name);
     identity += fieldRow('Slug', r.slug, { mono: true });
     identity += fieldRow('Kind', r.kind);
-    identity += fieldRow('Subtype', tmpl ? tmpl.name + ' (' + md.subType + ')' : (md.subType || ''));
+    // Discovery plugins (nmap, unifi) tag a classification they inferred
+    // from a scan -- OS banner, port shape, device model -- rather than one
+    // an operator confirmed. That signal existed in the data with nothing
+    // ever surfacing it: an inferred subtype looked identical to a decided
+    // one everywhere in the UI.
+    const subtypeGuessBadge = md.subTypeSource
+      ? ' <span class="badge bg-warning text-dark border" title="Classified by a scan (' + esc(md.subTypeSource) + '), not confirmed by an operator"><i class="fa-solid fa-wand-magic-sparkles me-1"></i>Guessed</span>'
+      : '';
+    const subtypeLabel = esc(tmpl ? tmpl.name + ' (' + md.subType + ')' : (md.subType || ''));
+    identity += fieldRow('Subtype', subtypeLabel + subtypeGuessBadge, { html: true });
     identity += fieldRow('Description', r.description);
     identity += fieldRow('Status', statusHtml, { html: true });
     const env = envBadge(md);
@@ -1334,6 +1345,61 @@
     </div>`;
   }
 
+  // Extracted from hostTelemetryHtml so it can render for a Proxmox-guest
+  // host too, not only a plain host bound directly to an agent.
+  // theta-agent has reported logged_users on every telemetry tick since
+  // telemetry.go:328; the reason this never rendered for a guest host like
+  // an LXC container was purely that loadResourceStatus's branch A (any host
+  // whose subtype is lxc/vm/kvm/etc.) never called hostTelemetryHtml at
+  // all -- not missing data, a routing gap.
+  function loggedInSessionsCardHtml(agent) {
+    if (!agent) return '';
+    const t = agent.lastTelemetry || {};
+    const d = agent.lastDiscovery || {};
+    const loggedUsers = t.logged_users || d.logged_users || agent.loggedUsers || [];
+
+    const body = loggedUsers.length > 0
+      ? `<div class="table-responsive"><table class="table table-sm small mb-0 align-middle">
+          <thead><tr><th>User</th><th>Terminal</th><th>Host / IP</th><th>Session Time</th></tr></thead><tbody>` +
+          loggedUsers.map(u => `<tr>
+            <td><i class="fa-solid fa-user text-primary me-1"></i><strong>${esc(u.user)}</strong></td>
+            <td><code class="text-muted">${esc(u.terminal || 'tty')}</code></td>
+            <td>${esc(u.host || 'local')}</td>
+            <td class="text-muted">${u.started ? moment(u.started * 1000).fromNow() : 'active'}</td>
+          </tr>`).join('') + `</tbody></table></div>`
+      : `<div class="small text-muted p-2"><i class="fa-solid fa-user-slash me-1"></i>No active logged-in user sessions.</div>`;
+
+    return `
+      <div class="card mb-3 shadow-sm border">
+        <div class="card-header bg-light py-2">
+          <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-users me-1"></i> Active Logged-in Users</h6>
+        </div>
+        <div class="card-body p-2">${body}</div>
+      </div>`;
+  }
+
+  // The "find this host's own agent" idiom branch B of loadResourceStatus
+  // used to do inline -- shared so branch A (Proxmox guests, ssh, ilo, ...)
+  // can resolve the same agent for loggedInSessionsCardHtml without
+  // duplicating the walk.
+  function resolveHostAgent(r) {
+    let agent = r.agent;
+    if (!agent) {
+      const childEdges = allEdges.filter(e => e.parentId === r.id);
+      for (const ce of childEdges) {
+        const childRes = resourcesById[ce.childId];
+        if (childRes && agentsByResource[childRes.id]) {
+          agent = agentsByResource[childRes.id];
+          break;
+        }
+      }
+      if (!agent && agentsById) {
+        agent = Object.values(agentsById).find(a => a.resourceId === r.id);
+      }
+    }
+    return agent || null;
+  }
+
   function hostTelemetryHtml(agent) {
     if (!agent) {
       return `
@@ -1426,21 +1492,6 @@
     }
 
     const agentVer = d.version || t.version || agent.version || 'v1.8.0';
-    const loggedUsers = t.logged_users || d.logged_users || agent.loggedUsers || [];
-
-    let loggedUsersHtml = '';
-    if (loggedUsers.length > 0) {
-      loggedUsersHtml = `<div class="table-responsive"><table class="table table-sm small mb-0 align-middle">
-        <thead><tr><th>User</th><th>Terminal</th><th>Host / IP</th><th>Session Time</th></tr></thead><tbody>` +
-        loggedUsers.map(u => `<tr>
-          <td><i class="fa-solid fa-user text-primary me-1"></i><strong>${esc(u.user)}</strong></td>
-          <td><code class="text-muted">${esc(u.terminal || 'tty')}</code></td>
-          <td>${esc(u.host || 'local')}</td>
-          <td class="text-muted">${u.started ? moment(u.started * 1000).fromNow() : 'active'}</td>
-        </tr>`).join('') + `</tbody></table></div>`;
-    } else {
-      loggedUsersHtml = `<div class="small text-muted p-2"><i class="fa-solid fa-user-slash me-1"></i>No active logged-in user sessions.</div>`;
-    }
 
     return `<div class="p-0">
       <div class="mb-3 d-flex justify-content-between align-items-center">
@@ -1501,15 +1552,7 @@
         </div>
       </div>
 
-      <!-- Logged-in Users Card -->
-      <div class="card mb-3 shadow-sm border">
-        <div class="card-header bg-light py-2">
-          <h6 class="mb-0 fw-bold text-dark"><i class="fa-solid fa-users me-1"></i> Active Logged-in Users</h6>
-        </div>
-        <div class="card-body p-2">
-          ${loggedUsersHtml}
-        </div>
-      </div>
+      ${loggedInSessionsCardHtml(agent)}
 
       <div class="row g-3 mb-3">
         <div class="col-6">GPU <strong>${gpu}</strong></div>
@@ -1733,7 +1776,29 @@
     }, delay);
   }
 
+  // "The tree tells the truth per row, but nothing says '3 critical, 12
+  // unknown' before you start scanning" -- the fleet-wide equivalent of the
+  // per-site Site Health Summary, always visible above the tree rather than
+  // requiring a click into a site. Scoped to hosts, matching what Site
+  // Health Summary already counts, rather than diluting the signal with
+  // every leaf service.
+  function renderFleetSummary() {
+    const $el = $('#fleet-summary');
+    if (!$el.length) return;
+    const hosts = (rawResources || []).filter(r => r.kind === 'host');
+    if (!hosts.length) { $el.html(''); return; }
+    const counts = ResourceStatus.bucketResourceStatuses(hosts);
+    $el.html(`
+      <span class="badge bg-success" title="Healthy hosts"><i class="fa-solid fa-circle-check me-1"></i>${counts.ok} Healthy</span>
+      <span class="badge bg-warning text-dark" title="Hosts with a warning"><i class="fa-solid fa-triangle-exclamation me-1"></i>${counts.warning} Warning</span>
+      <span class="badge bg-danger" title="Hosts in a critical state"><i class="fa-solid fa-circle-exclamation me-1"></i>${counts.critical} Critical</span>
+      <span class="badge bg-secondary" title="Hosts with no status yet"><i class="fa-solid fa-circle-question me-1"></i>${counts.unknown} Unknown</span>
+      <span class="text-muted small ms-1">${hosts.length} host${hosts.length === 1 ? '' : 's'} total</span>
+    `);
+  }
+
   function renderTable() {
+    renderFleetSummary();
     const filter = $('#search-filter').val().toLowerCase();
     const sort = $('#sort-by').val();
     const secretsOnly = $('#toggle-secrets-only').is(':checked');
@@ -1809,6 +1874,10 @@
          n.childCount = n.children.length;
          n.accessHtml = accessCellHtml(n.id);
          n.isArchived = (n.metadata || {}).lifecycle_state === 'archived' && (n.metadata || {}).managed !== true;
+         // A discovery plugin (nmap, unifi) classified this subtype from a
+         // scan rather than an operator confirming it -- previously
+         // invisible anywhere in the tree.
+         n.isGuessedSubtype = !!(n.metadata || {}).subTypeSource;
          // Environment bubbles up, and was being computed and then never shown:
          // a site carrying production looked identical to an empty one.
          const nmd = n.metadata || {};
@@ -3028,10 +3097,18 @@
         // This is the branch a Proxmox guest with a bound agent actually
         // takes (its subType, e.g. lxc, is matched above regardless of
         // kind), which never showed anything about its children before.
-        const meshHtml = r.kind === 'host'
-          ? resourceFactsMeshHtml(r, isProxmoxGuest ? ResourceFacts.factsFromProxmoxGuestSnapshot(m, r.id, r.name) : null)
-          : '';
-        $container.html(statusHeader + selfCardHtml + meshHtml);
+        let meshHtml = '', sessionsHtml = '';
+        if (r.kind === 'host') {
+          meshHtml = resourceFactsMeshHtml(r, isProxmoxGuest ? ResourceFacts.factsFromProxmoxGuestSnapshot(m, r.id, r.name) : null);
+          // Sessions are a fact about the host, not about which driver backs
+          // its Status tab -- a Proxmox guest with a bound agent has them
+          // exactly like a plain host does, but this branch never rendered
+          // hostTelemetryHtml (and never will: proxmoxGuestStatusHtml/
+          // sshStatusHtml/iloStatusHtml are the right card for the driver
+          // data above), so it's rendered directly here instead.
+          sessionsHtml = loggedInSessionsCardHtml(resolveHostAgent(r));
+        }
+        $container.html(statusHeader + selfCardHtml + meshHtml + sessionsHtml);
       } catch (err) {
         $container.html(statusHeader + `
           <div class="card border shadow-sm p-3">
@@ -3051,21 +3128,7 @@
 
     // B. Host resources
     if (r.kind === 'host') {
-      let agent = r.agent;
-      if (!agent) {
-        const childEdges = allEdges.filter(e => e.parentId === r.id);
-        for (const ce of childEdges) {
-          const childRes = resourcesById[ce.childId];
-          if (childRes && agentsByResource[childRes.id]) {
-            agent = agentsByResource[childRes.id];
-            break;
-          }
-        }
-        if (!agent && agentsById) {
-          agent = Object.values(agentsById).find(a => a.resourceId === r.id);
-        }
-      }
-
+      const agent = resolveHostAgent(r);
       const selfLive = agent ? ResourceFacts.factsFromAgentHostSnapshot(agent, r.id, r.name) : null;
       const meshHtml = resourceFactsMeshHtml(r, selfLive);
 

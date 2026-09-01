@@ -1,3 +1,13 @@
+## [2.36.18] - 2026-09-01
+
+### Fixed
+- **`nodejs/package.json` Version Drift**: The v2.36.17 release bumped the repo-root wrapper `package.json` but missed the app's own `nodejs/package.json`, which every prior release had kept in sync. Caught and corrected.
+- **Active Sessions Still Unreachable for Proxmox Guests**: Fixing the driver-priority bug in v2.36.17 did not, on its own, expose the already-working "logged-in sessions" table for a Proxmox-guest host (LXC/VM) — it lives inside `hostTelemetryHtml`, which the Status-tab dispatcher's branch A (any host whose subtype is `lxc`/`vm`/`kvm`/etc., matched before `kind` is even checked) never calls, regardless of which driver backs it. Extracted `loggedInSessionsCardHtml`/`resolveHostAgent` so both dispatcher branches render the same sessions data for any host with a bound agent, guest or not.
+
+### Added
+- **Fleet-Level Status Summary**: The Directory tree now shows a healthy/warning/critical/unknown host count above the table, always visible — not just per-site, and not requiring you to expand anything first.
+- **"Guessed" Subtype Badge**: A resource whose subtype `nmap`/`unifi` inferred from a scan rather than an operator confirming now shows a "Guessed" badge, both in the tree row and on its own Identity card (`metadata.subTypeSource`, previously written by discovery but never surfaced anywhere in the UI).
+
 ## [2.36.17] - 2026-09-01
 
 ### Fixed
