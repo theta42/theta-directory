@@ -1,3 +1,8 @@
+## [2.36.22] - 2026-09-01
+
+### Changed
+- **"Agent-Pulled Configuration" Doc Corrected**: `docs/resources-reimagined.md`'s "Planned: not built yet" section previously listed this as open design work with four unanswered questions. theta-agent v2.21.8 closed the Proxy/TLS-material case: a connect-time secrets pull (hybrid with the existing signed push), gated by the same capability, with backup-before-write and PEM validation on render. Section rewritten to describe what's now built vs. what's still explicitly out of scope (generic config types, a true independent poll loop, automatic rollback). No code change in this repo.
+
 ## [2.36.21] - 2026-09-01
 
 ### Changed
