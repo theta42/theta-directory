@@ -1,3 +1,8 @@
+## [2.36.21] - 2026-09-01
+
+### Changed
+- **`directory.ejs` Decomposition, First Slice**: Extracted the two most self-contained clusters out of the single ~5,760-line inline `<script>` block — Discovery plugin admin + merge (`public/js/discovery_admin.js`) and Mesh/WireGuard site & exit management (`public/js/mesh_site_admin.js`) — loaded as ordinary `<script src>` tags, same pattern as the existing `resource_status.js`/`resource_facts.js`. No behavior change; ~900 lines (16%) out of the monolith. `tests/view_integrity.test.js` now also resolves inline `onclick`/`onchange`/`onkeyup`/`onkeydown` handlers and parses syntax against any local `<script src="/static/...">` file a view loads, not just its own inline source, so this and future extractions stay covered by the check that exists specifically because a broken script block on this page once killed it silently for three releases.
+
 ## [2.36.20] - 2026-09-01
 
 ### Fixed
