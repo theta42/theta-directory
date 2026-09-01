@@ -98,14 +98,20 @@ kind (static vs. live), *same* role (total vs. used vs. a plain percentage),
 and *same* unit disagree by more than 10%. A live percentage is never
 compared against a static byte total; they're answering different questions.
 
-This is a pure, read-time transform. It makes no network calls beyond what
-the page was already making for the resource open in front of you — a
-child's live data is only included if it's already resident client-side
-(agent-bound children, via the same telemetry the tree's status dots
-already use). A child that would need its own on-demand `driver-metrics`
-fetch (an `ssh`/`ilo`/Proxmox-guest child) is **not** fetched in v1; it's
-named in a "N more children have their own live data" note instead. Pulling
-those in too is a natural next step, deliberately not built yet.
+This is a pure, read-time transform. Most of a child's live data is already
+resident client-side (agent-bound children, via the same telemetry the
+tree's status dots already use) and costs no extra call. For a Proxmox-guest
+child (LXC/VM/KVM) with no other live source, `resourceFactsMeshHtml` fetches
+its `driver-metrics` directly — bounded to 5 such children per host, in
+parallel, one failure never blocking the rest — since that's the only child
+subtype where the fetch actually yields a fact this vocabulary can compare
+(`proxmox_driver.js`'s node/cluster-level responses use a different shape
+than a guest's `guestStats`, and `ssh`/`ilo`/network-appliance children have
+nothing in `cpu`/`memory`/`disk`/`network` to report regardless of fetching).
+Those, and any guest child over the 5-child cap, are named in a "N more
+children have their own live data" note instead — not fetched, because there
+is nothing to gain (or, over the cap, to bound the cost of a host with many
+guest children turning every modal-open into a fetch storm).
 
 `views/directory.ejs`'s `resourceFactsMeshHtml(resource, selfLive)` is the
 thin rendering layer on top: one badge per contributing source, bordered when
@@ -116,7 +122,9 @@ separate control-rendering path for meshed children.
 
 ## What's still out of scope
 
-- Live facts from a child that needs its own fetch (see above).
+- Live facts from an `ssh`/`ilo`/network-appliance/hypervisor-node child, or a
+  guest child beyond the 5-per-host eager-fetch cap (see above) — either
+  nothing to gain from fetching, or bounded on purpose.
 - Reconciling `hostTelemetryHtml`/`proxmoxGuestStatusHtml`/`serviceStatusHtml`'s
   own summary numbers with the meshed card below them — both are shown today,
   which can look like double-counting on a host with few children. Rewriting
