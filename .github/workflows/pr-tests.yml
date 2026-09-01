@@ -16,7 +16,11 @@ jobs:
 
     strategy:
       matrix:
-        node-version: [18.x, 20.x, 22.x]
+        # Deployment is scripted and always builds node:20-alpine
+        # (Dockerfile.openldap) -- no other Node version is ever what
+        # actually runs in production, so testing 18.x/22.x here bought
+        # nothing but tripled exposure to any environment-timing flake.
+        node-version: [20.x]
 
     # A dedicated, GHA-managed Redis -- NOT the bundled image's own Redis,
     # which only binds to loopback *inside* its container (redis-server's
