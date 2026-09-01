@@ -1,6 +1,8 @@
 const { Resource, ResourceEdge, ResourceGroup } = require('../models/resource');
 const { identityClassFor } = require('./subtype_templates');
 const { WebhookEmitter } = require('./webhook_emitter');
+const ResourceMatcher = require('./resource_matcher');
+const { recordFactSources } = require('../utils/fact_sources');
 const crypto = require('crypto');
 
 // Is `candidateId` at or below `rootId` in the edge graph? Used to refuse an
@@ -92,9 +94,6 @@ class DiscoveryReconciler {
       }
     }
 
-    const normalizeMac = (m) => (m || '').toLowerCase().replace(/[^a-f0-9]/g, '');
-    const normalizeHost = (h) => (h || '').toLowerCase().split('.')[0].trim();
-
     // Read the inventory ONCE, not once per incoming resource. A Proxmox
     // cluster reports ~55 resources against an inventory of similar size, so
     // the per-iteration Resource.list() was doing quadratic full-table reads
@@ -145,8 +144,6 @@ class DiscoveryReconciler {
       if (autoPromote) res.metadata.managed = true;
       res._originalSlug = res.slug; // Keep track for edge mapping
 
-      let existing = null;
-
       // A discovered device may only merge into a resource of the same IDENTITY
       // CLASS. Without this a VM called "gitea-runner" matches a hand-created
       // *service* of the same name on rule 3 and silently overwrites it -- the
@@ -165,77 +162,13 @@ class DiscoveryReconciler {
         return k === incomingClass;
       });
 
-      // 1. God Key (UUID) Matching (highest precision)
-      if (res.id) {
-        existing = candidates.find(r => r.id === res.id);
-      }
-
-      // 2. MAC Address Matching (stable identity)
-      const incomingMacs = [];
-      if (res.metadata.macAddress) incomingMacs.push(normalizeMac(res.metadata.macAddress));
-      if (res.metadata.interfaces) {
-        for (const i of res.metadata.interfaces) {
-          const m = normalizeMac(i.mac);
-          if (m.length === 12) incomingMacs.push(m);
-        }
-      }
-      const uniqueMacs = [...new Set(incomingMacs.filter(m => m.length === 12))];
-      if (!existing && uniqueMacs.length > 0) {
-        existing = candidates.find(r =>
-          r.metadata && (
-            (r.metadata.macAddress && uniqueMacs.includes(normalizeMac(r.metadata.macAddress))) ||
-            (r.metadata.interfaces && r.metadata.interfaces.some(i => uniqueMacs.includes(normalizeMac(i.mac))))
-          )
-        );
-      }
-
-      // 3. Fallback matching by IP address (Strictly bound to targetSite and only if candidate lacks a MAC)
-      let ipsToMatch = [];
-      if (res.metadata.interfaces) {
-        ipsToMatch = res.metadata.interfaces.map(i => i.ip).filter(i => !!i);
-      }
-      if (res.metadata.ip) ipsToMatch.push(res.metadata.ip);
-      if (res.metadata.address) {
-        res.metadata.address.split(',').forEach(a => ipsToMatch.push(a.trim()));
-      }
-      ipsToMatch = [...new Set(ipsToMatch.filter(Boolean))];
-
-      if (!existing && ipsToMatch.length > 0) {
-        existing = candidates.find(r => {
-          // Strict boundaries: never hijack a resource that already has a strong identity (MAC).
-          const rHasMac = !!(r.metadata && (r.metadata.macAddress || (r.metadata.interfaces && r.metadata.interfaces.some(i => i.mac))));
-          if (rHasMac) return false;
-          // Strict boundaries: IP fallback only within the same site.
-          if (incomingSiteId && siteOf.get(r.id) !== incomingSiteId) return false;
-          if (!r.metadata) return false;
-          if (r.metadata.ip && ipsToMatch.includes(r.metadata.ip)) return true;
-          if (r.metadata.address) {
-            const addrs = r.metadata.address.split(',').map(a => a.trim());
-            if (addrs.some(a => ipsToMatch.includes(a))) return true;
-          }
-          if (r.metadata.interfaces && r.metadata.interfaces.some(i => ipsToMatch.includes(i.ip))) return true;
-          return false;
-        });
-      }
-
-      // 4. Fallback matching by Slug, Name, or Base Hostname
-      const hasMac = uniqueMacs.length > 0;
-      const hasIp = ipsToMatch.length > 0;
-      if (!existing && !hasMac && !hasIp && (res.slug || res.name)) {
-        const inputName = normalizeHost(res.name || res.slug);
-        existing = candidates.find(r => {
-          const rHasMac = !!(r.metadata && (r.metadata.macAddress || (r.metadata.interfaces && r.metadata.interfaces.some(i => i.mac))));
-          if (rHasMac) return false;
-          // Strict boundaries: name/slug fallback only within the same site.
-          if (incomingSiteId && siteOf.get(r.id) !== incomingSiteId) return false;
-          
-          if (res.slug && r.slug === res.slug) return true;
-          if (res.name && r.name && r.name.toLowerCase() === res.name.toLowerCase()) return true;
-          if (inputName && r.name && normalizeHost(r.name) === inputName) return true;
-          if (inputName && r.slug && normalizeHost(r.slug) === inputName) return true;
-          return false;
-        });
-      }
+      // UUID -> MAC -> IP -> name/slug, in that order. See resource_matcher.js
+      // for the full tier semantics and the site-scoping/MAC-hijack guards.
+      const existing = ResourceMatcher.findExistingMatch(
+        { id: res.id, name: res.name, slug: res.slug, metadata: res.metadata },
+        candidates,
+        { siteOf: (id) => siteOf.get(id), incomingSiteId }
+      );
 
       if (existing) {
         // Merge metadata
@@ -263,7 +196,8 @@ class DiscoveryReconciler {
         mergedMeta.discovery_sources = [...sources];
         
         mergedMeta.last_seen = Date.now();
-        
+        recordFactSources(mergedMeta, sourceName, res.metadata);
+
         const isIp = (str) => /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(str || '');
         const isMac = (str) => /^([0-9a-f]{2}[:-]){5}[0-9a-f]{2}$/i.test((str || '').trim());
         const nameRank = (str) => {
@@ -294,7 +228,8 @@ class DiscoveryReconciler {
         const sources = new Set([sourceName]);
         res.metadata.discovery_sources = [...sources];
         res.metadata.last_seen = Date.now();
-        
+        recordFactSources(res.metadata, sourceName, res.metadata);
+
         const slug = res.slug || `${res.kind}-${crypto.randomBytes(4).toString('hex')}`;
         
         const created = await Resource.create({

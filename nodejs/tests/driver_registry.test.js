@@ -84,3 +84,54 @@ describe('Subtype Driver Registry Engine', () => {
   });
 
 });
+
+// Regression test for the exact seam that broke: resolveDriver()'s tier 1 is
+// documented as "prefer a connected theta-agent over a hypervisor API", but
+// getAgentForResource(hostId) had no "host -> its agent-service child"
+// direction, so tier 1 silently never fired for a Proxmox-guest host with a
+// bound agent and the Proxmox driver always won. Needs the real ORM (unlike
+// the plain-stub tests above) because it exercises the actual
+// AgentManager.getAgentForResource lookup, not a stub.
+describe('Subtype Driver Registry Engine - tier 1 agent preference', () => {
+  const { Resource, ResourceEdge } = require('../models/resource');
+  const { Agent } = require('../models/agent');
+  const { initORM } = require('../models');
+
+  beforeAll(async () => {
+    await initORM();
+  });
+
+  beforeEach(async () => {
+    for (const a of await Agent.list().catch(() => [])) await a.delete().catch(() => {});
+    for (const e of await ResourceEdge.list().catch(() => [])) await e.delete().catch(() => {});
+    for (const r of await Resource.list().catch(() => [])) await r.delete().catch(() => {});
+  });
+
+  test('a connected agent on a Proxmox-guest host outranks the Proxmox driver', async () => {
+    const host = await Resource.create({
+      id: 'lxc-emby-6e65df28bb21-id', kind: 'host', name: 'emby',
+      slug: 'lxc-emby-6e65df28bb21', metadata: { subType: 'lxc' }
+    });
+    const agentSvc = await Resource.create({
+      id: 'svc-emby-theta-agent-id', kind: 'service', name: 'Theta Agent',
+      slug: 'svc-emby-theta-agent', metadata: { subType: 'theta-agent' }
+    });
+    await ResourceEdge.create({ id: 'edge1', parentId: host.id, childId: agentSvc.id, relation: 'hosts' });
+    await Agent.create({
+      id: 'agent-emby-id', name: 'emby', resourceId: agentSvc.id, tokenHash: 't',
+      last_seen: Math.floor(Date.now() / 1000) // recently seen -> isOnline
+    });
+
+    const driver = await DriverRegistry.resolveDriver(host);
+    expect(driver.name).toBe('theta_agent');
+  });
+
+  test('falls back to the Proxmox driver when the host has no bound agent', async () => {
+    const host = await Resource.create({
+      id: 'lxc-noagent-id', kind: 'host', name: 'noagent',
+      slug: 'lxc-noagent', metadata: { subType: 'lxc' }
+    });
+    const driver = await DriverRegistry.resolveDriver(host);
+    expect(driver.name).toBe('proxmox');
+  });
+});

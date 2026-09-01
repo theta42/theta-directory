@@ -65,6 +65,7 @@ backend, that's the niche.
 - **[Access Inheritance](access-inheritance.html)** — ownership propagates down the resource tree: granting someone a site grants them what is in it, why grants are additive with no deny, and how to tell an inherited grant from a direct one.
 - **[Subtype Templates](subtype-templates.html)** — data-driven resource types: what a `linux` host or a `port-forward` service is, which fields it has, where in the tree it may go, and how those templates replicate across sites.
 - **[Status Rules](status-rules.html)** — how a resource's health dot is computed from telemetry, plugin state and the environment bubbled up from its children, and the small expression language that says so.
+- **[Resource Facts](resource-facts.html)** — the canonical vocabulary a plugin/driver must use for a fact to be found across sources, the additive per-source echo that lets two sources' values survive side by side, and how a host's Status tab meshes its own facts with its children's.
 - **[Theta Agent & Endpoint C2](agents.html)** — 2-way Go daemon (`theta-agent`) for real-time telemetry (CPU, RAM, Disk, ZFS, GPU), automated host discovery, SSSD/LDAP configuration, and local capability-controlled management operations.
 - **[Vault secrets](vault.html)** — an OpenBao-backed key-value store built into the UI, for stashing passwords/API keys/credentials with encryption and access control.
 - **[API tokens](concepts-api-tokens.html)** — self-service personal access tokens for calling the management API from scripts/CI without a browser session.

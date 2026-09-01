@@ -393,7 +393,17 @@ class AgentManager {
   }
 
   // The agent that can act on a resource: the one bound to it directly (it IS
-  // an agent service), or the one on the host it runs under.
+  // an agent service), the one on the host it runs under (resourceId is a
+  // service/container, walk UP to its parent host's agent-service sibling),
+  // or -- resourceId IS a host -- the one bound to ITS agent-service child
+  // (walk DOWN). All three directions go through agent_binding.js's
+  // findAgentService/hostForAgent rather than each re-deriving the walk.
+  //
+  // The third direction used to be missing entirely, which is why
+  // driver_registry.js's tier-1 "prefer a connected agent" check silently
+  // never fired for a Proxmox-guest host with a bound agent: it calls this
+  // function with the HOST's id, which matched neither of the first two
+  // cases, so it always fell through to the Proxmox driver.
   async getAgentForResource(resourceId) {
     if (!resourceId) return null;
     const rows = await Agent.list().catch(() => []);
@@ -403,7 +413,10 @@ class AgentManager {
       try {
         const { Resource, ResourceEdge } = require('../models/resource');
         const res = await Resource.get(resourceId);
-        if (res && (res.kind === 'service' || res.kind === 'container')) {
+        if (res && res.kind === 'host') {
+          const agentService = await findAgentService(res);
+          if (agentService) agent = rows.find(a => a.resourceId === agentService.id);
+        } else if (res && (res.kind === 'service' || res.kind === 'container')) {
           const edges = await ResourceEdge.list({ where: { childId: resourceId } });
           for (const edge of edges) {
             const parentRes = await Resource.get(edge.parentId).catch(() => null);
@@ -441,7 +454,7 @@ class AgentManager {
     try {
       const { Resource, ResourceEdge } = require('../models/resource');
       const { normalizeHost, ensureAgentService } = require('./agent_binding');
-      const normalizeMac = (m) => (m ? String(m).toLowerCase().replace(/[^a-f0-9]/g, '') : '');
+      const ResourceMatcher = require('../services/resource_matcher');
 
       const hostMetadata = {
         os: discovery.os || undefined,
@@ -464,32 +477,59 @@ class AgentManager {
         // If hostRes was auto-created during enrollment (e.g. host-<name>) while
         // a richer hypervisor guest or seeded host exists at the same site
         // (matching MAC, IP, or normalized name), merge into the real host.
-        const incomingMac = normalizeMac(discovery.mac_address);
+        //
+        // MAC and IP tiers share resource_matcher.js with
+        // discovery_reconciler.js -- same MAC-hijack guard (never match a
+        // candidate that already has its own MAC identity), same same-site
+        // scoping for the IP tier. This used to be an independent copy with
+        // neither: it queried every host in the catalog with no site filter
+        // despite a comment claiming one, and a match here doesn't just merge
+        // metadata, it DELETES the placeholder host and reparents its edges.
+        //
+        // Name/slug fallback stays agent_binding.js's fuzzy normalizeHost
+        // (strips lxc-/pve-/host- prefixes and hex suffixes) rather than
+        // resource_matcher's strict identity match -- deliberately looser,
+        // because this compares a bare OS hostname ("emby") against a
+        // structurally-prefixed slug Proxmox discovery minted
+        // ("lxc-emby-6e65df28bb21"), not two discovery payloads describing
+        // the same device the way the reconciler's tiers do. It now gets the
+        // same MAC-hijack guard and site scoping the other tiers have, which
+        // it also lacked before.
+        const allHosts = (await Resource.list({ where: { kind: 'host' } }).catch(() => []))
+          .filter(r => r.id !== hostRes.id);
+        const incomingMacs = ResourceMatcher.macsOf({ macAddress: discovery.mac_address });
         const incomingIps = (discovery.ip_addresses || []).filter(Boolean);
         const inputName = normalizeHost(discovery.hostname);
 
-        const allHosts = await Resource.list({ where: { kind: 'host' } }).catch(() => []);
-        let realHost = null;
+        let realHost = ResourceMatcher.matchByMac(incomingMacs, allHosts);
 
-        if (incomingMac && incomingMac.length === 12) {
-          realHost = allHosts.find(r => r.id !== hostRes.id && r.metadata && (
-            (r.metadata.macAddress && normalizeMac(r.metadata.macAddress) === incomingMac) ||
-            (r.metadata.interfaces && r.metadata.interfaces.some(i => i.mac && normalizeMac(i.mac) === incomingMac))
-          ));
-        }
+        if (!realHost && (incomingIps.length || inputName)) {
+          const incomingSiteId = await Resource.findAncestorSiteSlug(hostRes.id).catch(() => null);
+          const siteCache = new Map();
+          const siteOf = async (id) => {
+            if (!siteCache.has(id)) siteCache.set(id, await Resource.findAncestorSiteSlug(id).catch(() => null));
+            return siteCache.get(id);
+          };
+          // matchByIp/the guard below are synchronous, so resolve every
+          // candidate's site slug up front rather than mid-predicate.
+          for (const h of allHosts) await siteOf(h.id);
+          const siteOfSync = (id) => siteCache.get(id);
 
-        if (!realHost && incomingIps.length > 0) {
-          realHost = allHosts.find(r => r.id !== hostRes.id && r.metadata && (
-            (r.metadata.ip && incomingIps.includes(r.metadata.ip)) ||
-            (r.metadata.interfaces && r.metadata.interfaces.some(i => i.ip && incomingIps.includes(i.ip)))
-          ));
-        }
+          if (incomingIps.length) {
+            realHost = ResourceMatcher.matchByIp(incomingIps, allHosts, { siteOf: siteOfSync, incomingSiteId });
+          }
 
-        if (!realHost && inputName) {
-          realHost = allHosts.find(r => r.id !== hostRes.id && (
-            (r.name && normalizeHost(r.name) === inputName) ||
-            (r.slug && normalizeHost(r.slug) === inputName)
-          ));
+          // Unmatched MAC/IP is a stronger negative signal than never having
+          // had one -- don't fall through to a name guess in that case,
+          // mirroring resource_matcher's own tier-4 gating.
+          if (!realHost && !incomingMacs.length && !incomingIps.length && inputName) {
+            realHost = allHosts.find(r => {
+              if (ResourceMatcher.hasStrongIdentity(r)) return false;
+              if (incomingSiteId && siteOfSync(r.id) !== incomingSiteId) return false;
+              return (r.name && normalizeHost(r.name) === inputName) ||
+                     (r.slug && normalizeHost(r.slug) === inputName);
+            }) || null;
+          }
         }
 
         if (realHost) {
