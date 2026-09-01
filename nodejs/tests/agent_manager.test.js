@@ -388,4 +388,178 @@ describe('theta-agent docker service reconciliation', () => {
     const childIds = guestEdges.map(e => e.childId);
     expect(childIds).toContain(agent.resourceId);
   });
+
+  // Regression test for the bug this consolidation logic used to have: it
+  // queried every host in the catalog with no MAC-hijack guard, and a match
+  // deletes the placeholder host and reparents everything onto the "match".
+  // A candidate that already has its own MAC identity must never be adopted
+  // via a weaker IP coincidence.
+  test('never hijacks a candidate host that already has its own MAC identity', async () => {
+    const { Resource, ResourceEdge } = require('../models/resource');
+    const otherHostId = crypto.randomUUID();
+    const placeholderHostId = crypto.randomUUID();
+    const placeholderAgentSvcId = crypto.randomUUID();
+
+    // A host that happens to share an IP (stale/reused DHCP lease) but has
+    // its own, different, strong MAC identity.
+    await Resource.create({
+      id: otherHostId,
+      kind: 'host',
+      name: 'unrelated-box',
+      slug: 'host-unrelated-box',
+      metadata: { macAddress: 'aa:aa:aa:aa:aa:aa', ip: '192.168.1.206' }
+    });
+
+    const placeholderHost = await Resource.create({
+      id: placeholderHostId,
+      kind: 'host',
+      name: 'emby',
+      slug: 'host-emby',
+      metadata: { subType: 'linux', managed: true }
+    });
+    const placeholderAgentSvc = await Resource.create({
+      id: placeholderAgentSvcId,
+      kind: 'service',
+      name: 'Theta Agent',
+      slug: 'svc-emby-theta-agent',
+      metadata: { subType: 'theta-agent', managed: true }
+    });
+    await ResourceEdge.create({ id: crypto.randomUUID(), parentId: placeholderHostId, childId: placeholderAgentSvcId, relation: 'hosts' });
+
+    const agent = stubAgent({ name: 'emby', resourceId: placeholderAgentSvcId });
+
+    // Discovery reports the SAME ip (no MAC of its own -- e.g. a fresh
+    // install before an interface MAC was read), which would otherwise
+    // fallback-match otherHostId by IP.
+    await agentManager.applyDiscoveryToDirectory(agent, {
+      hostname: 'emby',
+      ip_addresses: ['192.168.1.206'],
+      os: 'linux ubuntu'
+    });
+
+    // The placeholder must still exist -- no hijack occurred.
+    const allHosts = await Resource.list({ where: { kind: 'host' } });
+    expect(allHosts.map(h => h.slug)).toContain('host-emby');
+
+    const otherHost = await Resource.get(otherHostId);
+    expect(otherHost.metadata.discovery_sources || []).not.toContain('theta-agent');
+  });
+
+  // Regression test for the missing site boundary: the old code queried
+  // Resource.list({where:{kind:'host'}}) with no site filter at all, despite
+  // a comment claiming "at the same site". A same-named host at a different
+  // physical site must not be adopted.
+  test('never adopts a same-named host at a different site', async () => {
+    const { Resource, ResourceEdge } = require('../models/resource');
+    const siteAId = crypto.randomUUID();
+    const siteBId = crypto.randomUUID();
+    const otherSiteHostId = crypto.randomUUID();
+    const placeholderHostId = crypto.randomUUID();
+    const placeholderAgentSvcId = crypto.randomUUID();
+
+    await Resource.create({ id: siteAId, kind: 'site', name: 'Site A', slug: 'site_a' });
+    await Resource.create({ id: siteBId, kind: 'site', name: 'Site B', slug: 'site_b' });
+
+    // Same name ("emby"), same physical hostname convention, but a
+    // genuinely different machine at a different site.
+    const otherSiteHost = await Resource.create({
+      id: otherSiteHostId,
+      kind: 'host',
+      name: 'emby',
+      slug: 'lxc-emby-aaaaaaaaaaaa',
+      metadata: { subType: 'lxc' }
+    });
+    await ResourceEdge.create({ id: crypto.randomUUID(), parentId: siteBId, childId: otherSiteHostId, relation: 'hosts' });
+
+    const placeholderHost = await Resource.create({
+      id: placeholderHostId,
+      kind: 'host',
+      name: 'emby',
+      slug: 'host-emby',
+      metadata: { subType: 'linux', managed: true }
+    });
+    await ResourceEdge.create({ id: crypto.randomUUID(), parentId: siteAId, childId: placeholderHostId, relation: 'hosts' });
+    const placeholderAgentSvc = await Resource.create({
+      id: placeholderAgentSvcId,
+      kind: 'service',
+      name: 'Theta Agent',
+      slug: 'svc-emby-theta-agent',
+      metadata: { subType: 'theta-agent', managed: true }
+    });
+    await ResourceEdge.create({ id: crypto.randomUUID(), parentId: placeholderHostId, childId: placeholderAgentSvcId, relation: 'hosts' });
+
+    const agent = stubAgent({ name: 'emby', resourceId: placeholderAgentSvcId });
+
+    await agentManager.applyDiscoveryToDirectory(agent, {
+      hostname: 'emby',
+      os: 'linux ubuntu'
+    });
+
+    // No cross-site adoption -- the Site A placeholder stays put.
+    const allHosts = await Resource.list({ where: { kind: 'host' } });
+    expect(allHosts.map(h => h.slug)).toContain('host-emby');
+
+    const untouchedOther = await Resource.get(otherSiteHostId);
+    expect(untouchedOther.metadata.discovery_sources || []).not.toContain('theta-agent');
+  });
+});
+
+describe('getAgentForResource', () => {
+  const { Resource, ResourceEdge } = require('../models/resource');
+  const { Agent } = require('../models/agent');
+  const { initORM } = require('../models');
+
+  beforeAll(async () => {
+    await initORM();
+  });
+
+  beforeEach(async () => {
+    for (const a of await Agent.list().catch(() => [])) await a.delete().catch(() => {});
+    for (const e of await ResourceEdge.list().catch(() => [])) await e.delete().catch(() => {});
+    for (const r of await Resource.list().catch(() => [])) await r.delete().catch(() => {});
+  });
+
+  test('resolves directly when resourceId IS the agent service', async () => {
+    const svc = await Resource.create({ id: crypto.randomUUID(), kind: 'service', name: 'Theta Agent', slug: 'svc-x-theta-agent', metadata: { subType: 'theta-agent' } });
+    const agentRow = await Agent.create({ id: crypto.randomUUID(), name: 'x', resourceId: svc.id, tokenHash: 't' });
+
+    const found = await agentManager.getAgentForResource(svc.id);
+    expect(found).not.toBeNull();
+    expect(found.id).toBe(agentRow.id);
+  });
+
+  test('walks UP from a plain service to its parent host\'s agent service', async () => {
+    const host = await Resource.create({ id: crypto.randomUUID(), kind: 'host', name: 'x', slug: 'host-x', metadata: {} });
+    const agentSvc = await Resource.create({ id: crypto.randomUUID(), kind: 'service', name: 'Theta Agent', slug: 'svc-x-theta-agent', metadata: { subType: 'theta-agent' } });
+    const otherSvc = await Resource.create({ id: crypto.randomUUID(), kind: 'service', name: 'nginx', slug: 'svc-x-nginx', metadata: { subType: 'systemd' } });
+    await ResourceEdge.create({ id: crypto.randomUUID(), parentId: host.id, childId: agentSvc.id, relation: 'hosts' });
+    await ResourceEdge.create({ id: crypto.randomUUID(), parentId: host.id, childId: otherSvc.id, relation: 'hosts' });
+    const agentRow = await Agent.create({ id: crypto.randomUUID(), name: 'x', resourceId: agentSvc.id, tokenHash: 't' });
+
+    const found = await agentManager.getAgentForResource(otherSvc.id);
+    expect(found).not.toBeNull();
+    expect(found.id).toBe(agentRow.id);
+  });
+
+  // The direction that was missing: this is the exact live bug from this
+  // session. driver_registry.js's resolveDriver() calls
+  // getAgentForResource(hostId) for a Proxmox-guest host with a bound,
+  // connected agent -- before this fix it always returned null here, so
+  // tier-1 ("prefer the agent") never fired and Proxmox always won.
+  test('walks DOWN from a host to its own agent-service child', async () => {
+    const host = await Resource.create({ id: crypto.randomUUID(), kind: 'host', name: 'emby', slug: 'lxc-emby-6e65df28bb21', metadata: { subType: 'lxc' } });
+    const agentSvc = await Resource.create({ id: crypto.randomUUID(), kind: 'service', name: 'Theta Agent', slug: 'svc-emby-theta-agent', metadata: { subType: 'theta-agent' } });
+    await ResourceEdge.create({ id: crypto.randomUUID(), parentId: host.id, childId: agentSvc.id, relation: 'hosts' });
+    const agentRow = await Agent.create({ id: crypto.randomUUID(), name: 'emby', resourceId: agentSvc.id, tokenHash: 't' });
+
+    const found = await agentManager.getAgentForResource(host.id);
+    expect(found).not.toBeNull();
+    expect(found.id).toBe(agentRow.id);
+  });
+
+  test('returns null for a host with no agent-service child', async () => {
+    const host = await Resource.create({ id: crypto.randomUUID(), kind: 'host', name: 'lonely', slug: 'host-lonely', metadata: {} });
+    const found = await agentManager.getAgentForResource(host.id);
+    expect(found).toBeNull();
+  });
 });

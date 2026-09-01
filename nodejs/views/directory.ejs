@@ -327,6 +327,8 @@
   </div>
 </div>
 
+<script type="text/javascript" src="/static/js/resource_status.js"></script>
+<script type="text/javascript" src="/static/js/resource_facts.js"></script>
 <script>
   app.auth.forceLogin(['app_sso_admin', 'app_sso_directory_admin', 'admin']);
 
@@ -1184,44 +1186,13 @@
         : fieldRow('Access', '<span class="text-muted">No group grants this resource.</span>', { html: true });
     }
 
-    let rollup = '';
-    if (kids.length) {
-      let healthyCount = 0, warnCount = 0, critCount = 0, unkCount = 0;
-      let rows = '';
-      kids.forEach(k => {
-        const kmd = k.metadata || {};
-        const kStatus = kmd.status || kmd.bubbled_status || (kmd.powerState === 'running' ? 'ok' : (kmd.powerState === 'stopped' ? 'warning' : 'unknown'));
-        if (kStatus === 'ok') healthyCount++;
-        else if (kStatus === 'warning') warnCount++;
-        else if (kStatus === 'critical' || kStatus === 'error') critCount++;
-        else unkCount++;
-
-        const kStyle = STATUS_STYLE[kStatus] || { color: '#6c757d', title: 'Unknown' };
-        const ktmpl = subtypeTemplates.find(t => t.slug === (kmd.subType || ''));
-        const kIcon = (ktmpl && ktmpl.icon) || (k.kind === 'host' ? 'fa-solid fa-server' : 'fa-solid fa-cube');
-        const kAddr = kmd.ip || kmd.address || (kmd.port ? ':' + kmd.port : (kmd.vmid ? 'VMID ' + kmd.vmid : '—'));
-
-        rows += '<tr>'
-          + '<td><i class="' + kIcon + ' text-primary me-2"></i><a href="#" onclick="openEditModal(\'' + k.id + '\'); return false;">' + esc(k.name) + '</a> <small class="text-muted font-monospace">(' + esc(k.slug) + ')</small></td>'
-          + '<td><span class="badge bg-light text-dark border">' + esc((ktmpl && ktmpl.name) || kmd.subType || k.kind) + '</span></td>'
-          + '<td><span class="badge" style="background:' + kStyle.color + '">' + esc(String(kStatus).toUpperCase()) + '</span></td>'
-          + '<td class="font-monospace small text-muted">' + esc(kAddr) + '</td>'
-          + '</tr>';
-      });
-
-      rollup = '<div class="row g-2 mb-3">'
-        + '<div class="col-3 text-center"><div class="badge bg-success p-2 w-100">' + healthyCount + ' Healthy</div></div>'
-        + '<div class="col-3 text-center"><div class="badge bg-warning text-dark p-2 w-100">' + warnCount + ' Warning</div></div>'
-        + '<div class="col-3 text-center"><div class="badge bg-danger p-2 w-100">' + critCount + ' Critical</div></div>'
-        + '<div class="col-3 text-center"><div class="badge bg-secondary p-2 w-100">' + unkCount + ' Unknown</div></div>'
-        + '</div>'
-        + '<div class="table-responsive">'
-        + '<table class="table table-sm table-hover align-middle mb-0">'
-        + '<thead class="table-light"><tr><th>Resource</th><th>Subtype</th><th>Status</th><th>Address / Info</th></tr></thead>'
-        + '<tbody>' + rows + '</tbody>'
-        + '</table>'
-        + '</div>';
-    }
+    // The rollup card that used to live here (a table restating the same
+    // children already listed in Placement above, with status badges) is
+    // gone -- redundant with Placement even before the mesh, and it lived on
+    // this (General) tab, structurally separate from the Status tab, which is
+    // the actual mechanism behind children's data being spread across a few
+    // places. Meshed facts and pulled-up controls for a host's children now
+    // live in exactly one place: resourceFactsMeshHtml, on the Status tab.
 
     let discovery = '';
     discovery += fieldRow('Managed', md.managed ? 'yes' : 'no');
@@ -1232,7 +1203,6 @@
 
     return sectionCard('Identity', 'fa-solid fa-id-card', identity)
       + sectionCard('Placement', 'fa-solid fa-sitemap', place)
-      + (rollup ? sectionCard('Child Workloads & Status Rollup', 'fa-solid fa-layer-group', rollup) : '')
       + sectionCard(tmpl ? tmpl.name + ' Configuration' : (md.subType ? md.subType + ' Configuration' : 'Subtype Configuration'), 'fa-solid fa-shapes', custom)
       + sectionCard('Network', 'fa-solid fa-network-wired', network)
       + sectionCard('Platform', 'fa-solid fa-microchip', platform)
@@ -3042,15 +3012,26 @@
       try {
         const res = await app.api.get(`directory-admin/resources/${id}/driver-metrics`);
         const m = (res && res.metrics) || {};
-        if (['lxc', 'proxmox-lxc', 'vm', 'kvm', 'proxmox-kvm'].includes(md.subType)) {
-          $container.html(statusHeader + proxmoxGuestStatusHtml(r, m));
+        let selfCardHtml;
+        const isProxmoxGuest = ['lxc', 'proxmox-lxc', 'vm', 'kvm', 'proxmox-kvm'].includes(md.subType);
+        if (isProxmoxGuest) {
+          selfCardHtml = proxmoxGuestStatusHtml(r, m);
         } else if (md.subType === 'ssh') {
-          $container.html(statusHeader + sshStatusHtml(r, m));
+          selfCardHtml = sshStatusHtml(r, m);
         } else if (md.subType === 'ilo') {
-          $container.html(statusHeader + iloStatusHtml(r, m));
+          selfCardHtml = iloStatusHtml(r, m);
         } else {
-          $container.html(statusHeader + serviceStatusHtml(r, m));
+          selfCardHtml = serviceStatusHtml(r, m);
         }
+        // Only hosts have children to mesh in -- a service resource under
+        // this branch (systemd unit, ssh port, etc.) is itself the leaf.
+        // This is the branch a Proxmox guest with a bound agent actually
+        // takes (its subType, e.g. lxc, is matched above regardless of
+        // kind), which never showed anything about its children before.
+        const meshHtml = r.kind === 'host'
+          ? resourceFactsMeshHtml(r, isProxmoxGuest ? ResourceFacts.factsFromProxmoxGuestSnapshot(m, r.id, r.name) : null)
+          : '';
+        $container.html(statusHeader + selfCardHtml + meshHtml);
       } catch (err) {
         $container.html(statusHeader + `
           <div class="card border shadow-sm p-3">
@@ -3085,10 +3066,11 @@
         }
       }
 
-      const rollupHtml = childrenRollupHtml(r);
+      const selfLive = agent ? ResourceFacts.factsFromAgentHostSnapshot(agent, r.id, r.name) : null;
+      const meshHtml = resourceFactsMeshHtml(r, selfLive);
 
       if (agent) {
-        $container.html(statusHeader + hostTelemetryHtml(agent) + rollupHtml);
+        $container.html(statusHeader + hostTelemetryHtml(agent) + meshHtml);
       } else {
         const noAgentMsg = `
           <div class="p-4 text-center text-muted mb-3">
@@ -3100,31 +3082,25 @@
             </div>
           </div>
         `;
-        $container.html(statusHeader + (rollupHtml ? rollupHtml : noAgentMsg));
+        $container.html(statusHeader + (meshHtml ? meshHtml : noAgentMsg));
       }
       return;
     }
 
     // C. Site resources
     if (r.kind === 'site') {
-      const childEdges = allEdges.filter(e => e.parentId === r.id);
-      const childHosts = childEdges.map(e => resourcesById[e.childId]).filter(Boolean);
-      let okCount = 0, warnCount = 0, critCount = 0, unkCount = 0;
-      childHosts.forEach(h => {
-        const s = (h.metadata && (h.metadata.status || h.metadata.bubbled_status)) || 'unknown';
-        if (s === 'ok') okCount++;
-        else if (s === 'warning') warnCount++;
-        else if (s === 'critical' || s === 'error') critCount++;
-        else unkCount++;
-      });
+      const childHosts = ResourceStatus.childrenOf(r.id, allEdges, resourcesById);
+      // Shares the same bucketing (and the same powerState fallback) as
+      // childrenRollupHtml below -- these used to disagree with each other.
+      const counts = ResourceStatus.bucketResourceStatuses(childHosts);
       $container.html(statusHeader + `
         <div class="card border shadow-sm p-3 mb-3">
           <h5 class="mb-3 fw-bold"><i class="fa-solid fa-network-wired text-primary me-2"></i>Site Health Summary</h5>
           <div class="row g-2 mb-3">
-            <div class="col-3 text-center"><div class="badge bg-success p-2 w-100 fs-6">${okCount} Healthy</div></div>
-            <div class="col-3 text-center"><div class="badge bg-warning text-dark p-2 w-100 fs-6">${warnCount} Warning</div></div>
-            <div class="col-3 text-center"><div class="badge bg-danger p-2 w-100 fs-6">${critCount} Critical</div></div>
-            <div class="col-3 text-center"><div class="badge bg-secondary p-2 w-100 fs-6">${unkCount} Unknown</div></div>
+            <div class="col-3 text-center"><div class="badge bg-success p-2 w-100 fs-6">${counts.ok} Healthy</div></div>
+            <div class="col-3 text-center"><div class="badge bg-warning text-dark p-2 w-100 fs-6">${counts.warning} Warning</div></div>
+            <div class="col-3 text-center"><div class="badge bg-danger p-2 w-100 fs-6">${counts.critical} Critical</div></div>
+            <div class="col-3 text-center"><div class="badge bg-secondary p-2 w-100 fs-6">${counts.unknown} Unknown</div></div>
           </div>
           <p class="text-muted small mb-0">Total child hosts: <strong>${childHosts.length}</strong></p>
         </div>
@@ -3142,19 +3118,14 @@
   }
 
   function childrenRollupHtml(r) {
-    const kids = allEdges.filter(e => e.parentId === r.id).map(e => resourcesById[e.childId]).filter(Boolean);
+    const kids = ResourceStatus.childrenOf(r.id, allEdges, resourcesById);
     if (!kids.length) return '';
 
-    let healthyCount = 0, warnCount = 0, critCount = 0, unkCount = 0;
+    const counts = ResourceStatus.bucketResourceStatuses(kids);
     let rows = '';
     kids.forEach(k => {
       const kmd = k.metadata || {};
-      const kStatus = kmd.status || kmd.bubbled_status || (kmd.powerState === 'running' ? 'ok' : (kmd.powerState === 'stopped' ? 'warning' : 'unknown'));
-      if (kStatus === 'ok') healthyCount++;
-      else if (kStatus === 'warning') warnCount++;
-      else if (kStatus === 'critical' || kStatus === 'error') critCount++;
-      else unkCount++;
-
+      const kStatus = ResourceStatus.bucketResourceStatus(k);
       const kStyle = STATUS_STYLE[kStatus] || { color: '#6c757d', title: 'Unknown' };
       const ktmpl = subtypeTemplates.find(t => t.slug === (kmd.subType || ''));
       const kIcon = (ktmpl && ktmpl.icon) || (k.kind === 'host' ? 'fa-solid fa-server' : 'fa-solid fa-cube');
@@ -3177,10 +3148,10 @@
           <h6 class="fw-bold mb-0 text-primary"><i class="fa-solid fa-layer-group me-1"></i>Child Resources & Services (${kids.length})</h6>
         </div>
         <div class="row g-2 mb-3">
-          <div class="col-3 text-center"><div class="badge bg-success p-2 w-100">${healthyCount} Healthy</div></div>
-          <div class="col-3 text-center"><div class="badge bg-warning text-dark p-2 w-100">${warnCount} Warning</div></div>
-          <div class="col-3 text-center"><div class="badge bg-danger p-2 w-100">${critCount} Critical</div></div>
-          <div class="col-3 text-center"><div class="badge bg-secondary p-2 w-100">${unkCount} Unknown</div></div>
+          <div class="col-3 text-center"><div class="badge bg-success p-2 w-100">${counts.ok} Healthy</div></div>
+          <div class="col-3 text-center"><div class="badge bg-warning text-dark p-2 w-100">${counts.warning} Warning</div></div>
+          <div class="col-3 text-center"><div class="badge bg-danger p-2 w-100">${counts.critical} Critical</div></div>
+          <div class="col-3 text-center"><div class="badge bg-secondary p-2 w-100">${counts.unknown} Unknown</div></div>
         </div>
         <div class="table-responsive">
           <table class="table table-sm table-hover align-middle mb-0">
@@ -3188,6 +3159,89 @@
             <tbody>${rows}</tbody>
           </table>
         </div>
+      </div>
+    `;
+  }
+
+  // Single source of actionable truth (and control) for a host and its
+  // children: gathers facts already resident client-side -- persisted
+  // metadata (resourcesById already carries every resource's full metadata)
+  // and already-loaded agent telemetry (agentsByResource, via
+  // liveServiceMetric) -- normalizes them into the canonical vocabulary
+  // (docs/resource-facts.md), and renders one badge per contributing
+  // source/resource, bordered when sources disagree, with a hover tooltip
+  // showing how fresh each value is. Pulls a controllable child's own
+  // Start/Stop/Restart/Reload buttons into this card via the existing
+  // serviceControlsHtml -- no new control-rendering code.
+  //
+  // Purely a read-time render: nothing here writes back to a resource, and
+  // it makes zero new network calls in v1 -- a child that would need its own
+  // on-demand driver-metrics fetch (ssh/ilo/proxmox-guest) is named in a
+  // "N more children have their own live data" note instead of fetched.
+  function resourceFactsMeshHtml(r, selfLive) {
+    const kids = ResourceStatus.childrenOf(r.id, allEdges, resourcesById);
+    if (!kids.length) return '';
+
+    const NEEDS_OWN_FETCH_SUBTYPES = new Set([
+      'ssh', 'ilo', 'proxmox', 'lxc', 'proxmox-lxc', 'vm', 'kvm', 'proxmox-kvm',
+      'wireguard', 'pfsense', 'unifi_ap', 'unifi_switch'
+    ]);
+
+    const children = kids.map(k => {
+      const kmd = k.metadata || {};
+      const { agent, svc } = liveServiceMetric(k);
+      const live = svc ? ResourceFacts.factsFromAgentServiceSnapshot(svc, k.id, k.name, agent && agent.lastSeen ? Date.parse(agent.lastSeen) : Date.now()) : null;
+      return {
+        resource: k,
+        svc, agent,
+        live,
+        needsOwnFetch: !live && NEEDS_OWN_FETCH_SUBTYPES.has(kmd.subType)
+      };
+    });
+
+    const { groups, skippedChildrenCount } = ResourceFacts.buildResourceFactsMesh({ resource: r, selfLive, children });
+
+    const fmtFactValue = (v) => {
+      if (v.unit === 'bytes') return v.value >= 1073741824 ? (v.value / 1073741824).toFixed(2) + ' GiB' : (v.value / 1048576).toFixed(1) + ' MiB';
+      if (v.unit === 'percent') return Number(v.value).toFixed(1) + '%';
+      if (v.unit === 'count') return String(v.value);
+      return esc(v.value);
+    };
+
+    const groupsHtml = groups.map(g => {
+      const badges = g.entries.map(e => {
+        const badgeCls = g.conflict ? 'bg-warning text-dark border border-dark' : 'bg-light text-dark border';
+        const freshness = e.observedAt ? timeAgo(new Date(e.observedAt).toISOString()) : 'just now';
+        const title = `${esc(e.resourceName)} via ${esc(e.source)} (${e.kind}) — ${esc(freshness)}`;
+        return `<span class="badge ${badgeCls} me-1 mb-1" title="${title}">${esc(e.resourceName)}: ${fmtFactValue(e)}</span>`;
+      }).join('');
+      const conflictNote = g.conflict
+        ? '<i class="fa-solid fa-triangle-exclamation text-warning ms-1" title="Sources disagree by more than 10%"></i>'
+        : '';
+      return `<div class="mb-2"><div class="text-muted small">${esc(g.label)}${conflictNote}</div><div>${badges}</div></div>`;
+    }).join('');
+
+    const controlsHtml = children
+      .filter(c => c.svc && c.resource.kind === 'service' && CONTROLLABLE_SERVICE_SUBTYPES.has(((c.resource.metadata || {}).subType || '').toLowerCase()))
+      .map(c => `
+        <div class="border-top pt-2 mt-2">
+          <div class="small fw-semibold mb-1"><a href="#" onclick="openEditModal('${c.resource.id}'); return false;">${esc(c.resource.name)}</a></div>
+          ${serviceControlsHtml(c.resource, c.svc, { status: c.agent && c.agent.isOnline ? 'online' : 'offline' })}
+        </div>`)
+      .join('');
+
+    const skippedNote = skippedChildrenCount
+      ? `<p class="text-muted small mb-0 mt-2"><i class="fa-solid fa-circle-info me-1"></i>${skippedChildrenCount} more child resource${skippedChildrenCount === 1 ? '' : 's'} report their own live data — open them directly to see it.</p>`
+      : '';
+
+    if (!groupsHtml && !controlsHtml) return '';
+
+    return `
+      <div class="card border shadow-sm p-3 mt-3">
+        <h6 class="fw-bold mb-2 text-primary"><i class="fa-solid fa-layer-group me-1"></i>Facts &amp; Controls — this resource and its children</h6>
+        ${groupsHtml}
+        ${controlsHtml}
+        ${skippedNote}
       </div>
     `;
   }
@@ -3340,8 +3394,17 @@
 
     const svc = m.service || {};
 
-    const badge = (on) =>
-      `<span class="badge ${on ? 'bg-success' : 'bg-danger'}">${on ? 'Active' : 'Inactive'}</span>`;
+    // 'unknown' (no telemetry reported at all) must render as neither
+    // Active nor Inactive -- both would be a confirmed answer this service
+    // hasn't given. It used to default to Active, which showed a green
+    // "Active" badge directly beside a "State: inactive" row for the same
+    // undefined value, live, on the Theta Agent's own Status card.
+    const activeState = ResourceStatus.serviceActiveState(svc);
+    const badge = (state) => {
+      const cls = state === 'active' ? 'bg-success' : state === 'inactive' ? 'bg-danger' : 'bg-secondary';
+      const label = state === 'active' ? 'Active' : state === 'inactive' ? 'Inactive' : 'Unknown';
+      return `<span class="badge ${cls}">${label}</span>`;
+    };
 
     const fmtBytes = (b) => {
       if (b == null) return 'N/A';
@@ -3429,11 +3492,11 @@
               <strong class="fs-6"><i class="fa-solid fa-cube me-1"></i>${esc(r.name)}</strong>
               ${driverBadge}
             </div>
-            ${badge(svc.active !== false)}
+            ${badge(activeState)}
           </div>
           <div class="row g-2">
             ${row('Sub type', esc(subType))}
-            ${row('State', esc(svc.substate || svc.status || (svc.active ? 'running' : 'inactive')))}
+            ${row('State', esc(svc.substate || svc.status || (activeState === 'active' ? 'running' : activeState === 'inactive' ? 'inactive' : 'unknown')))}
             ${row('CPU', (svc.cpu_usage_percent != null && svc.cpu_usage_percent >= 0)
               ? esc(svc.cpu_usage_percent.toFixed(1)) + '%' : 'N/A')}
             ${row('Memory', fmtBytes(svc.memory_bytes))}
@@ -3460,8 +3523,17 @@
     if (!CONTROLLABLE_SERVICE_SUBTYPES.has(subType)) return '';
 
     const offline = !m || m.status !== 'online';
-    const active = svc.active !== false;
-    const reason = offline ? 'The host agent is not connected' : '';
+    const activeState = ResourceStatus.serviceActiveState(svc);
+    const unknown = !offline && activeState === 'unknown';
+    const active = activeState === 'active';
+    // An unknown state is treated exactly like offline for every button --
+    // never offer Start OR Stop as if we knew which one was safe. This used
+    // to default an unknown svc.active to "confirmed running" (Start
+    // disabled, Stop/Reload enabled), which is the same "absence means yes"
+    // bug as the badge above, just affecting what you can click instead of
+    // what you can read.
+    const disabledAll = offline || unknown;
+    const reason = offline ? 'The host agent is not connected' : (unknown ? 'Service state unknown' : '');
 
     const btn = (label, action, cls, icon, disabled, why) =>
       `<button type="button" class="btn btn-sm ${cls} me-1 mb-1" ${disabled ? 'disabled' : ''}
@@ -3469,21 +3541,21 @@
          onclick="serviceAction('${r.id}', '${action}')"><i class="fa-solid ${icon} me-1"></i>${esc(label)}</button>`;
 
     const reloadBtn = subType === 'systemd'
-      ? btn('Reload', 'reload', 'btn-outline-secondary', 'fa-rotate', offline || !active,
-            offline ? reason : (active ? 'Re-read the unit\'s configuration' : 'Not running'))
+      ? btn('Reload', 'reload', 'btn-outline-secondary', 'fa-rotate', disabledAll || !active,
+            reason || (active ? 'Re-read the unit\'s configuration' : 'Not running'))
       : '';
 
     return `
       <hr class="my-3">
       <div class="d-flex align-items-center flex-wrap">
-        ${btn('Start', 'start', 'btn-success', 'fa-play', offline || active,
-              offline ? reason : (active ? 'Already running' : 'Start this service'))}
-        ${btn('Restart', 'restart', 'btn-warning', 'fa-arrows-rotate', offline,
-              offline ? reason : 'Stop and start this service')}
-        ${btn('Stop', 'stop', 'btn-outline-danger', 'fa-stop', offline || !active,
-              offline ? reason : (active ? 'Stop this service' : 'Already stopped'))}
+        ${btn('Start', 'start', 'btn-success', 'fa-play', disabledAll || active,
+              reason || (active ? 'Already running' : 'Start this service'))}
+        ${btn('Restart', 'restart', 'btn-warning', 'fa-arrows-rotate', disabledAll,
+              reason || 'Stop and start this service')}
+        ${btn('Stop', 'stop', 'btn-outline-danger', 'fa-stop', disabledAll || !active,
+              reason || (active ? 'Stop this service' : 'Already stopped'))}
         ${reloadBtn}
-        <span class="text-muted small ms-2">${esc(serviceTargetName(r))}${offline ? ' — agent offline' : ''}</span>
+        <span class="text-muted small ms-2">${esc(serviceTargetName(r))}${offline ? ' — agent offline' : (unknown ? ' — state unknown' : '')}</span>
       </div>`;
   }
 

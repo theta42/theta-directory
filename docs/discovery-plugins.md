@@ -120,6 +120,13 @@ loses the attribution; one an operator promoted is kept by default
 is what lets a later run reparent a guest that moved and prune only the edges
 you own. Edges made by hand carry no source and are never pruned by a plugin.
 
+**Per-source fact provenance.** Every field you report is automatically
+echoed under `metadata.facts_by_source[yourSourceName]` alongside the
+existing flat merge — you don't need to do anything for this. It's what lets
+a later UI show your value next to another source's for the same resource
+instead of one silently overwriting the other. See
+[Resource Facts](resource-facts.html).
+
 ## Rules of thumb
 
 **Fail partially, not totally.** Wrap per-item work so one bad node does not
@@ -137,6 +144,13 @@ and unchangeable without editing the file. It is a config field now.
 **Volume is a decision.** UniFi imports every DHCP client on the LAN if asked.
 That is off by default: a directory of managed infrastructure and a DHCP lease
 table are different products.
+
+**Name numeric facts from the canonical vocabulary.** `cores`, `ram_total_gb`,
+`disk_total_gb`, `macAddress`, `ip` — see
+[Resource Facts](resource-facts.html) for the full list and the GiB-not-GB
+unit trap. A field under any other name still works for your subtype's own
+schema; it just won't be findable by another source reporting the same
+concept under a different name.
 
 ## Testing
 

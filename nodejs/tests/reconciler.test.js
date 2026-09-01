@@ -71,6 +71,13 @@ describe('DiscoveryReconciler', () => {
     // Interface array should be merged/updated
     expect(merged.metadata.interfaces).toHaveLength(1);
     expect(merged.metadata.interfaces[0].ip).toBe('10.0.0.6'); // Updated IP
+
+    // Each source's own contribution survives alongside the flat merge,
+    // additively -- see utils/fact_sources.js. This does not change what the
+    // flat fields above resolve to.
+    expect(merged.metadata.facts_by_source['plugin-A'].os).toBe('Linux');
+    expect(merged.metadata.facts_by_source['plugin-B'].cpu_cores).toBe(4);
+    expect(merged.metadata.facts_by_source['plugin-B'].interfaces[0].ip).toBe('10.0.0.6');
   });
 
   it('does not duplicate access/admin groups across repeated autoPromote passes', async () => {
