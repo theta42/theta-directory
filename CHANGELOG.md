@@ -1,3 +1,8 @@
+## [2.36.20] - 2026-09-01
+
+### Fixed
+- **Meshed Facts Card No Longer Restates the Self-Card Above It**: A concept (CPU/memory/disk) with only the host's own entries — no child contributed anything comparable — is now dropped from the meshed facts card entirely, instead of restating the exact same number `proxmoxGuestStatusHtml`/`hostTelemetryHtml` already showed immediately above it. A concept where a child *does* contribute keeps the host's own entry too — that comparison (a host's live memory figure disagreeing with a child's) is the actual reason this mesh exists, not something to lose.
+
 ## [2.36.19] - 2026-09-01
 
 ### Changed
