@@ -425,32 +425,39 @@ Two of the goals at the top of this document have no implementation. They are
 recorded here as work, with the design questions that have to be answered first,
 so nobody has to rediscover the shape of them.
 
-### Active sessions
+### Active sessions — corrected: this was never actually unbuilt
 
 > "See who is currently logged in and where."
 
-Nothing in the directory reads session state today. Sketch:
+This section previously said "nothing in the directory reads session state
+today" and sketched it as unbuilt work. That was wrong when it was written:
+`theta-agent` has reported sessions on every telemetry tick since
+`telemetry.go:328` (`loginctl list-sessions` / `who` on Linux, `quser` on
+Windows, as `{ user, tty, from, since, type }`), the directory has always
+stored and rendered them (`hostTelemetryHtml`'s "Active Logged-in Users"
+card, driven by `agent.lastTelemetry.logged_users`) — it just only ever
+rendered for a plain host bound directly to an agent. A Proxmox-guest host
+(any LXC/VM) took a different branch of the Status-tab dispatcher that never
+called that renderer at all, regardless of whether the guest had an agent
+installed, so it looked exactly like a missing feature. Fixed in v2.36.17
+(`resolveHostAgent`/`loggedInSessionsCardHtml` extracted so both branches use
+them); sessions now render for any host with a bound agent, guest or not.
 
-- **theta-agent** reports sessions on its telemetry tick — `loginctl list-sessions`
-  / `who` on Linux, `quser` on Windows — as `{ user, tty, from, since, type }`.
-  It already has a telemetry channel and an interval; this is a new field, not a
-  new transport.
-- **The directory** stores them against the agent's own `theta-agent` service
-  resource (they are facts about that enrolment, and they die with it), with a
-  short retention: a session list is only interesting while it is current.
-- **The UI** shows them on the host's read-only view, and — the actually useful
-  view — a directory-wide "who is logged in anywhere" pane.
+What's still genuinely unbuilt:
 
-Open questions worth settling before writing code:
-
-- **Retention and privacy.** Live sessions are one thing; a searchable history of
-  who logged into what is a different product with different obligations. Default
-  should almost certainly be live-only, with history opt-in per site.
+- **A directory-wide "who is logged in anywhere" pane.** Only the per-host
+  view exists. Aggregating across every host is a real, separate piece of
+  work — this doc's original framing called it "the actually useful view,"
+  and that's still true.
+- **Retention and privacy.** Live sessions are one thing; a searchable
+  history of who logged into what is a different product with different
+  obligations. Nothing persists history today — this is still open, not
+  resolved by the per-host fix.
 - **Who may see them.** Session data is more sensitive than the resource it
-  belongs to. Reusing resource access means anyone with viewer on a host learns
-  who is on it. That is probably wrong, and probably wants its own capability.
-- **Windows and containers.** `loginctl` covers systemd hosts. Windows needs a
-  different call, and a container has no sessions at all.
+  belongs to, and today it's gated by ordinary resource access — same
+  question as before, still unanswered.
+- **Windows and containers.** `loginctl` covers systemd hosts. Windows needs
+  a different call, and a container has no sessions at all — unchanged.
 
 ### Agent-pulled configuration
 
@@ -479,16 +486,18 @@ Open questions:
 ## Remaining gaps / risks
 
 - The two items above, which are features rather than defects.
-- **No fleet-level summary.** The tree tells the truth per row, but nothing says
-  "3 critical, 12 unknown" before you start scanning. On an estate of any size
-  that is the first thing you want.
 - **The Access column is repetitive.** Because everything inherits from its
   site, nearly every row reads "2 groups · N inherited". It is accurate and it
-  is noise; it probably wants collapsing to the exceptions.
-- **The modal is titled "Edit Resource" even in View mode**, which contradicts
-  the pane it is showing.
-- Discovery classification is inference. `nmap` and `unifi` label what they find
-  from OS banners, port shape and device model; they are right often and not
-  always. `metadata.subTypeSource` marks a guess so an operator can tell it from
-  a decision, but nothing yet surfaces "these N resources were classified by a
-  scan and nobody has confirmed them".
+  is noise; it probably wants collapsing to the exceptions. Still open.
+
+Closed since the list above was written:
+
+- ~~No fleet-level summary~~ — `renderFleetSummary()` (v2.36.17) shows a
+  healthy/warning/critical/unknown host count above the tree, always visible,
+  not just per-site.
+- ~~The modal is titled "Edit Resource" even in View mode~~ — fixed; the
+  title now tracks View vs. Edit.
+- ~~Nothing surfaces "these N resources were classified by a scan and nobody
+  has confirmed them"~~ — `metadata.subTypeSource` (v2.36.17) now renders a
+  "Guessed" badge both in the tree row and on the resource's own Identity
+  card, wherever `nmap`/`unifi` inferred rather than an operator decided.
