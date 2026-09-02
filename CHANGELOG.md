@@ -1,3 +1,8 @@
+## [2.36.25] - 2026-09-02
+
+### Fixed
+- **Agent Site Hint Now Handles Hyphen/Underscore Mismatch**: The directory's site `Resource` slug is `site_718it` (underscore, `bootstrap/bootstrap.js`) while the site identity (`SITE_SLUG` / `site_config.siteSlug` / mDNS TXT `site`) is `site-718it` (hyphen, `setup.sh`). `utils/agent_site.js:resolveSiteHint` only matched exact `site_718it` / `site-${wanted}` forms, so an agent presenting `site-718it` (fresh join via mDNS or `location: site-718it`) was rejected with `4001 Site not found: site-718it` and never enrolled — the exact failure reported on `william-HP-ENVY` and `theta-suite-718it` (master). Normalized `-`↔`_` and `site_` prefix before comparison so `site-718it`, `site_718it`, and bare `718it` all resolve.
+
 ## [2.36.24] - 2026-09-01
 
 ### Fixed
