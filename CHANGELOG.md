@@ -1,3 +1,8 @@
+## [2.36.23] - 2026-09-01
+
+### Changed
+- **PR Test Matrix Trimmed to Node 20.x**: Deployment is scripted and always builds `node:20-alpine` (`Dockerfile.openldap`) — no other Node version is ever what actually runs in production. Dropping 18.x/22.x from `pr-tests.yml`'s matrix removes exposure that bought nothing but tripled the chance of hitting an environment-timing flake (`tests/network_driver_ssh.test.js`'s live-port-timing test) on any given PR. Parked earlier this session on a missing `workflow` OAuth scope; applied now that the scope is available.
+
 ## [2.36.22] - 2026-09-01
 
 ### Changed
