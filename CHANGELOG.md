@@ -1,3 +1,8 @@
+## [2.36.24] - 2026-09-01
+
+### Fixed
+- **v2.36.23's Premise Was Wrong — 22.x Restored to the PR Test Matrix**: v2.36.23 claimed "deployment is scripted and always builds node:20-alpine — no other Node version is ever what actually runs in production" and dropped 18.x/22.x on that basis. That was false: `install.sh`'s bare-metal path (`DEPLOYMENT.md` "Method 2") hardcodes `NODE_MAJOR=22` and installs it via NodeSource — a second, real, currently-documented production deployment target, distinct from the Docker path's `node:20-alpine`. Only 18.x actually has no deployment path. Matrix is now `[20.x, 22.x]`. Caught by grepping `DEPLOYMENT.md`/`install.sh` after being asked directly whether v2.36.23 was itself free of gaps — it was not.
+
 ## [2.36.23] - 2026-09-01
 
 ### Changed
