@@ -18,6 +18,16 @@
 // Exact match only. Fuzzy site matching is how resources ended up in the wrong
 // site to begin with, so an unrecognised hint is an error the caller reports,
 // never something to guess past.
+//
+// Normalization: the directory's Resource slug is `site_<name>` (underscore,
+// see bootstrap/bootstrap.js) while the site identity (`SITE_SLUG` /
+// `site_config.siteSlug` / mDNS TXT `site`) is `site-<name>` (hyphen, see
+// setup.sh). An agent therefore naturally presents `site-718it` while the row
+// is stored as `site_718it`. Treat `-` and `_` interchangeably after the
+// `site` prefix so either form resolves.
+function normalizeSiteKey(v) {
+  return String(v || '').trim().toLowerCase().replace(/-/g, '_');
+}
 async function resolveSiteHint(hint) {
   const wanted = String(hint || '').trim();
   if (!wanted || wanted.toLowerCase() === 'default' || wanted.toLowerCase() === 'unknown' || wanted.toLowerCase() === 'none') {
@@ -26,13 +36,18 @@ async function resolveSiteHint(hint) {
 
   const { Resource } = require('../models/resource');
   const sites = await Resource.list({ where: { kind: 'site' } }).catch(() => []);
-  return sites.find(s =>
-    s.id === wanted ||
-    s.slug === wanted ||
-    s.slug === `site_${wanted}` ||
-    s.slug === `site-${wanted}` ||
-    s.name === wanted
-  ) || null;
+  const wNorm = normalizeSiteKey(wanted);
+  const wBare = wNorm.replace(/^site_/, '');
+  return sites.find(s => {
+    const sIdNorm = normalizeSiteKey(s.id);
+    const sSlugNorm = normalizeSiteKey(s.slug);
+    const sNameNorm = normalizeSiteKey(s.name);
+    return s.id === wanted || sIdNorm === wNorm ||
+      s.slug === wanted || sSlugNorm === wNorm ||
+      sSlugNorm === `site_${wBare}` ||
+      sNameNorm === wNorm || sNameNorm === wBare ||
+      s.name === wanted;
+  }) || null;
 }
 
 // The site this directory itself is. Set on exactly one row (see
