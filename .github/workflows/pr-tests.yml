@@ -16,11 +16,13 @@ jobs:
 
     strategy:
       matrix:
-        # Deployment is scripted and always builds node:20-alpine
-        # (Dockerfile.openldap) -- no other Node version is ever what
-        # actually runs in production, so testing 18.x/22.x here bought
-        # nothing but tripled exposure to any environment-timing flake.
-        node-version: [20.x]
+        # Both scripted deployment paths are real production targets:
+        # Docker (Dockerfile.openldap) runs node:20-alpine, install.sh's
+        # bare-metal path installs NODE_MAJOR=22 via NodeSource. 18.x has
+        # no deployment path at all -- dropped for that reason alone, not
+        # because "only one version matters" (a prior version of this
+        # comment claimed that; it was wrong -- see CHANGELOG v2.36.24).
+        node-version: [20.x, 22.x]
 
     # A dedicated, GHA-managed Redis -- NOT the bundled image's own Redis,
     # which only binds to loopback *inside* its container (redis-server's
