@@ -33,6 +33,12 @@ router.post('/', async function(req, res, next) {
 		if (typeof req.body.allowed_groups === 'string') {
 			req.body.allowed_groups = req.body.allowed_groups.split('\n').map(s => s.trim()).filter(Boolean);
 		}
+		// Booleans arrive as strings from a form post; the model normalises them,
+		// but only if they are passed through rather than dropped here.
+		if (req.body.is_public !== undefined) {
+			req.body.is_public = req.body.is_public === true || req.body.is_public === 'true' || req.body.is_public === 'on';
+		}
+
 		// jQuery serializeObject sends nested fields as "token_lifetime[access_token]"
 		if (req.body['token_lifetime[access_token]'] || req.body['token_lifetime[refresh_token]']) {
 			req.body.token_lifetime = {
@@ -81,6 +87,13 @@ router.put('/:client_id', async function(req, res, next) {
 		}
 		if (typeof req.body.allowed_groups === 'string') {
 			req.body.allowed_groups = req.body.allowed_groups.split('\n').map(s => s.trim()).filter(Boolean);
+		}
+		// `is_valid: false` disables a client without deleting it -- refused at
+		// both the authorize and the token endpoint, registration intact.
+		for (const flag of ['is_valid', 'is_public']) {
+			if (req.body[flag] !== undefined) {
+				req.body[flag] = req.body[flag] === true || req.body[flag] === 'true' || req.body[flag] === 'on';
+			}
 		}
 
 		return res.json({

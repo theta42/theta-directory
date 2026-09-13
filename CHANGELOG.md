@@ -1,3 +1,28 @@
+## [2.38.0] - 2026-09-13
+
+A review of the OIDC surface, prompted by the setup experience being harder than
+the provider underneath it warranted. It turned up a set of UI gaps and, beneath
+them, three defects that made the management controls dishonest.
+
+### Fixed
+- **Every OAuth Client Edit Was Silently Discarded**: the `OAuthClient.update()` wrapper mutated `r.metadata` in place and then handed the *same object reference* back to the ORM, which compares what it is given against what the row already holds — saw no difference, and dropped the write. Changing redirect URIs, scopes, allowed groups or token lifetimes returned 200 and changed nothing. Two consequences were worse than the rest:
+  - **Disabling a client did nothing.** `is_valid: false` never reached storage, so a client an operator believed they had turned off kept authenticating.
+  - **Rotating a client secret left the old secret working and the new one dead.** The new value was displayed, saved by the operator, and rejected on use, while the leaked one it was supposed to retire carried on. During the incident the button exists for, it was actively misleading.
+- **"OIDC Client" Produced a Client That Could Never Work**: the subtype vocabulary offers `oauth` ("OAuth Client") and `oidc-client` ("OIDC Client") — the latter being the name an operator setting up a relying party reaches for first — and the console showed both the credentials panel. But only `subType === 'oauth'` minted a client_id and secret. Picking "OIDC Client" saved redirect URIs, scopes and TTLs, offered a Rotate Secret button for a secret that did not exist, and produced `Unknown client_id` at the token endpoint. Both subtypes are now real clients. `saml-sp` is not (SAML is unimplemented here) and no longer claims to be.
+- **The Overview "OAuth" Tile Always Read 0**: it counted `r.kind === 'oauth'`, a kind that stopped existing when clients became services. Those clients were silently counted as plain services instead; both tiles are now correct.
+
+### Added
+- **Connection Details In The Console**: the client_id — the other half of the credential pair — was displayed *nowhere*, and neither were the issuer or any endpoint. Setting up a new service meant digging the id out of a URL and knowing the endpoints by heart. The client's edit screen now shows the client ID, the discovery URL, and every endpoint, each copyable; the creation dialog hands over the client ID alongside the secret. The panel reads the provider's own discovery document rather than assembling URLs a second time.
+- **RS256 ID Tokens And A JWKS** (`GET /.well-known/jwks.json`): ID tokens were signed HS256 with one global `jwtSecret` shared by every client, so there was no public half to publish and **every client validated with a key it could also sign with** — any one of them could mint a token for another. (The spec's HS256 mode uses the client's own secret as the MAC key; that is unavailable here because secrets are stored bcrypt-hashed.) The key is generated on first use, stored in OpenBao, replicated across sites like the agent signing key, and its `kid` is an RFC 7638 thumbprint. HS256 remains as a logged fallback when the key cannot be loaded, because refusing to sign would fail every login on the deployment.
+- **Public Clients**: an SPA, mobile or CLI app can now be registered as a public client — no secret, PKCE required (refused at code issue, not just at redemption, so the error lands where the mistake is). Sending a secret for one is rejected rather than ignored. Advertised as `none` in `token_endpoint_auth_methods_supported`.
+- **Token Revocation**: `POST /oauth/revoke` ([RFC 7009](https://www.rfc-editor.org/rfc/rfc7009)) for a client revoking its own token, and a **Revoke All Tokens** action for an operator ending every session for an application at once. Rotating a secret stops a client getting *new* tokens but leaves issued ones alive for up to the refresh lifetime — 30 days by default — so there was previously no lever that actually ended a session.
+- **Enable/disable and public-client switches** on the client edit screen, backing the model flags that already existed and were unreachable.
+- **`tests/oidc_provider.test.js`**: discovery, JWKS, a full relying-party validation (discovery → JWKS → verify, no shared secret anywhere), public clients, revocation, subtype handling, and regression tests for all three persistence bugs above — each checked against the pre-fix code to confirm it actually catches them.
+
+### Changed
+- **Docs**: `docs/oauth.md` gains token signing and the JWKS, public clients, revocation, disabling, and the client subtypes; `docs/concepts-oauth-apps.md` gains where to find the connection details, apps that cannot keep a secret, and how to turn an app off; `API.md` documents the JWKS and revocation endpoints, the public-client auth method, and the revoke/disable admin operations.
+- A `{ virtual: true }` flag on the `@simpleworkjs/bao-conf` mock in three test files let that mock leak into other files sharing a jest worker (`plugins.test.js` received another suite's `request` stub). The module is real; the flag is gone.
+
 ## [2.37.2] - 2026-09-13
 
 ### Security

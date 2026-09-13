@@ -40,6 +40,20 @@ behalf.
 impersonate that app when talking to your SSO Manager. If you ever suspect
 it's leaked, rotate it from the client's card.
 
+Everything you need to paste into the other app — the Client ID, the
+discovery URL, and each individual endpoint for apps that can't use
+discovery — is shown under **Connection details** on the client's edit
+screen. The secret is the one exception: it's shown once when the client is
+created or rotated and is never recoverable afterwards, so save it then.
+
+### Apps that can't keep a secret
+
+A single-page web app, a mobile app or a command-line tool has nowhere safe
+to store a Client Secret — anyone can read it out of the download. Tick
+**Public client** for those, and the app proves itself a different way
+(PKCE) instead of with a secret. If you're not sure, leave it off: an app
+running on a server you control should keep its secret.
+
 ## What are "scopes"?
 
 **Scopes** control what information a connected app is allowed to ask for
@@ -68,6 +82,23 @@ as given. If the app is reachable via more than one hostname (for example,
 because it sits behind [theta42/proxy](https://theta42.github.io/proxy/)),
 this field supports wildcard patterns — see the inline help under the
 field itself for the exact syntax.
+
+## Turning an app off
+
+If you need to cut an app off — it's been compromised, or you're
+decommissioning it — you have two switches on the client's edit screen, and
+they do different things:
+
+* **Enabled** (turn off) stops anyone logging into that app from now on.
+  The registration and all its settings survive, so turning it back on
+  restores service. People *already* signed in stay signed in until their
+  session expires.
+* **Revoke All Tokens** signs out everyone who is currently using it,
+  immediately.
+
+For a suspected leak you generally want both, plus a secret rotation.
+Rotating on its own only stops the app getting *new* sessions; it does not
+end the ones already running.
 
 ## Want more detail?
 

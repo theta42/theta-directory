@@ -19,7 +19,7 @@ const middleware = require('./middleware/auth');
 const socketPubsub = require('./utils/socket_pubsub');
 
 // OAuth routes
-const { router: oauthRouter, authRouter: oauthApiRouter, discovery } = require('./routes/oauth');
+const { router: oauthRouter, authRouter: oauthApiRouter, discovery, jwksDocument } = require('./routes/oauth');
 
 // Grab the projects PubSub
 app.contoller = require('./controller');
@@ -159,6 +159,10 @@ app.use('/oauth', oauthRouter);
 app.use('/api/oauth', middleware.auth, oauthApiRouter);
 app.use('/api/oauth/client', middleware.auth, require('./routes/oauth_client'));
 app.get('/.well-known/openid-configuration', discovery);
+// The JWKS a relying party validates RS256 ID tokens against. Unauthenticated
+// by design -- it is public key material, and a client has to be able to fetch
+// it before it has any credentials at all.
+app.get('/.well-known/jwks.json', jwksDocument);
 app.use('/api/webhook', require('./routes/webhook'));
 // Plugin instances — loadable/unloadable, configurable plugin copies with
 // per-instance secrets in OpenBao (secret/plugins/*). Admin-only (gated inside

@@ -118,12 +118,17 @@
         oauth:   'fa-solid fa-key'  // legacy kind fallback; oauth is a service subtype
     };
 
-    // Kept in step with OAUTH_SUBTYPES in views/directory.ejs. An OAuth client
-    // is a credential registration, not somewhere a person browses to, so it is
-    // filtered out of the catalog rather than offered as a service card.
-    var OAUTH_SUBTYPES = ['oauth', 'oidc-client', 'saml-sp'];
+    // A credential registration is not somewhere a person browses to, so these
+    // are filtered out of the catalog rather than offered as a service card.
+    //
+    // Deliberately NOT the same list as models/oauth_client.js's
+    // OAUTH_SUBTYPES, which answers a different question: that one is "gets
+    // OAuth client credentials minted", and `saml-sp` is not that (SAML is a
+    // different protocol, unimplemented here). It is still a credential
+    // registration, so it still does not belong on the catalog page.
+    var IDENTITY_REGISTRATION_SUBTYPES = ['oauth', 'oidc-client', 'saml-sp'];
     function isOAuthSubtype(subType) {
-        return OAUTH_SUBTYPES.indexOf(String(subType || '').toLowerCase()) !== -1;
+        return IDENTITY_REGISTRATION_SUBTYPES.indexOf(String(subType || '').toLowerCase()) !== -1;
     }
 
     function esc(s) {
