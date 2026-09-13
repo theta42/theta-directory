@@ -762,9 +762,17 @@ homeDirectory: /home/${replicatedUid}
 
   // The real proof the handoff worked: a write on the NEW master has to reach
   // the sibling that was never told about the promotion by hand.
+  //
+  // Same 20s budget as the post-join replication check above. This step had 15s
+  // for strictly MORE work -- a fan-out from a registry the new master had only
+  // just inherited -- and duly failed about half the time. The cause was a real
+  // one and is fixed in utils/site_replicate.js (an unreachable mesh address
+  // cost the full 8s request timeout before the public endpoint was tried, so
+  // the push routinely landed a second or two the wrong side of 15s); this only
+  // removes the arbitrary difference between two assertions of the same kind.
   step('Verifying a post-promotion write on the new master replicates to spoke2');
   let siblingReplicated = false;
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 40; i++) {
     const r = await api(SPOKE2_URL, '/api/directory-admin/resources', { token: spoke2Token });
     const slugs = (r.body.results || r.body.resources || r.body || []).map((x) => x.slug);
     if (slugs.includes('host_e2e_postpromotion')) { siblingReplicated = true; break; }

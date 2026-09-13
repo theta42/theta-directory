@@ -26,6 +26,16 @@ function spokeWithUpdate(spoke) {
 
 let mockFetchCalls = [];
 let mockFetchImpl = async () => ({ ok: true, status: 200 });
+// Whether the mesh address answers a connect. Real by default would mean every
+// test in this file spends the probe timeout on an address that does not exist,
+// so it is controlled here -- and `probeCalls` lets a test assert that the
+// probe is what kept a dead mesh address from costing a request timeout.
+let probeCalls = [];
+let meshIsReachable = true;
+const trackedProbe = (host, port, timeoutMs) => {
+  probeCalls.push([host, port, timeoutMs]);
+  return Promise.resolve(meshIsReachable);
+};
 // Shared so a test that re-requires the module (to pick up a different
 // JUMP_INTERNAL_URL) can reinstall the same recorder.
 const trackedFetch = (...args) => { mockFetchCalls.push(args); return mockFetchImpl(...args); };
@@ -38,8 +48,11 @@ describe('site_replicate', () => {
   beforeEach(() => {
     jest.resetModules();
     mockFetchCalls = [];
+    probeCalls = [];
+    meshIsReachable = true;
     mockFetchImpl = async () => ({ ok: true, status: 200 });
 
+    jest.doMock('../utils/tcp_probe', () => ({ tcpReachable: trackedProbe }));
     jest.doMock('../models/site_spoke', () => ({ SiteSpoke: makeSpokeMock() }));
     siteReplicate = require('../utils/site_replicate');
     SiteSpoke = require('../models/site_spoke').SiteSpoke;
@@ -83,6 +96,7 @@ describe('site_replicate', () => {
   // tunnel by default -- no meshIp field required.
   test('prefers the peer directory over the mesh for any spoke with a ServerID', async () => {
     jest.resetModules();
+    jest.doMock('../utils/tcp_probe', () => ({ tcpReachable: trackedProbe }));
     jest.doMock('../models/site_spoke', () => ({ SiteSpoke: makeSpokeMock() }));
     siteReplicate = require('../utils/site_replicate');
     SiteSpoke = require('../models/site_spoke').SiteSpoke;
@@ -99,8 +113,38 @@ describe('site_replicate', () => {
     expect(mockFetchCalls[0][0]).toBe('http://10.5.0.2:3001/api/site/resync');
   });
 
+  // THE regression. The mesh URL is tried first and the request timeout has to
+  // be generous (the far end does a full export+import before answering), so an
+  // address with no route cost the FULL timeout -- 8 seconds, on every write,
+  // for every spoke -- before the public endpoint was even attempted. It is why
+  // the multi-site E2E's post-promotion replication assertion (15s budget)
+  // failed about half the time, and why "Sync now" hung for 8s per spoke at any
+  // site whose tunnel had dropped.
+  test('does not spend the request timeout on a mesh address nothing is listening on', async () => {
+    jest.resetModules();
+    jest.doMock('../utils/tcp_probe', () => ({ tcpReachable: trackedProbe }));
+    jest.doMock('../models/site_spoke', () => ({ SiteSpoke: makeSpokeMock() }));
+    siteReplicate = require('../utils/site_replicate');
+    SiteSpoke = require('../models/site_spoke').SiteSpoke;
+    global.fetch = trackedFetch;
+
+    meshIsReachable = false;
+    SiteSpoke._seed([
+      spokeWithUpdate({ endpoint: 'https://spoke-a.example.com', pushToken: 'token-a', ldapServerId: 5 })
+    ]);
+
+    await siteReplicate.replicateToSpokes('catalog-changed');
+    await new Promise((r) => setImmediate(r));
+
+    // Probed once, with a timeout far shorter than the request's.
+    expect(probeCalls).toEqual([['10.5.0.2', 3001, 1000]]);
+    // And never dialled: the request that would have timed out was not made.
+    expect(mockFetchCalls.map((c) => c[0])).toEqual(['https://spoke-a.example.com/api/site/resync']);
+  });
+
   test('falls back to the public endpoint if the mesh attempt fails', async () => {
     jest.resetModules();
+    jest.doMock('../utils/tcp_probe', () => ({ tcpReachable: trackedProbe }));
     jest.doMock('../models/site_spoke', () => ({ SiteSpoke: makeSpokeMock() }));
     siteReplicate = require('../utils/site_replicate');
     SiteSpoke = require('../models/site_spoke').SiteSpoke;

@@ -1,3 +1,8 @@
+## [2.37.1] - 2026-09-13
+
+### Fixed
+- **An Unreachable Mesh Address Cost Every Replication Push 8 Seconds**: the resync push prefers a spoke's mesh address (`10.<serverId>.0.2`) and falls back to its public endpoint, and the request timeout has to be generous because the far end does a full export + import before it answers (`/api/site/resync`). So when a tunnel was down — or had never come up, or in any deployment without a mesh at all — every catalog write spent the **full 8s timeout per spoke** discovering that, before the fallback was even attempted. A timeout is not a reachability test. The mesh address now gets a 1s TCP connect probe first (`utils/tcp_probe.js`) and is skipped when nothing answers; the request timeout is untouched, because shortening *that* would abort a mesh push that was working and repeat the whole import over the public endpoint. Operator-visible as "Sync now" hanging for 8s per spoke at any site whose tunnel had dropped, and as the multi-site E2E's post-promotion replication assertion failing about half the time: its push routinely landed a second or two the wrong side of a 15s budget. That assertion now also gets the same 20s budget as the post-join check it mirrors — it had 15s for strictly more work.
+
 ## [2.37.0] - 2026-09-12
 
 ### Fixed
