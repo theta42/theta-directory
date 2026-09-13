@@ -110,7 +110,13 @@ class NetworkDriver extends BaseDriver {
           host: host || 'Unspecified',
           reachable: probe ? probe.reachable : (agentMetrics ? agentMetrics.active : false),
           banner: (probe && probe.banner) || (isOnline ? 'OpenSSH (Active)' : null),
-          responseTimeMs: (probe && probe.responseTimeMs) || null,
+          // `??`, not `||`: a probe that answered in under a millisecond
+          // reports 0, and `0 || null` is null -- so the fastest possible
+          // result was indistinguishable from no result at all. Any SSH
+          // service on loopback or a fast LAN reported "no response time"
+          // instead of "0 ms", and the test asserting `>= 0` failed whenever
+          // CI happened to be quick enough.
+          responseTimeMs: probe ? (probe.responseTimeMs ?? null) : null,
           agentService: agentMetrics || null
         }
       };

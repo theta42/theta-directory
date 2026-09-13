@@ -94,6 +94,34 @@ describe('NetworkDriver SSH Monitoring', () => {
     expect(metrics.ssh.reachable).toBe(false);
   });
 
+  // The live test above is a coin flip on a fast machine: the probe answers in
+  // under a millisecond, `responseTimeMs` is 0, and `0 || null` -- which is what
+  // the driver used to do -- turned the fastest possible result into "no
+  // result". This pins the mapping without depending on how quick the loopback
+  // happens to be, which is the only way to hold the line on it.
+  test('a zero response time is reported as 0, not as null', async () => {
+    const res = await Resource.create({
+      kind: 'service',
+      name: 'Instant SSH Service',
+      metadata: { subType: 'ssh', ip: '127.0.0.1', port: mockPort }
+    });
+
+    const probeSpy = jest.spyOn(driver, 'probeSsh').mockResolvedValue({
+      reachable: true,
+      banner: 'SSH-2.0-OpenSSH_8.9p1',
+      port: mockPort,
+      responseTimeMs: 0
+    });
+
+    try {
+      const metrics = await driver.getMetrics(res);
+      expect(metrics.ssh.responseTimeMs).toBe(0);
+      expect(metrics.ssh.reachable).toBe(true);
+    } finally {
+      probeSpy.mockRestore();
+    }
+  });
+
   test('execAction probe returns probe result', async () => {
     const res = await Resource.create({
       kind: 'service',
