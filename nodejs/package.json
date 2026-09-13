@@ -58,7 +58,7 @@
     "mustache": "^4.2.0",
     "node-fetch": "^2.7.0",
     "node-nmap": "^4.0.0",
-    "nodemailer": "^9.0.0",
+    "nodemailer": "^9.1.1",
     "p2psub": "^0.2.0",
     "socket.io": "^4.8.3",
     "ws": "^8.21.1",
