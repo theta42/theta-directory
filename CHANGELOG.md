@@ -1,3 +1,11 @@
+## [2.37.2] - 2026-09-13
+
+### Security
+- **Dependency advisories cleared** (1 high, 5 moderate; every open Dependabot alert on this repo is now closed): `nodemailer` 9.0.3 → 9.1.1, `qs` 6.15.3 → 6.16.0, and the `js-yaml` dev dependency 3.15.1 → 3.15.2. All three were within-major and none required a code change. `nodemailer`'s PR had been sitting red since it was opened — not for anything to do with nodemailer, but because of the flaky agent WS handler test fixed in v2.37.1, which had been failing CI on other people's pull requests.
+
+### Fixed
+- **A Test Bound A Hardcoded Port**: `network_driver_ssh.test.js` stood up its mock SSH server on a fixed `22222` and asserted against a "closed" port of `22223` it had never verified was closed. Jest runs suites in parallel workers and CI runs whole suites concurrently, so that is a standing `EADDRINUSE` waiting to happen — and it duly failed a dependency PR's test run, and a local full-suite run, while this release was being prepared. The mock now binds `:0` and reads the port back; the closed port is one that is bound and then released, so it is known-closed rather than assumed-closed.
+
 ## [2.37.1] - 2026-09-13
 
 ### Fixed

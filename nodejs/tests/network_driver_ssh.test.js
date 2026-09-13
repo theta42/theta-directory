@@ -8,7 +8,17 @@ const { Resource } = require('../models/resource');
 describe('NetworkDriver SSH Monitoring', () => {
   let driver;
   let mockSshServer;
-  const mockPort = 22222;
+  // Ephemeral, not a fixed 22222. Jest runs suites in parallel workers and CI
+  // runs whole suites concurrently, so a hardcoded port is a standing
+  // EADDRINUSE waiting to happen -- and it did, intermittently failing CI on
+  // unrelated pull requests. `listen(0)` lets the OS pick a port nothing else
+  // holds, and the tests read it back rather than assuming it.
+  let mockPort;
+  // A port to be REFUSED on. Bound then released, so it is known-closed rather
+  // than merely hoped-to-be-closed: an arbitrary "closed" port number can just
+  // as easily be in use by something else, which would turn this into the
+  // opposite test without saying so.
+  let closedPort;
 
   beforeAll(async () => {
     await initORM();
@@ -18,7 +28,18 @@ describe('NetworkDriver SSH Monitoring', () => {
       mockSshServer = net.createServer((socket) => {
         socket.write('SSH-2.0-OpenSSH_8.9p1 Ubuntu-3ubuntu0.6\r\n');
       });
-      mockSshServer.listen(mockPort, '127.0.0.1', resolve);
+      mockSshServer.listen(0, '127.0.0.1', () => {
+        mockPort = mockSshServer.address().port;
+        resolve();
+      });
+    });
+
+    await new Promise((resolve) => {
+      const throwaway = net.createServer();
+      throwaway.listen(0, '127.0.0.1', () => {
+        closedPort = throwaway.address().port;
+        throwaway.close(resolve);
+      });
     });
   });
 
@@ -64,7 +85,7 @@ describe('NetworkDriver SSH Monitoring', () => {
       metadata: {
         subType: 'ssh',
         ip: '127.0.0.1',
-        port: 22223 // Closed port
+        port: closedPort
       }
     });
 
@@ -87,6 +108,6 @@ describe('NetworkDriver SSH Monitoring', () => {
     const actionRes = await driver.execAction(res, 'probe');
     expect(actionRes.status).toBe('ok');
     expect(actionRes.probe.reachable).toBe(true);
-    expect(actionRes.message).toContain('SSH listening on 127.0.0.1:22222');
+    expect(actionRes.message).toContain(`SSH listening on 127.0.0.1:${mockPort}`);
   });
 });
