@@ -471,6 +471,39 @@
     <div id="oauth-details-container" style="display: none;">
       <hr>
       <h5>OAuth Configuration</h5>
+
+      <!-- Everything needed to configure the far end, in one copyable place.
+           The client_id was previously never displayed anywhere at all: the
+           creation modal showed the secret alone, so half the credential pair
+           had to be dug out of a URL or the API. -->
+      <div class="card bg-body-tertiary border-0 mb-3" id="oauth-integration-card" style="display:none;">
+        <div class="card-body py-3">
+          <h6 class="mb-2"><i class="fa-solid fa-plug"></i> Connection details</h6>
+          <div class="mb-2">
+            <label class="form-label small text-muted mb-1">Client ID</label>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" id="oauth-client-id" readonly>
+              <button class="btn btn-outline-secondary" type="button" onclick="copyOauthField('oauth-client-id', this)" title="Copy">
+                <i class="fa-solid fa-copy"></i>
+              </button>
+            </div>
+          </div>
+          <div class="mb-2">
+            <label class="form-label small text-muted mb-1">Discovery URL <small>(most clients need only this)</small></label>
+            <div class="input-group input-group-sm">
+              <input type="text" class="form-control font-monospace" id="oauth-discovery-url" readonly>
+              <button class="btn btn-outline-secondary" type="button" onclick="copyOauthField('oauth-discovery-url', this)" title="Copy">
+                <i class="fa-solid fa-copy"></i>
+              </button>
+            </div>
+          </div>
+          <div class="small text-muted" id="oauth-endpoint-list"></div>
+          <div class="small mt-2" id="oauth-secret-note">
+            The client secret is shown once, when it is created or rotated. Rotate it below if it has been lost.
+          </div>
+        </div>
+      </div>
+
       <div class="mb-3">
         <label class="form-label">Redirect URIs <small class="text-muted">(one per line)</small></label>
         <textarea id="res-redirect-uris" class="form-control shadow-sm font-monospace" rows="3"></textarea>
@@ -496,11 +529,29 @@
           <input type="number" id="res-refresh-ttl" class="form-control shadow-sm" value="2592000" min="3600">
         </div>
       </div>
+      <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" id="res-oauth-public">
+        <label class="form-check-label" for="res-oauth-public">
+          Public client <small class="text-muted">(SPA, mobile or CLI — holds no secret, must use PKCE)</small>
+        </label>
+      </div>
+      <div class="form-check form-switch mb-3">
+        <input class="form-check-input" type="checkbox" id="res-oauth-enabled" checked>
+        <label class="form-check-label" for="res-oauth-enabled">
+          Enabled <small class="text-muted">(turn off to block all logins and token issuance without deleting the client)</small>
+        </label>
+      </div>
       <div class="mb-3" id="oauth-rotate-container" style="display: none;">
         <button class="btn btn-outline-warning" onclick="rotateSecret()">
           <i class="fa-solid fa-arrows-rotate"></i> Rotate Client Secret
         </button>
-        <small class="d-block text-muted mt-1">Rotating the secret will break any currently running clients until they are updated.</small>
+        <button class="btn btn-outline-danger ms-2" onclick="revokeClientTokens()">
+          <i class="fa-solid fa-ban"></i> Revoke All Tokens
+        </button>
+        <small class="d-block text-muted mt-1">
+          Rotating the secret stops the client obtaining <em>new</em> tokens; the ones already issued keep working until they
+          expire. Revoking ends every active session for this application immediately.
+        </small>
       </div>
     </div>
   `;
@@ -2040,6 +2091,7 @@
       $('#external-container').hide();
       $('#public-container').hide();
       $('#site-details-container').show();
+      $('#oauth-integration-card').hide();
     }
     populateHostDropdown($('#res-host-id').val());
     refreshSubtypeOptions();
@@ -2073,10 +2125,16 @@
   });
 
   // OAuth clients are services carrying one of these subtypes -- `kind: 'oauth'`
-  // no longer exists (models/oauth_client.js). Kept as a list rather than a
-  // single string because a SAML SP and an OIDC RP want the same client
-  // credentials panel.
-  var OAUTH_SUBTYPES = ['oauth', 'oidc-client', 'saml-sp'];
+  // no longer exists (models/oauth_client.js).
+  //
+  // MUST match OAUTH_SUBTYPES in models/oauth_client.js: this list decides who
+  // is shown the client-credentials panel, and that one decides who actually
+  // gets credentials minted. They disagreed, so an "OIDC Client" was offered
+  // redirect URIs, scopes and a Rotate Secret button for a client that was
+  // never issued any credentials at all. `saml-sp` was in this list for the
+  // same reason and is not an OAuth client either -- SAML is a different
+  // protocol, with no implementation here.
+  var OAUTH_SUBTYPES = ['oauth', 'oidc-client'];
   function isOAuthSubtype(subType) {
     return OAUTH_SUBTYPES.indexOf(String(subType || '').toLowerCase()) !== -1;
   }
@@ -2106,6 +2164,11 @@
     $('#res-id').val('');
     $('#res-name').val('');
     $('#res-slug').val('');
+    // Nothing to describe until the client exists and has an id; the panel is
+    // populated on save and whenever an existing one is opened.
+    $('#oauth-integration-card').hide();
+    $('#res-oauth-enabled').prop('checked', true);
+    $('#res-oauth-public').prop('checked', false);
 
     let defaultKind = 'service';
     if (parentKind === 'site') defaultKind = 'host';
@@ -3683,8 +3746,13 @@
     $('#res-allowed-groups').val((r.metadata.allowed_groups || []).join(' '));
     $('#res-access-ttl').val((r.metadata.token_lifetime || {}).access_token || 3600);
     $('#res-refresh-ttl').val((r.metadata.token_lifetime || {}).refresh_token || 2592000);
-    
+    // Absent means enabled: validity is only written to metadata once someone
+    // turns it off (models/oauth_client.js).
+    $('#res-oauth-enabled').prop('checked', r.metadata.is_valid !== false);
+    $('#res-oauth-public').prop('checked', r.metadata.is_public === true);
+
     $('#oauth-rotate-container').toggle(isOAuthSubtype(r.metadata && r.metadata.subType));
+    if (isOAuthSubtype(r.metadata && r.metadata.subType)) showOauthIntegration(r.id);
     
     // Find parent host
     const childHostEdges = allEdges.filter(e => e.childId === r.id && e.relation === 'hosts');
@@ -3969,6 +4037,8 @@
         access_token: Number($('#res-access-ttl').val()) || 3600,
         refresh_token: Number($('#res-refresh-ttl').val()) || 2592000
       };
+      data.is_valid = $('#res-oauth-enabled').is(':checked');
+      data.is_public = $('#res-oauth-public').is(':checked');
     }
     
     try {
@@ -3991,13 +4061,120 @@
         // just-started hide()). open() alone already overwrites the
         // (already-visible) modal's content in place. The await above made
         // this race unlikely to lose in practice, but not guaranteed to.
-        app.modal.open({title: 'OAuth Secret', bodyHtml: 'Save this client secret, it will not be shown again: <br><br><code>' + res.results._raw_secret + '</code>'});
+        // BOTH halves, plus where to point the application. This used to show
+        // the secret alone -- so the client_id, which is the other half of the
+        // credential and appears nowhere else in the console, had to be dug out
+        // of the API or a URL before anything could be configured.
+        const newId = (res.results && (res.results.client_id || res.results.id)) || '';
+        let endpoints = '';
+        try {
+          const resp = await fetch('/.well-known/openid-configuration', { headers: { Accept: 'application/json' } });
+          if (resp.ok) {
+            const d = await resp.json();
+            endpoints = '<hr><div class="small">Point the application at:</div>'
+              + '<div class="small"><span class="text-muted">Discovery</span> <code>'
+              + app.util.escapeHtml(d.issuer + '/.well-known/openid-configuration') + '</code></div>';
+          }
+        } catch (e) { /* the panel on the edit screen carries these too */ }
+
+        app.modal.open({
+          title: 'OAuth Client Created',
+          bodyHtml:
+            '<div class="mb-2"><span class="text-muted small">Client ID</span><br>'
+            + '<code class="user-select-all">' + app.util.escapeHtml(newId) + '</code></div>'
+            + '<div class="mb-2"><span class="text-muted small">Client secret</span><br>'
+            + '<code class="user-select-all">' + app.util.escapeHtml(res.results._raw_secret) + '</code></div>'
+            + '<div class="alert alert-warning py-2 small mb-0">Save the secret now — it is not stored in a recoverable '
+            + 'form and will never be shown again. Rotate it from this client\'s Edit screen if it is lost.</div>'
+            + endpoints
+        });
       } else {
         app.modal.close();
       }
     } catch (err) {
       console.error(err);
       app.messages.action(err.message || 'Failed to save', app.modal.body(), 'danger');
+    }
+  }
+
+  // The connection details a relying party needs, read from the provider's own
+  // discovery document rather than assembled here -- the issuer is server-side
+  // configuration (conf.oauth.issuer), and a second copy of these URLs in the
+  // console would be one more thing to drift.
+  var oauthDiscoveryCache = null;
+  async function showOauthIntegration(clientId) {
+    $('#oauth-integration-card').show();
+    $('#oauth-client-id').val(clientId || '');
+
+    try {
+      if (!oauthDiscoveryCache) {
+        const resp = await fetch('/.well-known/openid-configuration', { headers: { Accept: 'application/json' } });
+        if (!resp.ok) throw new Error('discovery returned ' + resp.status);
+        oauthDiscoveryCache = await resp.json();
+      }
+      const d = oauthDiscoveryCache;
+      $('#oauth-discovery-url').val(d.issuer + '/.well-known/openid-configuration');
+
+      const rows = [
+        ['Issuer', d.issuer],
+        ['Authorization', d.authorization_endpoint],
+        ['Token', d.token_endpoint],
+        ['User info', d.userinfo_endpoint],
+        ['JWKS', d.jwks_uri],
+        ['Logout', d.end_session_endpoint]
+      ].filter(function (row) { return row[1]; });
+
+      $('#oauth-endpoint-list').html(
+        '<div class="mt-2 mb-1 fw-semibold">For a client that cannot use discovery:</div>' +
+        rows.map(function (row) {
+          return '<div class="d-flex gap-2"><span class="text-muted" style="min-width:7.5rem">' + row[0] +
+                 '</span><code class="small">' + app.util.escapeHtml(row[1]) + '</code></div>';
+        }).join('') +
+        '<div class="mt-2">ID tokens are signed <code>' +
+        app.util.escapeHtml((d.id_token_signing_alg_values_supported || []).join(', ')) + '</code>.</div>'
+      );
+    } catch (err) {
+      $('#oauth-endpoint-list').html(
+        '<div class="text-warning">Could not read the discovery document: ' +
+        app.util.escapeHtml(err.message) + '</div>'
+      );
+    }
+  }
+
+  function copyOauthField(id, btn) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    // clipboard.writeText is unavailable on a page served over plain http
+    // (a secure-context API), which is exactly how this console is reached on a
+    // LAN -- so fall back to selecting the text rather than failing silently.
+    const done = function () {
+      const icon = $(btn).find('i');
+      icon.removeClass('fa-copy').addClass('fa-check');
+      setTimeout(function () { icon.removeClass('fa-check').addClass('fa-copy'); }, 1200);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(el.value).then(done, function () { el.select(); });
+    } else {
+      el.select();
+      try { document.execCommand('copy'); done(); } catch (e) { /* left selected to copy by hand */ }
+    }
+  }
+
+  async function revokeClientTokens() {
+    const id = $('#res-id').val();
+    if (!id) return;
+    const ok = await app.messages.confirm(
+      'Revoke every access and refresh token this client holds? Everyone signed in through this application will be ' +
+      'signed out immediately and will have to log in again.',
+      app.modal.body(), 'warning');
+    if (!ok) return;
+
+    try {
+      const res = await app.api.post('directory-admin/resources/' + id + '/revoke-tokens');
+      app.messages.action(res.message || 'Tokens revoked', app.modal.body(), 'success');
+    } catch (err) {
+      console.error(err);
+      app.messages.action(err.message || 'Failed to revoke tokens', app.modal.body(), 'danger');
     }
   }
 

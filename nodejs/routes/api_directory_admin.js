@@ -325,10 +325,16 @@ router.post('/resources', async (req, res, next) => {
     req.body.updated_by = req.user.uid;
     req.body.updated_on = now;
 
-    // An OAuth client is a service with `subType: 'oauth'`; the OAuthClient
-    // wrapper mints the client_id/secret pair the resource row cannot.
+    // An OAuth client is a service carrying one of the client subtypes; the
+    // OAuthClient wrapper mints the client_id/secret pair the resource row
+    // cannot. Asking the model which subtypes those are, rather than hardcoding
+    // `oauth` here: this check and models/oauth_client.js's isOAuthClient() have
+    // to agree, and when they did not, creating an "OIDC Client" produced a
+    // resource with no credentials that the token endpoint then refused to
+    // recognise -- with nothing anywhere saying so.
+    const { isOAuthSubtype } = require('../models/oauth_client');
     const isOAuth = req.body.kind === 'service'
-      && (req.body.metadata || {}).subType === 'oauth';
+      && isOAuthSubtype((req.body.metadata || {}).subType);
 
     let r;
     if (isOAuth) {
@@ -490,6 +496,56 @@ router.post('/resources/:id/rotate-secret', async (req, res, next) => {
         const client = await OAuthClient.get(req.params.id);
         const secret = await client.rotateSecret();
         res.json({ secret });
+    } catch (err) {
+        next(err);
+    }
+});
+
+// Revoke every token a client holds. Rotating its secret stops it obtaining
+// NEW tokens but leaves the issued ones alive -- a refresh token lives 30 days
+// by default -- so this is the lever that actually ends every session for an
+// application. The per-client RFC 7009 endpoint (/oauth/revoke) lets a client
+// clean up after itself; this is the operator's equivalent for a client that
+// cannot be trusted to.
+router.post('/resources/:id/revoke-tokens', async (req, res, next) => {
+    try {
+        const { OAuthClient } = require('../models/oauth_client');
+        const { OAuthAccessToken, OAuthRefreshToken } = require('../models/oauth_code');
+
+        // Resolve through OAuthClient so a non-client resource is a clean 404
+        // rather than silently revoking nothing and reporting success.
+        const client = await OAuthClient.get(req.params.id);
+
+        // listDetail(options), NOT list({where}): on these model-redis tables
+        // list() takes no arguments and returns index KEYS, so a where clause is
+        // silently ignored and the loop below would iterate over strings,
+        // revoke nothing, and report success. listDetail filters by matching
+        // instance fields.
+        let access = 0;
+        let refresh = 0;
+        for (const [Model, kind] of [[OAuthAccessToken, 'access'], [OAuthRefreshToken, 'refresh']]) {
+            const rows = await Model.listDetail({ client_id: client.id }).catch(() => []);
+            for (const row of rows) {
+                if (!row || row.is_valid === false) continue;
+                await row.update({ is_valid: false });
+                if (kind === 'access') access++; else refresh++;
+            }
+        }
+
+        console.log(JSON.stringify({
+            timestamp: new Date().toISOString(),
+            component: 'oauth',
+            action: 'revoke_all_tokens',
+            actor: req.user && req.user.uid,
+            client_id: client.id,
+            access_tokens: access,
+            refresh_tokens: refresh
+        }));
+
+        res.json({
+            revoked: { access_tokens: access, refresh_tokens: refresh },
+            message: `Revoked ${access} access and ${refresh} refresh token(s) for '${client.name}'.`
+        });
     } catch (err) {
         next(err);
     }

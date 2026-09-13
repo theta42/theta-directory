@@ -26,15 +26,33 @@ GET https://<sso-host>/.well-known/openid-configuration
 ```
 
 It advertises the `issuer`, `authorization_endpoint`, `token_endpoint`,
-`userinfo_endpoint`, `end_session_endpoint`, supported scopes, and token
-lifetimes. OIDC clients (e.g. the theta42/proxy) can read their endpoint URLs
-from here rather than configuring each one.
+`userinfo_endpoint`, `revocation_endpoint`, `end_session_endpoint`, `jwks_uri`,
+supported scopes, and token lifetimes. OIDC clients (e.g. the theta42/proxy) can
+read their endpoint URLs from here rather than configuring each one — for most
+clients the discovery URL is the *only* thing you have to paste in, alongside the
+client ID and secret.
+
+The console shows the discovery URL, the client ID and every endpoint on the
+client's own edit screen (Directory → the client → **Connection details**), so
+you do not have to assemble them by hand.
 
 The `issuer` advertised is `conf.oauth.issuer` — set it to the **browser-facing**
 HTTPS URL the SSO is served at (e.g. `https://sso.example.com`), either in
 `conf/secrets.js` or via `app_oauth__issuer` / `OAUTH_ISSUER`.
 
 ## OAuth clients
+
+An OAuth client is a **service** resource in the Directory carrying one of two
+subtypes:
+
+| Subtype | Shown as | |
+| :--- | :--- | :--- |
+| `oauth` | OAuth Client | Either is a full client; pick whichever name |
+| `oidc-client` | OIDC Client | describes the app better. |
+
+Both get a `client_id` and secret minted. `saml-sp` (SAML Service Provider) is a
+catalog entry only — SAML is a different protocol and is **not implemented**, so
+a `saml-sp` resource gets no client credentials and cannot be used to log in.
 
 An OAuth client represents an app that authenticates against the SSO. Each has:
 
@@ -50,6 +68,10 @@ An OAuth client represents an app that authenticates against the SSO. Each has:
 - `allowed_groups` — restrict the client to members of specific SSO groups
   (empty = any valid user).
 - `token_lifetime` — `access_token` / `refresh_token` lifetimes (seconds).
+- `is_public` — the app holds no secret and authenticates with PKCE (see
+  [Public clients](#public-clients-spa-mobile-cli)).
+- `is_valid` — clear it to disable the client without deleting it (see
+  [Disabling a client](#disabling-a-client)).
 
 ### Managing clients
 
@@ -101,12 +123,92 @@ first admin and adds them to `app_sso_admin` + `app_sso_oauth_admin`
 automatically; for a standalone install, add the admin's DN to those groups
 manually (or via `ops/ldap-setup.sh`).
 
-## JWT signing
+## Token signing
 
-Tokens are signed with `conf.oauth.jwtSecret` (`app_oauth__jwtSecret` /
-`JWT_SECRET`). **Persist this secret** — if it changes, every issued token
-stops validating. The all-in-one Docker image auto-generates one if none is set,
-but that generated value does not survive container recreation unless you
-persist it (set `JWT_SECRET` in your `.env`).
+ID tokens are signed **RS256** with an RSA key pair generated on first use and
+stored in OpenBao at `secret/oauth/id-token-key`. The public half is published
+as a JWKS:
+
+```
+GET https://<sso-host>/.well-known/jwks.json
+```
+
+A relying party validates ID tokens against that document and needs no shared
+secret to do it — which is what lets a client configure itself from discovery
+alone. The `kid` is an RFC 7638 thumbprint of the key, so it changes if and only
+if the key does.
+
+In a multi-site cluster the key is replicated with the rest of the directory
+(the same mechanism as the agent signing key), so a promotion or failover does
+not invalidate every issued token.
+
+### The HS256 fallback
+
+If the RSA key cannot be read or persisted — typically an OpenBao policy that
+does not grant `secret/oauth/*` — ID tokens fall back to HS256 signed with
+`conf.oauth.jwtSecret` (`app_oauth__jwtSecret` / `JWT_SECRET`), the discovery
+document advertises `HS256` and omits `jwks_uri`, and the failure is logged at
+startup. That fallback exists because refusing to sign would fail every login on
+the deployment; it is not a mode to run in deliberately:
+
+- there is no public half to publish, so every client needs the shared secret
+  handed to it out of band;
+- **every client validates with a key it could also sign with**, so any one of
+  them can mint an ID token for any other. (The OIDC spec's HS256 mode uses the
+  client's own `client_secret` as the MAC key precisely to avoid this; that is
+  not available here because client secrets are stored bcrypt-hashed and cannot
+  be recovered.)
+
+`jwtSecret` therefore still has to be set and persisted, but on a correctly
+configured deployment it is not what signs your tokens. Check which is in use by
+reading `id_token_signing_alg_values_supported` from the discovery document.
+
+## Public clients (SPA, mobile, CLI)
+
+An app with nowhere to keep a secret — a browser SPA, a mobile app, a CLI — is
+registered as a **public client** (the toggle on the client's edit screen). A
+public client:
+
+- authenticates at the token endpoint with **PKCE instead of a secret**, and
+  `code_challenge` is *required*: a code is refused at issue time without one,
+  rather than failing later at redemption where the cause is less obvious;
+- must **not** send a `client_secret`. Doing so is rejected rather than ignored,
+  because it means the caller believes it is talking to a confidential client.
+
+Discovery advertises this as `none` in `token_endpoint_auth_methods_supported`.
+Confidential clients are unaffected and still require their secret.
+
+## Revoking tokens
+
+Rotating a client secret stops it obtaining *new* tokens. It does nothing about
+the ones already issued — a refresh token lives 30 days by default — so it is not
+on its own the containment it sounds like. Two levers end existing sessions:
+
+**A client revoking its own token** — [RFC 7009](https://www.rfc-editor.org/rfc/rfc7009):
+
+```
+POST https://<sso-host>/oauth/revoke
+    token=<access or refresh token>
+    &token_type_hint=refresh_token      # optional
+    &client_id=…&client_secret=…        # omit the secret for a public client
+```
+
+Always answers `200`, including for an unknown, malformed or already-revoked
+token, and for a token belonging to another client — the endpoint must not become
+an oracle telling a caller which of the tokens it holds are real. The only
+failure it reports is a client that cannot authenticate.
+
+**An operator revoking everything a client holds** — the **Revoke All Tokens**
+button on the client's edit screen (`POST /api/directory-admin/resources/:id/revoke-tokens`).
+Everyone signed in through that application is signed out immediately.
+
+## Disabling a client
+
+The **Enabled** switch on the client's edit screen blocks both the authorize and
+the token endpoint without deleting anything, which is usually what you want
+during an incident: the registration, its redirect URIs and its group
+restrictions all survive, and flipping it back restores service. Note that
+disabling does not retract tokens that are already issued — pair it with
+**Revoke All Tokens** if you need existing sessions gone too.
 
 [← Back to Home](index.html)

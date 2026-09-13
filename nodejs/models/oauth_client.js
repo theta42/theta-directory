@@ -17,12 +17,28 @@ const UUID = () => crypto.randomUUID();
 // As a subtype it inherits all of that for free.
 const OAUTH_SUBTYPE = 'oauth';
 
+// Every subtype that IS an OAuth/OIDC client and therefore needs a client_id and
+// secret minted for it. `oidc-client` is in the vocabulary as "OIDC Client" --
+// the name an operator setting up a relying party will reach for first -- and
+// recognising only `oauth` meant picking it produced a resource with redirect
+// URIs, scopes and a Rotate Secret button, no credentials, and a token endpoint
+// that answered "Unknown client_id". Silently, which is the worst part.
+//
+// `saml-sp` is deliberately NOT here: SAML is a different protocol with no
+// implementation in this codebase, and minting OAuth credentials for it would
+// dress up something that still does not work.
+const OAUTH_SUBTYPES = [OAUTH_SUBTYPE, 'oidc-client'];
+
+function isOAuthSubtype(subType) {
+	return OAUTH_SUBTYPES.includes(String(subType || '').toLowerCase());
+}
+
 function isOAuthClient(resource) {
 	return Boolean(
 		resource &&
 		resource.kind === 'service' &&
 		resource.metadata &&
-		resource.metadata.subType === OAUTH_SUBTYPE
+		isOAuthSubtype(resource.metadata.subType)
 	);
 }
 
@@ -51,12 +67,22 @@ class OAuthClient {
 			description: data.description || '',
 			owner: data.created_by,
 			metadata: {
-				subType: OAUTH_SUBTYPE,
+				// Preserve the subtype the caller chose (`oidc-client` stays an
+				// OIDC Client in the catalog) rather than flattening everything
+				// to `oauth`; both are recognised as clients.
+				...(data.metadata || {}),
+				subType: isOAuthSubtype((data.metadata || {}).subType)
+					? String((data.metadata || {}).subType).toLowerCase()
+					: OAUTH_SUBTYPE,
 				client_secret_hash,
 				redirect_uris: data.redirect_uris || [],
 				scopes: data.scopes || ['openid', 'profile', 'email', 'groups'],
 				allowed_groups: data.allowed_groups || [],
-				token_lifetime: data.token_lifetime || { ...defaultLifetime }
+				token_lifetime: data.token_lifetime || { ...defaultLifetime },
+				// A public client (SPA, mobile, CLI) holds no secret and must
+				// use PKCE. One is still minted and stored so that flipping the
+				// flag back does not require a rotation.
+				is_public: data.is_public === true || data.is_public === 'true'
 			}
 		});
 		
@@ -89,12 +115,19 @@ class OAuthClient {
 		r.token_lifetime = r.metadata.token_lifetime || { ...defaultLifetime };
 		// Resource has no is_valid column; validity lives in metadata (absent = valid)
 		r.is_valid = r.metadata.is_valid !== false;
+		r.is_public = r.metadata.is_public === true;
 		r.verifySecret = async (secret) => bcrypt.compare(secret, r.client_secret_hash);
 		
 		r.rotateSecret = async () => {
 			const raw_secret = crypto.randomUUID();
-			r.metadata.client_secret_hash = await bcrypt.hash(raw_secret, 10);
-			await r.update({ metadata: r.metadata });
+			// Same in-place-mutation trap as update() below: build a new object
+			// so the ORM sees a changed value. A rotation that reported success
+			// and left the old secret working is the worst possible outcome for
+			// this particular operation.
+			const metadata = { ...r.metadata, client_secret_hash: await bcrypt.hash(raw_secret, 10) };
+			r.metadata = metadata;
+			r.client_secret_hash = metadata.client_secret_hash;
+			await originalUpdate({ metadata });
 			return raw_secret;
 		};
 
@@ -118,19 +151,35 @@ class OAuthClient {
 				allowed_groups: r.allowed_groups,
 				token_lifetime: r.token_lifetime,
 				is_valid: r.is_valid,
+				is_public: r.is_public,
+				subType: (r.metadata || {}).subType,
 			};
 		};
 
 		// proxy update to handle metadata correctly
 		const originalUpdate = r.update.bind(r);
 		r.update = async (data) => {
-			if (data.redirect_uris !== undefined) r.metadata.redirect_uris = data.redirect_uris;
-			if (data.scopes !== undefined) r.metadata.scopes = data.scopes;
-			if (data.allowed_groups !== undefined) r.metadata.allowed_groups = data.allowed_groups;
-			if (data.token_lifetime !== undefined) r.metadata.token_lifetime = data.token_lifetime;
-			if (data.is_valid !== undefined) r.metadata.is_valid = data.is_valid;
+			// A NEW object, not a mutation of r.metadata.
+			//
+			// This used to mutate r.metadata in place and then hand the SAME
+			// reference back to the ORM, which compares what it is given against
+			// what the row already holds -- and by then they were the identical
+			// object, so every metadata-only change was read as "nothing
+			// changed" and silently dropped. Disabling a client
+			// (`is_valid: false`) therefore did nothing at all: it returned 200,
+			// the flag never reached storage, and the client kept working.
+			const metadata = { ...r.metadata };
+			if (data.redirect_uris !== undefined) metadata.redirect_uris = data.redirect_uris;
+			if (data.scopes !== undefined) metadata.scopes = data.scopes;
+			if (data.allowed_groups !== undefined) metadata.allowed_groups = data.allowed_groups;
+			if (data.token_lifetime !== undefined) metadata.token_lifetime = data.token_lifetime;
+			if (data.is_valid !== undefined) metadata.is_valid = data.is_valid;
+			if (data.is_public !== undefined) {
+				metadata.is_public = data.is_public === true || data.is_public === 'true';
+			}
+			r.metadata = metadata;
 
-			const updateData = { metadata: r.metadata };
+			const updateData = { metadata };
 			if (data.name !== undefined) updateData.name = data.name;
 			if (data.description !== undefined) updateData.description = data.description;
 			
@@ -158,4 +207,4 @@ class OAuthClient {
 	}
 }
 
-module.exports = { OAuthClient, OAUTH_SUBTYPE, isOAuthClient };
+module.exports = { OAuthClient, OAUTH_SUBTYPE, OAUTH_SUBTYPES, isOAuthClient, isOAuthSubtype };

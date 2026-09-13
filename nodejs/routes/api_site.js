@@ -47,6 +47,7 @@ const {
   stripOperationalAttrs, summarizeLdapAddResult
 } = require('../utils/site_join');
 const agentKeys = require('../utils/agent_keys');
+const oauthKeys = require('../utils/oauth_keys');
 
 const execFileAsync = promisify(execFile);
 const router = express.Router();
@@ -161,7 +162,7 @@ router.post('/export', async (req, res, next) => {
     // meshSites: the cluster roster. Without it a spoke has no idea any other
     // site exists, its gateway builds no peers, and the mesh silently only
     // works at whichever site happens to be the master.
-    const [ldif, resources, edges, signingKey, meshSites, agents, baoSecrets, userVerifications, apiTokens, agentJoinKeys, subtypeTemplates, meshClients, meshExitGrants] = await Promise.all([
+    const [ldif, resources, edges, signingKey, oidcKey, meshSites, agents, baoSecrets, userVerifications, apiTokens, agentJoinKeys, subtypeTemplates, meshClients, meshExitGrants] = await Promise.all([
       slurpLdif(),
       Resource.list(),
       ResourceEdge.list(),
@@ -171,6 +172,12 @@ router.post('/export', async (req, res, next) => {
       // signing keys across sites is a nice-to-have on top of the join
       // working at all, never a reason to fail the join.
       agentKeys.load().then((k) => k && { privateKeyPem: k.privateKeyPem, publicKeyPem: k.publicKeyPem }).catch(() => null),
+      // The RS256 key ID tokens are signed with, for the same reason and on the
+      // same best-effort terms. Every site signing with the same key is what
+      // stops a promotion or failover invalidating every ID token in the
+      // cluster at once: the issuer moves to a node the relying parties'
+      // cached JWKS still matches.
+      oauthKeys.load().then((k) => k && { privateKeyPem: k.privateKeyPem, publicKeyPem: k.publicKeyPem }).catch(() => null),
       // Make sure sites that joined but whose gateway has not published yet
       // still appear, so a new site is visible to the rest of the cluster
       // before anyone starts its gateway.
@@ -205,7 +212,8 @@ router.post('/export', async (req, res, next) => {
       baoSecrets: baoSecrets || [],
       userVerifications: userVerifications || [],
       apiTokens: (apiTokens || []).map(t => (t.toReplica ? t.toReplica() : (t.toJSON ? t.toJSON() : t))),
-      ...(signingKey ? { signingKey } : {})
+      ...(signingKey ? { signingKey } : {}),
+      ...(oidcKey ? { oidcKey } : {})
     });
   } catch (e) { next(e); }
 });
@@ -1276,6 +1284,17 @@ async function adoptFromMaster({ masterUrl, joinKey, seedLdap = false }) {
       signingKeyNote = 'adopted';
     } catch (e) {
       signingKeyNote = 'failed: ' + e.message;
+    }
+  }
+
+  // Same treatment for the OIDC ID token key, and just as non-fatal: a spoke
+  // that keeps its own key still issues valid tokens, they simply stop
+  // validating if the issuer later moves to a different node.
+  if (exportData.oidcKey) {
+    try {
+      await oauthKeys.adopt(exportData.oidcKey);
+    } catch (e) {
+      console.warn('[site] could not adopt the OIDC ID token key from master: ' + e.message);
     }
   }
 

@@ -963,7 +963,24 @@ The SSO Manager acts as an OAuth 2.0 Authorization Server and OpenID Connect Pro
 
 **`GET /.well-known/openid-configuration`** — No auth required
 
-Returns the OIDC discovery document with endpoint URLs, supported scopes, and signing algorithms.
+Returns the OIDC discovery document with endpoint URLs, supported scopes, and
+signing algorithms. Includes `jwks_uri` and `revocation_endpoint`, and advertises
+`none` in `token_endpoint_auth_methods_supported` for public clients.
+
+---
+
+### JWKS
+
+**`GET /.well-known/jwks.json`** — No auth required
+
+The public half of the RS256 key ID tokens are signed with. A relying party
+validates tokens against this document and needs no shared secret to do it. The
+`kid` is an RFC 7638 thumbprint, so it changes only when the key does; the
+response is cacheable for an hour.
+
+Returns an empty key set (`{"keys": []}`) when the provider has fallen back to
+legacy HS256 signing — see [docs/oauth.md](docs/oauth.md) for when that happens
+and why it should be treated as a misconfiguration.
 
 ---
 
@@ -979,7 +996,8 @@ Returns the OIDC discovery document with endpoint URLs, supported scopes, and si
   any number of labels)
 - `scope` — Space-separated: `openid`, `profile`, `email`
 - `state` — Opaque value returned unchanged in the redirect
-- `code_challenge` — PKCE challenge (SHA-256 of code_verifier, base64url-encoded)
+- `code_challenge` — PKCE challenge (SHA-256 of code_verifier, base64url-encoded).
+  **Required** for a public client; optional but recommended otherwise
 - `code_challenge_method` — Must be `S256`
 
 Renders the consent screen.
@@ -1031,6 +1049,12 @@ completes the flow described in the Authorization Endpoint section above.
 
 **Client Authentication:** `client_id` + `client_secret` in the request body, or HTTP Basic Auth.
 
+A **public client** (`is_public`) sends `client_id` alone and proves itself with
+PKCE instead. Sending a `client_secret` for one is rejected with `invalid_client`
+rather than ignored — it means the caller believes it is talking to a
+confidential client. A code issued without `code_challenge` cannot be redeemed by
+a public client.
+
 #### Authorization Code Grant
 
 ```
@@ -1081,6 +1105,33 @@ Refresh tokens are rotated on each use — the old token is invalidated and a ne
   "email": "user@example.com"
 }
 ```
+
+---
+
+### Revocation Endpoint
+
+**`POST /oauth/revoke`** — No auth required (client authenticates via credentials)
+
+[RFC 7009](https://www.rfc-editor.org/rfc/rfc7009). Revokes one access or refresh
+token belonging to the calling client.
+
+**Content-Type:** `application/x-www-form-urlencoded`
+
+```
+token=<access or refresh token>
+&token_type_hint=refresh_token      # optional; a wrong hint still finds the token
+&client_id=<client_id>
+&client_secret=<client_secret>      # omitted for a public client
+```
+
+**Response:** `200` with an empty body — including for an unknown, malformed or
+already-revoked token, and for a token issued to a *different* client. This is
+required by the RFC: the endpoint must not become an oracle telling a caller
+which of the tokens it holds are real. The only failure reported is
+`401 invalid_client` for a client that cannot authenticate.
+
+To revoke *every* token a client holds (an operator action rather than the
+client's own), see **Revoke Client Tokens** below.
 
 ---
 
@@ -1186,6 +1237,41 @@ The `client_secret` is shown **only once**. Store it immediately.
 ```
 
 The old secret is invalidated immediately. The new secret is shown **only once**.
+
+Rotation stops the client obtaining **new** tokens; tokens it already holds keep
+working until they expire. Use **Revoke Client Tokens** as well if you need
+existing sessions ended.
+
+---
+
+### Revoke Client Tokens
+
+**`POST /api/directory-admin/resources/:id/revoke-tokens`** — Auth required (directory admin)
+
+Invalidates every access and refresh token issued to one client. Everyone signed
+in through that application is signed out immediately. Scoped to the named
+client; other applications are untouched.
+
+**Response:**
+```json
+{
+  "revoked": { "access_tokens": 3, "refresh_tokens": 2 },
+  "message": "Revoked 3 access and 2 refresh token(s) for '...'."
+}
+```
+
+This is the operator's lever. A client revoking its own single token uses the
+RFC 7009 [Revocation Endpoint](#revocation-endpoint) instead.
+
+---
+
+### Disabling a Client
+
+Set `is_valid: false` (the **Enabled** switch in the console) via
+`PUT /api/oauth/client/:client_id` or the directory resource update. A disabled
+client is refused at both the authorize and the token endpoint, keeping its
+registration, redirect URIs and group restrictions intact. It does not retract
+already-issued tokens — pair it with **Revoke Client Tokens** for that.
 
 ---
 

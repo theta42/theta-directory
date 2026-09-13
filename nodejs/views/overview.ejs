@@ -17,9 +17,18 @@
 			try {
 			    const dirRes = await app.api.get('directory-admin/resources');
 			    const resources = dirRes.results || [];
+			    // OAuth clients are services carrying a client subType -- `kind:
+			    // 'oauth'` has not existed since they became services
+			    // (models/oauth_client.js), so this tile read 0 for every
+			    // deployment while the clients themselves were quietly counted
+			    // as plain services. Kept in step with OAUTH_SUBTYPES in
+			    // views/directory.ejs.
+			    const OAUTH_SUBTYPES = ['oauth', 'oidc-client'];
+			    const isOauthClient = r => r.kind === 'service'
+			        && r.metadata && OAUTH_SUBTYPES.includes(String(r.metadata.subType || '').toLowerCase());
 			    document.getElementById('stat-hosts').textContent = resources.filter(r => r.kind === 'host').length;
-			    document.getElementById('stat-services').textContent = resources.filter(r => r.kind === 'service').length;
-			    document.getElementById('stat-oauth').textContent = resources.filter(r => r.kind === 'oauth').length;
+			    document.getElementById('stat-services').textContent = resources.filter(r => r.kind === 'service' && !isOauthClient(r)).length;
+			    document.getElementById('stat-oauth').textContent = resources.filter(isOauthClient).length;
 			    document.getElementById('directory-stats-row').style.display = '';
 			} catch (err) {}
 

@@ -22,7 +22,7 @@ jest.mock('@simpleworkjs/bao-conf', () => ({
   get: jest.fn(),
   set: jest.fn(),
   request: jest.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })),
-}), { virtual: true });
+}));
 
 // api_agent.js DESTRUCTURES these at require time, so a spy on the module object
 // would never be seen -- the module has to be replaced before it is required.

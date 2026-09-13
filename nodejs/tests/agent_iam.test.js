@@ -13,7 +13,7 @@ jest.mock('@simpleworkjs/bao-conf', () => ({
   get: jest.fn(),
   set: jest.fn(),
   request: jest.fn(async () => ({ ok: true, status: 200, json: async () => ({}) })),
-}), { virtual: true });
+}));
 
 const { initORM } = require('../models');
 const { Resource, ResourceEdge, ResourceGroup } = require('../models/resource');
