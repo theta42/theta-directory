@@ -360,19 +360,21 @@ router.post('/clients/:id/push', middleware.auth, async (req, res, next) => {
 		const agent = (await Agent.list({ where: { id: client.agentId } }))[0];
 		if (!agent) return res.status(404).json({ status: 'error', message: 'the agent for this device no longer exists' });
 
-		const agentManager = require('../utils/agent_manager');
-		// privateKey is null: the agent holds its own and fills in the
-		// placeholder. wireguard_apply is signed and gated on the agent's
-		// `wireguard` capability at the far end.
-		// Only the config. The agent applies it with wg-quick, which installs
-		// routes from AllowedIPs itself -- 10.0.0.0/8 + 172.24.0.0/16 for a
-		// split-tunnel device, 0.0.0.0/0 for one using an exit. Sending a
-		// separate route list would imply the agent acts on it, which it does
-		// not; clientRoutes() stays for the enrolment response, where a human
-		// setting a device up by hand needs to see them.
-		await agentManager.sendCommand(agent, 'wireguard_apply', {
-			config: renderClientConf({ client, site, privateKey: null })
-		}, true);
+		// One push path, shared with enrolment and exit selection
+		// (mesh_clients.pushConfigToAgent). This route used to build and send
+		// its own wireguard_apply carrying the config ALONE -- no siteId or
+		// exitSiteId -- so a config pushed by an admin left the agent deciding
+		// whether to raise the tunnel from whatever it learned at enrolment,
+		// while the same config pushed by the two other paths came with the
+		// fields that answer the question (PROTOCOL.md 4.3.1). Two code paths
+		// for one operation, disagreeing on the payload.
+		const pushed = await clients.pushConfigToAgent(client);
+		if (!pushed) {
+			return res.status(409).json({
+				status: 'error',
+				message: `could not push to the agent for ${client.name} -- it is not connected`
+			});
+		}
 
 		logAudit('mesh_client_pushed', { actor: req.user.uid, client: client.id, agent: agent.id });
 		res.json({ status: 'ok' });
