@@ -343,10 +343,20 @@ class AgentManager {
   async pruneServicesNotReported(hostRes, allServices, childIds, reported) {
     const { Resource, ResourceEdge } = require('../models/resource');
 
+    const { isAgentService } = require('./agent_binding');
+
     const mine = allServices.filter(r => {
       const meta = r.metadata || {};
       const isChildOfHost = meta.hostId === hostRes.id || childIds.has(r.id);
       if (!isChildOfHost) return false;
+      // Never the agent's OWN service resource. It is not something the agent
+      // reports in `services:` -- it is the row `agent.resourceId` points at,
+      // the binding between this agent and its host. Deleting it would unbind
+      // the agent from the machine it is running on, which is a far worse
+      // outcome than any stale child this prune exists to remove. It carries no
+      // `discovery_sources` today so the filter below already skips it; this is
+      // explicit because "today" is not a guarantee.
+      if (isAgentService(r)) return false;
       return Array.isArray(meta.discovery_sources) && meta.discovery_sources.includes('theta-agent');
     });
 

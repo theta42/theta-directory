@@ -675,6 +675,22 @@ describe('theta-agent service pruning', () => {
     expect(await serviceNames()).toEqual([]);
   });
 
+  test("the agent's own service resource is never pruned", async () => {
+    // It is not something the agent reports in `services:` -- it is the row
+    // `agent.resourceId` points at. Pruning it would unbind the agent from the
+    // host it runs on, which is far worse than any stale child this exists to
+    // remove.
+    await agentManager.handleTelemetry(agent, { services: [{ name: 'nginx', subtype: 'systemd' }] });
+    await agentManager.handleTelemetry(agent, { services: [] });
+
+    const svc = await Resource.get(agent.resourceId);
+    expect(svc).toBeTruthy();
+    expect(svc.metadata.subType).toBe('theta-agent');
+    // ... and it is still attached to its host.
+    const edges = await ResourceEdge.list({ where: { childId: svc.id } });
+    expect(edges.map(e => e.parentId)).toContain(hostRes.id);
+  });
+
   test('a service another source also sees is kept, and only loses this source', async () => {
     await agentManager.handleTelemetry(agent, { services: [{ name: 'gitea', subtype: 'docker' }] });
     const gitea = (await Resource.list({ where: { kind: 'service' } }))
