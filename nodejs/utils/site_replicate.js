@@ -18,8 +18,25 @@
 const { SiteSpoke } = require('../models/site_spoke');
 const { meshServiceTarget } = require('./mesh_route');
 const { fetchWithAuthRedirect } = require('./fetch_with_auth_redirect');
+const { tcpReachable } = require('./tcp_probe');
 
+// The far end does a full export + import before it answers (api_site.js's
+// /resync handler), so this has to be generous.
 const RESYNC_TIMEOUT_MS = 8000;
+
+// ...which is exactly why the mesh address gets a connect probe first. The
+// mesh URL is tried BEFORE the public endpoint, so when a tunnel is down every
+// push paid the full 8s above before falling back -- on every write, for every
+// spoke. That is not a hypothetical: it is why the multi-site E2E's
+// post-promotion replication assertion (a 15s budget) failed about half the
+// time, and why "Sync now" in the UI hung for 8s per spoke at any site whose
+// tunnel had dropped.
+//
+// A connect to a tunnel or LAN address either succeeds in milliseconds or is
+// not going to succeed, so a second is long. Shortening the REQUEST timeout
+// instead would have been wrong: it would abort a mesh push that was working,
+// mid-import, and then repeat the whole import over the public endpoint.
+const MESH_PROBE_TIMEOUT_MS = 1000;
 
 function replicateToSpokes(reason) {
 	return (async () => {
@@ -49,15 +66,33 @@ function replicateToSpokes(reason) {
 // Falls back to the spoke's public endpoint if the mesh attempt fails (the
 // tunnel isn't actually up yet, or unreachable for any other reason) -- never
 // let a mesh-routing preference turn into "spoke never gets updates."
-function resyncUrls(spoke) {
-	const urls = [];
+function resyncTargets(spoke) {
+	const targets = [];
 	// Every registered spoke has a ServerID (assigned at join), which is its
 	// mesh identity. A spoke without one has no mesh address yet and only the
 	// public endpoint is tried.
 	if (spoke.ldapServerId) {
 		const target = meshServiceTarget(`10.${spoke.ldapServerId}.0.2`);
-		if (target) urls.push(`http://${target.host}:${target.port}/api/site/resync`);
+		if (target) {
+			targets.push({
+				url: `http://${target.host}:${target.port}/api/site/resync`,
+				// Probed before it is used: see MESH_PROBE_TIMEOUT_MS.
+				probe: { host: target.host, port: target.port }
+			});
+		}
 	}
+	for (const url of publicUrls(spoke)) targets.push({ url, probe: null });
+	return targets;
+}
+
+// resyncUrls is the URL-only view of the above, kept because it reads as the
+// answer to "where would a resync for this spoke go, in order".
+function resyncUrls(spoke) {
+	return resyncTargets(spoke).map((t) => t.url);
+}
+
+function publicUrls(spoke) {
+	const urls = [];
 	if (spoke.endpoint) {
 		const base = String(spoke.endpoint).replace(/\/+$/, '');
 		// Prefer HTTPS directly when the registry says http://. The proxy in
@@ -74,9 +109,17 @@ function resyncUrls(spoke) {
 }
 
 async function pingOne(spoke, reason) {
-	const urls = resyncUrls(spoke);
+	const targets = resyncTargets(spoke);
 	let lastErr;
-	for (const url of urls) {
+	for (const { url, probe } of targets) {
+		// Skip an address nothing is listening on rather than spending the
+		// request timeout discovering it. Only the mesh address carries a
+		// probe: the public endpoint is the last resort, and "try it and see"
+		// is the right thing to do with a last resort.
+		if (probe && !(await tcpReachable(probe.host, probe.port, MESH_PROBE_TIMEOUT_MS))) {
+			lastErr = new Error(`mesh address ${probe.host}:${probe.port} is not reachable`);
+			continue;
+		}
 		const body = JSON.stringify({ reason: reason || 'catalog-changed' });
 		const init = {
 			method: 'POST',
@@ -100,4 +143,4 @@ async function pingOne(spoke, reason) {
 // pingOne is exported as pushResync for the operator-driven "Sync now" action
 // (routes/api_site.js), which unlike the write-triggered fan-out AWAITS the
 // result so the UI can report whether the spoke was actually reachable.
-module.exports = { replicateToSpokes, resyncUrls, pushResync: pingOne };
+module.exports = { replicateToSpokes, resyncUrls, resyncTargets, pushResync: pingOne };

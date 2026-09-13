@@ -85,9 +85,24 @@ const connect = async (wss, { token, hostname, prevToken, query = {} } = {}) => 
     socket: { remoteAddress: '10.9.9.9' }
   };
   wss.emit('connection', ws, req);
-  // The handler authenticates and sends the config frame from async paths.
-  await new Promise(r => setTimeout(r, 60));
+  // The handler authenticates and answers from async paths, so wait for the
+  // OUTCOME rather than for a fixed number of milliseconds: either a frame went
+  // out or the socket was closed. A sleep long enough today is a flaky test
+  // tomorrow, the moment anything on the connect path does slightly more work.
+  await waitFor(() => ws.sent.length > 0 || ws.closed);
   return ws;
+};
+
+// Poll until `cond` holds or the deadline passes. Returns either way -- the
+// assertion that follows is what should report the failure, with its own
+// message, rather than this throwing something less informative.
+const waitFor = async (cond, timeoutMs = 3000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (cond()) return true;
+    await new Promise(r => setTimeout(r, 10));
+  }
+  return false;
 };
 
 describe('agent WebSocket handler', () => {
@@ -210,7 +225,7 @@ describe('agent WebSocket handler', () => {
 
     // Exactly what the agent wrote up to v2.21.9: no envelope at all.
     ws.emit('message', JSON.stringify({ status: 'ok', message: 'done', output: 'uptime: 3 days' }));
-    await new Promise(r => setTimeout(r, 40));
+    await waitFor(() => agentManager.liveState(agent.id).lastResponse !== null);
 
     const live = agentManager.liveState(agent.id);
     expect(live.lastResponse).not.toBeNull();
@@ -228,7 +243,7 @@ describe('agent WebSocket handler', () => {
       type: 'response',
       payload: { status: 'error', message: 'storage capability disabled' }
     }));
-    await new Promise(r => setTimeout(r, 40));
+    await waitFor(() => agentManager.liveState(agent.id).lastResponse !== null);
 
     const live = agentManager.liveState(agent.id);
     expect(live.lastResponse.status).toBe('error');
@@ -244,7 +259,7 @@ describe('agent WebSocket handler', () => {
 
     await agent.update({ revoked: true });
     ws.emit('message', JSON.stringify({ type: 'heartbeat', payload: {} }));
-    await new Promise(r => setTimeout(r, 40));
+    await waitFor(() => ws.closed !== null);
 
     expect(ws.closed).toEqual({ code: 4003, reason: 'Enrollment revoked' });
 
