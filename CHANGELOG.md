@@ -1,3 +1,8 @@
+## [2.38.1] - 2026-09-13
+
+### Changed
+- **`@simpleworkjs/bao-conf` 1.0.1 → 1.0.2.** An unset `VAULT_TOKEN` is now reported once per process instead of once per secret read. This directory's multi-site E2E logs carried 108 copies of that message per run — in passing runs as much as failing ones — which is enough noise to bury the failure you are looking for. No behaviour change: reads still fail soft, and a genuine per-read error is still logged every time.
+
 ## [2.38.0] - 2026-09-13
 
 A review of the OIDC surface, prompted by the setup experience being harder than
