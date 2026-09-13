@@ -1,3 +1,14 @@
+## [2.37.2] - 2026-09-13
+
+### Security
+- **Dependency advisories cleared** (1 high, 5 moderate; every open Dependabot alert on this repo is now closed): `nodemailer` 9.0.3 → 9.1.1, `qs` 6.15.3 → 6.16.0, and the `js-yaml` dev dependency 3.15.1 → 3.15.2. All three were within-major and none required a code change. `nodemailer`'s PR had been sitting red since it was opened — not for anything to do with nodemailer, but because of the flaky agent WS handler test fixed in v2.37.1, which had been failing CI on other people's pull requests.
+
+### Fixed
+- **The Fastest Possible SSH Probe Reported No Response Time At All**: `network_driver.js` mapped its probe result with `responseTimeMs: (probe && probe.responseTimeMs) || null`. A probe that answers in under a millisecond — which is every SSH service on loopback or a fast LAN — reports `0`, and `0 || null` is `null`. So the best possible reading was indistinguishable from no reading, and the UI rendered a blank. `??` now does the job `||` could not. This is the same defect as theta-agent v2.22.1's `omitempty` on zero-valued telemetry, in JavaScript form: a falsy-but-valid zero coerced away.
+
+  It surfaced as an intermittent CI failure — `NetworkDriver SSH Monitoring › probes live SSH port…` failed exactly when the runner was quick enough to answer in 0 ms, which is why it failed one matrix leg and passed the other on the same commit. A regression test now pins the mapping with a stubbed probe, so it no longer depends on how fast the loopback happens to be.
+- **A Test Bound A Hardcoded Port**: while chasing the above, `network_driver_ssh.test.js` was also found standing up its mock SSH server on a fixed `22222` and asserting against a "closed" port `22223` it had never verified was closed. Jest runs suites in parallel workers, so a fixed port is a standing `EADDRINUSE`. The mock now binds `:0` and reads the port back; the closed port is bound and then released, so it is known-closed rather than assumed-closed. This was not what was failing CI — it is a latent problem found on the way to the one that was.
+
 ## [2.37.1] - 2026-09-13
 
 ### Fixed
