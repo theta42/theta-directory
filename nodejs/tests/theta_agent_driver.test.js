@@ -87,21 +87,53 @@ describe('the command targets the unit, not the slug', () => {
   test('a restart sends the unit name and the subtype', async () => {
     AgentManager.getAgentForResource.mockResolvedValue(ONLINE_AGENT);
     await driver.execAction(EMBY, 'service_action', { subAction: 'restart' });
-    const [, type, payload] = AgentManager.sendCommand.mock.calls[0];
+    const [agent, type, payload, isHighRisk] = AgentManager.sendCommand.mock.calls[0];
     expect(type).toBe('systemd_action');
+    // The AGENT, not its id. sendCommand looks the socket up by `agent.id`, so
+    // passing the id string made it look up `undefined` and throw
+    // `Agent "undefined" is not connected` -- every action this driver
+    // dispatched failed before it reached the wire.
+    expect(agent).toBe(ONLINE_AGENT);
     // `svc-lxc-213-systemd-emby-server` is not a unit on any host; sending it
     // meant every start/stop/restart silently acted on nothing.
     expect(payload.service).toBe('emby-server');
     expect(payload.subtype).toBe('systemd');
     expect(payload.action).toBe('restart');
-    // stop and restart interrupt something running; start does not.
-    expect(payload.isHighRisk).toBe(true);
+    // Signed, via the ARGUMENT. `isHighRisk` used to be set as a payload key,
+    // which signs nothing: the flag rode along inside the command while the
+    // frame went out unsigned, and the agent refuses every systemd_action but
+    // `status` without a signature.
+    expect(isHighRisk).toBe(true);
+    expect(payload.isHighRisk).toBeUndefined();
   });
 
-  test('start is not flagged high-risk', async () => {
-    AgentManager.getAgentForResource.mockResolvedValue(ONLINE_AGENT);
-    await driver.execAction(EMBY, 'service_action', { subAction: 'start' });
-    expect(AgentManager.sendCommand.mock.calls[0][2].isHighRisk).toBe(false);
+  test('every lifecycle action is signed, start included', async () => {
+    // The agent verifies a signature on start/stop/restart/reload alike
+    // (websocket.go systemd_action); only `status` is exempt. Sending `start`
+    // unsigned just means it is refused.
+    for (const action of ['start', 'stop', 'restart', 'reload']) {
+      AgentManager.sendCommand.mockClear();
+      AgentManager.getAgentForResource.mockResolvedValue(ONLINE_AGENT);
+      await driver.execAction(EMBY, 'service_action', { subAction: action });
+      expect(AgentManager.sendCommand.mock.calls[0][3]).toBe(true);
+    }
+  });
+
+  test('reboot, desktop control and a scrub all go out signed, to the agent', async () => {
+    const cases = [
+      [{ ...EMBY, metadata: { ...EMBY.metadata, subType: 'systemd' } }, 'reboot', 'reboot'],
+      [{ ...EMBY, metadata: { ...EMBY.metadata, subType: 'desktop_linux' } }, 'lock_session', 'desktop_control'],
+      [{ ...EMBY, metadata: { ...EMBY.metadata, subType: 'zfs_pool' } }, 'scrub', 'zpool_scrub']
+    ];
+    for (const [resource, action, wireCommand] of cases) {
+      AgentManager.sendCommand.mockClear();
+      AgentManager.getAgentForResource.mockResolvedValue(ONLINE_AGENT);
+      await driver.execAction(resource, action);
+      const [agent, type, , isHighRisk] = AgentManager.sendCommand.mock.calls[0];
+      expect(type).toBe(wireCommand);
+      expect(agent).toBe(ONLINE_AGENT);
+      expect(isHighRisk).toBe(true);
+    }
   });
 
   test('legacy systemdService resources still resolve', () => {

@@ -3,6 +3,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const conf = require('@simpleworkjs/conf');
 const middleware = require('../middleware/auth');
 const permission = require('../utils/permission');
 const agentManager = require('../utils/agent_manager');
@@ -10,15 +11,35 @@ const agentKeys = require('../utils/agent_keys');
 const ldapTunnel = require('../utils/ldap_tunnel');
 const { Agent, AgentJoinKey } = require('../models/agent');
 const { replicateOnFinish } = require('../utils/replicate_on_finish');
-const { isAgentService, ensureAgentService } = require('../utils/agent_binding');
+const { isAgentService, ensureAgentService, hostForAgent } = require('../utils/agent_binding');
+const { buildNodeIAM } = require('../utils/agent_iam');
 const { resolveSiteHint, currentSite } = require('../utils/agent_site');
 
 const ADMIN_GROUPS = ['app_sso_admin', 'app_super_admin', 'app_sso_directory_admin'];
 
+// How often the server pings a connected agent. One missed pong (so between
+// 30s and 60s of silence) terminates the socket, which is well inside the
+// agent's own 90s read deadline -- both sides give up at about the same time
+// rather than one of them holding a dead connection open.
+const AGENT_PING_INTERVAL_MS = 30000;
+
 // Commands that can change or run code on the host. They are signed with the
 // SSO's persisted Ed25519 key and the agent verifies against the key pinned in
 // its agent.yml.
-const HIGH_RISK_COMMANDS = ['reboot', 'shutdown', 'service_restart', 'systemd_action', 'configure_ldap', 'arbitrary_bash', 'update_binary', 'render_secrets', 'iam_apply'];
+// This list must match the agent's own signature gates (theta-agent
+// websocket.go): every command the agent runs verifySignature on has to be
+// signed here, or the agent answers "signature verification failed" and the
+// command never runs. The mesh and driver paths pass isHighRisk explicitly, but
+// POST /nodes/:id/command signs from this list alone -- so desktop_control,
+// wireguard_apply/remove, register/unregister_service and zpool_scrub were all
+// unreachable through the REST surface until they were added here.
+const HIGH_RISK_COMMANDS = [
+  'reboot', 'shutdown', 'service_restart', 'systemd_action', 'configure_ldap',
+  'arbitrary_bash', 'update_binary', 'render_secrets', 'iam_apply',
+  'desktop_control', 'lock_session', 'logout_user', 'display_off', 'sleep_host',
+  'wireguard_apply', 'wireguard_remove',
+  'register_service', 'unregister_service', 'zpool_scrub'
+];
 
 // ── REST API (mounted synchronously in app.js, BEFORE the 404 catch-all) ──
 // This is a plain Express Router exported directly so app.js can
@@ -535,6 +556,82 @@ router.post('/nodes/:id/command', async (req, res, next) => {
   }
 });
 
+// --- Node IAM ---
+// `iam_apply` had no caller anywhere in this directory, so the agent's whole IAM
+// engine was unreachable (utils/agent_iam.js explains what is and is not
+// derived). These two routes are the caller.
+//
+// Deliberately operator-triggered rather than pushed on connect, unlike
+// configure_ldap: the agent writes /etc/security/access.conf ending in
+// `-:ALL:ALL`, so applying a login policy is a change that can lock people out
+// of a machine. GET shows exactly what would be sent; POST sends it. Auto-
+// applying that to every host the moment it dialled in would be a fleet-wide
+// change nobody asked for, triggered by a reconnect.
+router.get('/nodes/:id/iam', async (req, res, next) => {
+  try {
+    const agent = await Agent.get(req.params.id);
+    if (!agent) return res.status(404).json({ status: 'error', message: 'agent not found' });
+
+    const hostRes = await hostForAgent(agent);
+    if (!hostRes) {
+      return res.status(409).json({ status: 'error', message: 'this agent is not bound to a host' });
+    }
+    const payload = await buildNodeIAM(hostRes);
+    if (!payload) {
+      return res.status(409).json({
+        status: 'error',
+        message: `no IAM policy is derivable for ${hostRes.slug}: it is at no site, so none of the site-scoped groups apply`
+      });
+    }
+    const capabilities = (agent.lastDiscovery && agent.lastDiscovery.capabilities) || {};
+    res.json({
+      status: 'ok',
+      host: { id: hostRes.id, slug: hostRes.slug, name: hostRes.name },
+      // The agent refuses iam_apply unless its own agent.yml enables it, so say
+      // so here rather than letting the push be the thing that finds out.
+      iamCapable: capabilities.iam === true,
+      payload
+    });
+  } catch (err) { next(err); }
+});
+
+router.post('/nodes/:id/iam', async (req, res, next) => {
+  try {
+    const agent = await Agent.get(req.params.id);
+    if (!agent) return res.status(404).json({ status: 'error', message: 'agent not found' });
+    if (agent.revoked) return res.status(403).json({ status: 'error', message: 'agent enrollment is revoked' });
+
+    const hostRes = await hostForAgent(agent);
+    if (!hostRes) {
+      return res.status(409).json({ status: 'error', message: 'this agent is not bound to a host' });
+    }
+    const payload = await buildNodeIAM(hostRes);
+    if (!payload) {
+      return res.status(409).json({
+        status: 'error',
+        message: `no IAM policy is derivable for ${hostRes.slug}: it is at no site, so none of the site-scoped groups apply`
+      });
+    }
+
+    const msg = await dispatchCommandClusterWide(agent, 'iam_apply', payload, true, req);
+    logAgentAudit('iam_apply', {
+      actor: req.user && req.user.uid,
+      agentId: agent.id,
+      agentName: agent.name,
+      resourceId: agent.resourceId || null,
+      nodeId: payload.node_id,
+      revision: payload.revision,
+      allowedLoginGroups: payload.access_control.allowed_login_groups
+    });
+    res.json({ status: 'ok', sentMessage: msg, payload });
+  } catch (err) {
+    logAgentAudit('iam_apply_failed', {
+      actor: req.user && req.user.uid, agentId: req.params.id, error: err.message
+    });
+    res.status(400).json({ status: 'error', message: err.message });
+  }
+});
+
 module.exports = router;
 module.exports.HIGH_RISK_COMMANDS = HIGH_RISK_COMMANDS;
 
@@ -612,7 +709,10 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
             // holding the join key could collide on the hostname and rotate
             // the real host's token, taking it over. A missing/incorrect
             // prev_token is rejected with 4001 (same as bad credential).
-            const prevToken = url.searchParams.get('prev_token');
+            // Header first: a token in a query string is recorded by every
+            // proxy and access log on the way here. ?prev_token= stays
+            // accepted for compatibility with an agent that only sends that.
+            const prevToken = req.headers['x-theta-prev-token'] || url.searchParams.get('prev_token');
             const prevHash = prevToken ? Agent.hashToken(prevToken) : null;
             const knowsCurrent = prevHash && existingAgent.tokenHash === prevHash;
             if (!knowsCurrent) {
@@ -669,6 +769,25 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
     logAgentAudit('connected', { agentId: agent.id, agentName: agent.name, remoteAddr });
     agentManager.registerAgent(agent, ws, remoteAddr);
 
+    // Liveness, from this side. `ws` never pings on its own, and a half-open
+    // socket (NAT timeout, a host that lost power, a dropped tunnel) keeps
+    // readyState OPEN indefinitely -- so isConnected() stayed true, the fleet
+    // view showed the agent up, and every command was written into a socket
+    // nobody was reading instead of being forwarded to the node that really
+    // holds the agent. The agent has its own 60s ping/90s deadline; this is
+    // the same check in the other direction.
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
+    const liveness = setInterval(() => {
+      if (ws.isAlive === false) {
+        console.warn(`[Theta Agent] "${agent.name}" (${agent.id}) missed its pong -- terminating the socket`);
+        try { ws.terminate(); } catch (e) {}
+        return;
+      }
+      ws.isAlive = false;
+      try { ws.ping(); } catch (e) {}
+    }, AGENT_PING_INTERVAL_MS);
+
     // Send initial welcome/config payload (credentials on enroll + home detection hints).
     (async () => {
       try {
@@ -682,10 +801,25 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
           payload.auth_token = issuedToken;
           payload.public_key = await agentManager.publicKeyBase64();
         }
-        Object.assign(payload, await homeDetectHints());
-        const orgName = (conf.name && conf.name !== 'SSO Manager') ? conf.name : ((conf.directory && conf.directory.name) || null);
-        if (orgName) {
-          payload.organization_name = orgName;
+        // The optional half of this frame is gathered defensively, each piece
+        // on its own. The credentials above are load-bearing -- an agent that
+        // enrolled with a join key and never receives them persists no token,
+        // re-dials with the join key, collides on its own hostname and is
+        // locked out for good (4001, contract G-2). A ReferenceError reading
+        // `conf` here used to throw before the send, so NO agent received a
+        // config frame at all: no token, no home-detect hints, no branding.
+        try {
+          Object.assign(payload, await homeDetectHints());
+        } catch (err) {
+          console.error(`[Theta Agent] home-detect hints unavailable for "${agent.name}":`, err.message);
+        }
+        try {
+          const orgName = (conf.name && conf.name !== 'SSO Manager')
+            ? conf.name
+            : ((conf.directory && conf.directory.name) || null);
+          if (orgName) payload.organization_name = orgName;
+        } catch (err) {
+          console.error(`[Theta Agent] organization name unavailable for "${agent.name}":`, err.message);
         }
         ws.send(JSON.stringify({ type: 'config', payload }));
         if (issuedToken) {
@@ -699,7 +833,19 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
     ws.on('message', async (message) => {
       try {
         const data = JSON.parse(message);
-        if (!data || typeof data.type !== 'string') return;
+        if (!data || typeof data !== 'object') return;
+        if (typeof data.type !== 'string') {
+          // Agents up to v2.21.9 answered commands with a bare
+          // `{status, message, ...}` and no envelope, so every command
+          // response was dropped here without a word -- lastResponse stayed
+          // null forever and no command output ever reached the UI. Treat a
+          // typeless frame carrying a status as the response it is; anything
+          // else is not something the agent protocol defines.
+          if (typeof data.status !== 'string') return;
+          data.type = 'response';
+          data.payload = { ...data };
+          delete data.payload.type;
+        }
 
         // Re-read the row per message so a revoke mid-session takes effect on
         // the next thing the agent says, not only on reconnect.
@@ -716,7 +862,6 @@ module.exports.initAgentWebSockets = function initAgentWebSockets(app) {
             await agentManager.handleDiscovery(current, payload);
             socketPubsub.emitChannel(app.io, 'agent.discovery', { agentId: current.id, payload });
             if (payload.capabilities && payload.capabilities.configure_ldap) {
-              const conf = require('@simpleworkjs/conf');
               const ssoHost = conf.stack && conf.stack.ssoHost;
               const ldapBaseDn = conf.stack && conf.stack.ldapBaseDn;
               // Refuse to push SSSD config when stack host/base are unset: a
@@ -823,7 +968,12 @@ refresh_expired_interval = 300
       }
     });
 
+    ws.on('error', (err) => {
+      console.warn(`[Theta Agent] socket error for "${agent.name}" (${agent.id}): ${err.message}`);
+    });
+
     ws.on('close', () => {
+      clearInterval(liveness);
       console.log(`[Theta Agent] "${agent.name}" (${agent.id}) disconnected`);
       agentManager.unregisterAgent(agent.id, ws);
       // Scoped to THIS ws: an agent that reconnected already has relay
@@ -864,7 +1014,6 @@ async function homeDetectHints() {
   const hints = {};
   const lanEndpoints = [];
   const dns = require('dns');
-  const conf = require('@simpleworkjs/conf');
   const isPrivateIp = (ip) => {
     if (!ip) return false;
     return /^(10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|127\.|169\.254\.|fc00:|fd00:|fe80::)/.test(ip);

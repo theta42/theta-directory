@@ -83,11 +83,32 @@ class ThetaAgentDriver extends BaseDriver {
       }
     };
 
-    // Subtype-specific metrics extraction from agent telemetry
+    // Subtype-specific metrics extraction from agent telemetry.
+    //
+    // Read only what the agent actually sends (theta-agent telemetry.go).
+    // `telemetry.zfs` and `telemetry.wireguard` used to be read with a default
+    // standing in for them, and neither key has ever existed on the wire: every
+    // zfs_pool resource in the catalog reported a hardcoded `status: 'ONLINE'`
+    // whatever the pool was really doing, and every wireguard resource an empty
+    // peer list. A default that is indistinguishable from a healthy reading is
+    // worse than no reading.
     if (subType === 'zfs_pool') {
-      result.zfs = telemetry.zfs || { status: 'ONLINE', pools: [] };
+      // `zfs_health` is the pool status string the agent reports (`ONLINE`,
+      // `DEGRADED`, …), or 'N/A' when it found no pool.
+      const health = telemetry.zfs_health || null;
+      result.zfs = {
+        status: health && health !== 'N/A' ? health : null,
+        reported: !!(health && health !== 'N/A')
+      };
     } else if (subType === 'wireguard') {
-      result.wireguard = telemetry.wireguard || { peers: [], interfaces: [] };
+      const wg = telemetry.wireguard || null;
+      result.wireguard = {
+        active: wg ? !!wg.active : null,
+        // Tools installed on the host. False with active:false is the one
+        // combination that explains itself -- the tunnel cannot come up.
+        ready: wg ? !!wg.ready : null,
+        reported: !!wg
+      };
     } else if (subType === 'systemd' || subType === 'docker' || subType === 'podman' || subType === 'process' || subType === 'systemd-timer' || subType === 'cron' || subType === 'lxc' || subType === 'kvm' || subType === 'libvirt') {
       const targetService = (resource.metadata && (resource.metadata.serviceName || resource.metadata.systemdService || resource.metadata.dockerContainer || resource.metadata.installPath)) || resource.name || resource.slug;
       // Live status + resource usage come from the telemetry stream (per
@@ -135,18 +156,18 @@ class ThetaAgentDriver extends BaseDriver {
     const subType = ((resource.metadata && resource.metadata.subType) || '').toLowerCase();
 
     if (action === 'reboot' || action === 'shutdown') {
-      const result = await AgentManager.sendCommand(agent.id, action, { isHighRisk: true });
+      const result = await AgentManager.sendCommand(agent, action, {}, true);
       return { status: 'ok', driver: this.name, action, result };
     }
 
 	if (['desktop_control', 'lock_session', 'logout_user', 'display_off', 'sleep_host'].includes(action) || subType.startsWith('desktop')) {
 		const subAction = params.subAction || action;
 		const targetUser = params.user || '';
-		const result = await AgentManager.sendCommand(agent.id, 'desktop_control', {
-			subAction,
-			user: targetUser
 		// H7: these session-control commands mutate user state, so the agent
 		// requires an Ed25519 signature on them (fail-closed). Sign them.
+		const result = await AgentManager.sendCommand(agent, 'desktop_control', {
+			subAction,
+			user: targetUser
 		}, true);
 		return { status: 'ok', driver: this.name, action: subAction, result };
 	}
@@ -175,19 +196,23 @@ class ThetaAgentDriver extends BaseDriver {
         };
       }
       const serviceName = ThetaAgentDriver.serviceTarget(resource, params);
-      const result = await AgentManager.sendCommand(agent.id, 'systemd_action', {
+      // The agent verifies a signature on every action but `status`
+      // (websocket.go systemd_action), so all four of these are signed. They
+      // used to pass `isHighRisk` as a PAYLOAD key, which signs nothing: the
+      // flag rode along inside the command and the frame went out unsigned, so
+      // the agent answered "signature verification failed" to every one.
+      const result = await AgentManager.sendCommand(agent, 'systemd_action', {
         service: serviceName,
         subtype: subType,
-        action: subAction,
-        // stop and restart interrupt something that is running; start does not.
-        isHighRisk: ['stop', 'restart'].includes(subAction)
-      });
+        action: subAction
+      }, true);
       return { status: 'ok', driver: this.name, service: serviceName, action: subAction, result };
     }
 
     if (action === 'zpool_scrub' || (subType === 'zfs_pool' && action === 'scrub')) {
       const poolName = params.pool || 'rpool';
-      const result = await AgentManager.sendCommand(agent.id, 'zpool_scrub', { pool: poolName });
+      // Signed and gated on the agent's `storage` capability at the far end.
+      const result = await AgentManager.sendCommand(agent, 'zpool_scrub', { pool: poolName }, true);
       return { status: 'ok', driver: this.name, pool: poolName, action: 'scrub', result };
     }
 

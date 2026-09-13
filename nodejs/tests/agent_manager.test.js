@@ -90,6 +90,32 @@ describe('AgentManager PROTOCOL.md v1.2.0 Compliance', () => {
     expect(agent.persisted.last_seen).toEqual(expect.any(Number));
   });
 
+  // The MAC is the one stable host identity the agent reports, and the whole
+  // adoption path downstream is keyed on it. handleDiscovery builds an explicit
+  // whitelist of fields and this one was missing from it, so every use of
+  // `discovery.mac_address` in applyDiscoveryToDirectory read undefined: the MAC
+  // tier of host adoption never fired, an unbound agent's host slug always fell
+  // back to its hostname, and the host row never recorded a MAC for any other
+  // discovery source to match against. The adoption tests below pass
+  // applyDiscoveryToDirectory a mac_address directly, which is exactly why none
+  // of them could see it.
+  test('keeps the MAC address on the path from the wire to the directory (Section 3.1)', async () => {
+    agentManager.registerAgent(agent, mockWs, '192.168.1.100');
+    const applied = jest.spyOn(agentManager, 'applyDiscoveryToDirectory').mockResolvedValue();
+
+    await agentManager.handleDiscovery(agent, {
+      hostname: 'node-01.local',
+      mac_address: '6e:65:df:28:bb:21',
+      ip_addresses: ['192.168.1.100']
+    });
+
+    expect(agent.persisted.lastDiscovery.mac_address).toBe('6e:65:df:28:bb:21');
+    expect(applied).toHaveBeenCalledWith(agent, expect.objectContaining({
+      mac_address: '6e:65:df:28:bb:21'
+    }));
+    applied.mockRestore();
+  });
+
   test('persists telemetry to the agent row (Section 3.2)', async () => {
     agentManager.registerAgent(agent, mockWs, '192.168.1.100');
     await agentManager.handleTelemetry(agent, {
@@ -561,5 +587,108 @@ describe('getAgentForResource', () => {
     const host = await Resource.create({ id: crypto.randomUUID(), kind: 'host', name: 'lonely', slug: 'host-lonely', metadata: {} });
     const found = await agentManager.getAgentForResource(host.id);
     expect(found).toBeNull();
+  });
+});
+
+// PROTOCOL.md 3.5 has always said a service removed from agent.yml loses its
+// child resource "on the next reconciliation". Nothing ever removed anything:
+// only an explicit unregister_service frame did, so a name deleted from
+// agent.yml by hand -- or on a host whose unregister frame was lost -- left a
+// child resource reporting stale health for good.
+describe('theta-agent service pruning', () => {
+  const { Resource, ResourceEdge } = require('../models/resource');
+  const { initORM } = require('../models');
+
+  let hostRes;
+  let agent;
+
+  beforeAll(async () => {
+    await initORM();
+  });
+
+  beforeEach(async () => {
+    for (const r of await Resource.list().catch(() => [])) await r.delete().catch(() => {});
+    for (const e of await ResourceEdge.list().catch(() => [])) await e.delete().catch(() => {});
+
+    const hostId = crypto.randomUUID();
+    hostRes = await Resource.create({
+      id: hostId,
+      kind: 'host',
+      name: 'prune-host',
+      slug: 'host_prune-host',
+      metadata: { subType: 'linux' },
+      created_on: Math.floor(Date.now() / 1000)
+    });
+    const agentSvc = await Resource.create({
+      id: crypto.randomUUID(),
+      kind: 'service',
+      name: 'theta-agent',
+      slug: 'svc-prune-host-theta-agent',
+      metadata: { subType: 'theta-agent', hostId },
+      created_on: Math.floor(Date.now() / 1000)
+    });
+    await ResourceEdge.create({
+      id: crypto.randomUUID(), parentId: hostId, childId: agentSvc.id, relation: 'hosts'
+    });
+    agent = stubAgent({ name: 'prune-host', resourceId: agentSvc.id });
+  });
+
+  const serviceNames = async () => {
+    const rows = await Resource.list({ where: { kind: 'service' } });
+    return rows.filter(r => r.metadata?.subType !== 'theta-agent').map(r => r.name).sort();
+  };
+
+  test('a service the agent stops reporting loses its child resource', async () => {
+    await agentManager.handleTelemetry(agent, {
+      services: [{ name: 'nginx', subtype: 'systemd' }, { name: 'redis', subtype: 'docker' }]
+    });
+    expect(await serviceNames()).toEqual(['nginx', 'redis']);
+
+    // `redis` removed from agent.yml; the next frame simply does not mention it.
+    await agentManager.handleTelemetry(agent, {
+      services: [{ name: 'nginx', subtype: 'systemd' }]
+    });
+    expect(await serviceNames()).toEqual(['nginx']);
+
+    // Edges go with it -- an edge pointing at a deleted row is invisible in the
+    // UI and poisonous to getGraph().
+    const edges = await ResourceEdge.list({ where: { parentId: hostRes.id } });
+    const names = [];
+    for (const e of edges) {
+      const child = await Resource.get(e.childId).catch(() => null);
+      if (child) names.push(child.name);
+    }
+    expect(names).not.toContain('redis');
+  });
+
+  test('an empty list prunes, an absent one does not', async () => {
+    await agentManager.handleTelemetry(agent, { services: [{ name: 'nginx', subtype: 'systemd' }] });
+    expect(await serviceNames()).toEqual(['nginx']);
+
+    // An older agent omits the key entirely when it has no services. Pruning on
+    // that would delete the service tree of every host running an older agent.
+    await agentManager.handleTelemetry(agent, { cpu_usage_percent: 3 });
+    expect(await serviceNames()).toEqual(['nginx']);
+
+    // An explicit empty list is the agent saying "none left".
+    await agentManager.handleTelemetry(agent, { services: [] });
+    expect(await serviceNames()).toEqual([]);
+  });
+
+  test('a service another source also sees is kept, and only loses this source', async () => {
+    await agentManager.handleTelemetry(agent, { services: [{ name: 'gitea', subtype: 'docker' }] });
+    const gitea = (await Resource.list({ where: { kind: 'service' } }))
+      .find(r => r.name === 'gitea');
+    // A docker-socket scan sees the same container.
+    await gitea.update({
+      metadata: { ...gitea.metadata, discovery_sources: ['theta-agent', 'docker-socket'] }
+    });
+
+    await agentManager.handleTelemetry(agent, { services: [] });
+
+    const after = await Resource.get(gitea.id);
+    expect(after).toBeTruthy();
+    // The agent no longer watching it is not evidence the thing is gone.
+    expect(after.metadata.discovery_sources).toEqual(['docker-socket']);
   });
 });

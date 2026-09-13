@@ -168,6 +168,13 @@ class AgentManager {
       hostname: payload.hostname || '',
       ip_addresses: Array.isArray(payload.ip_addresses) ? payload.ip_addresses : [],
       public_ip: payload.public_ip || '',
+      // The primary NIC's MAC. The agent has always sent it and
+      // applyDiscoveryToDirectory has always read it -- but this whitelist
+      // dropped it, so `discovery.mac_address` was undefined at every use:
+      // the MAC tier of host adoption never fired, an unbound agent's host
+      // slug always fell back to its hostname, and the host row never
+      // recorded a MAC for any other discovery source to match against.
+      mac_address: payload.mac_address || '',
       os: payload.os || '',
       kernel: payload.kernel || '',
       cpu: payload.cpu || '',
@@ -211,8 +218,21 @@ class AgentManager {
     // The telemetry stream is a second, softer reconciliation pass: if a
     // register_service frame was ever lost, the periodic telemetry keeps the
     // directory's service children in sync with the agent's `services:` list.
-    if (Array.isArray(payload.services) && payload.services.length > 0) {
-      await this.reconcileServicesFromTelemetry(agent, payload.services).catch(err =>
+    //
+    // Pruning rides on the same pass. PROTOCOL.md 3.5 has always promised that
+    // a service removed from agent.yml loses its child resource "on the next
+    // reconciliation", but nothing ever removed anything -- only an explicit
+    // unregister_service frame did, so a service deleted from agent.yml by
+    // hand (or on a host whose unregister frame was lost) left a child
+    // resource reporting stale health forever.
+    //
+    // An ABSENT services key means "this agent told us nothing", not "this
+    // agent has no services": agents before v2.22.0 omitted the key when the
+    // list was empty, and pruning on that would delete the whole service tree
+    // of every host running an older agent. Only a present array is
+    // authoritative, and an empty one then legitimately means "none left".
+    if (Array.isArray(payload.services)) {
+      await this.reconcileServicesFromTelemetry(agent, payload.services, { prune: true }).catch(err =>
         console.error(`[AgentManager] telemetry service reconcile failed for ${agent.id}:`, err.message)
       );
     }
@@ -222,7 +242,7 @@ class AgentManager {
   // service (systemd unit or docker container), parented under this agent's
   // host. Idempotent and safe to run on every telemetry tick -- it matches by
   // (host, subtype, name) and only creates when missing.
-  async reconcileServicesFromTelemetry(agent, services) {
+  async reconcileServicesFromTelemetry(agent, services, options = {}) {
     const { Resource, ResourceEdge } = require('../models/resource');
 
     const hostRes = await hostForAgent(agent);
@@ -230,6 +250,8 @@ class AgentManager {
       console.warn(`[AgentManager] cannot reconcile services for ${agent.id}: no bound host resource`);
       return;
     }
+    // Names this pass saw, for the prune below.
+    const reported = new Set();
 
     const allServices = await Resource.list({ where: { kind: 'service' } }).catch(() => []);
     const hostEdges = await ResourceEdge.list({ where: { parentId: hostRes.id } }).catch(() => []);
@@ -239,6 +261,7 @@ class AgentManager {
       const name = (typeof svc === 'string') ? svc : (svc && svc.name);
       if (!name) continue;
       const subtype = (svc && (svc.subtype || svc.subType)) || 'systemd';
+      reported.add(`${subtype}/${name}`);
       const slug = `svc-${hostRes.slug.replace(/^host-/, '')}-${subtype}-${name.toLowerCase().replace(/[^a-z0-9_-]/g, '-')}`;
 
       // Match on host parentage and matching subtype + serviceName / dockerContainer / systemdService / name.
@@ -300,6 +323,60 @@ class AgentManager {
           }).catch(() => {});
         }
       }
+    }
+
+    if (options.prune) {
+      await this.pruneServicesNotReported(hostRes, allServices, childIds, reported);
+    }
+  }
+
+  // Drop the child resources of a host that the agent no longer reports.
+  //
+  // Scoped to what THIS source created: a resource only disappears when
+  // theta-agent is the only discovery source that ever saw it. A service some
+  // other source also knows about (a docker-socket scan, a seeded catalog
+  // entry, an operator's hand-made resource) keeps its row and merely loses the
+  // 'theta-agent' source, because the agent ceasing to report it is not
+  // evidence that the thing is gone -- only that this agent stopped watching
+  // it. Deleting on that basis would make removing one name from agent.yml
+  // quietly delete an operator's resource.
+  async pruneServicesNotReported(hostRes, allServices, childIds, reported) {
+    const { Resource, ResourceEdge } = require('../models/resource');
+
+    const mine = allServices.filter(r => {
+      const meta = r.metadata || {};
+      const isChildOfHost = meta.hostId === hostRes.id || childIds.has(r.id);
+      if (!isChildOfHost) return false;
+      return Array.isArray(meta.discovery_sources) && meta.discovery_sources.includes('theta-agent');
+    });
+
+    for (const res of mine) {
+      const meta = res.metadata || {};
+      const subtype = meta.subType || 'systemd';
+      const name = meta.serviceName || meta.dockerContainer || meta.systemdService || res.name;
+      if (!name) continue;
+      if (reported.has(`${subtype}/${name}`)) continue;
+
+      const sources = (meta.discovery_sources || []).filter(src => src !== 'theta-agent');
+      if (sources.length) {
+        await res.update({
+          metadata: { ...meta, discovery_sources: sources },
+          updated_on: nowSeconds()
+        }).catch(() => {});
+        console.log(`[AgentManager] ${hostRes.slug}: ${subtype} ${name} no longer reported by the agent (kept, still seen by ${sources.join(', ')})`);
+        continue;
+      }
+
+      // Edges first: a row deleted before its edges leaves edges pointing at
+      // an id that no longer exists, invisible in the UI and poisonous to
+      // getGraph() -- the same ordering rule the resource delete route uses.
+      const [asChild, asParent] = await Promise.all([
+        ResourceEdge.list({ where: { childId: res.id } }).catch(() => []),
+        ResourceEdge.list({ where: { parentId: res.id } }).catch(() => [])
+      ]);
+      for (const e of [...asChild, ...asParent]) await e.delete().catch(() => {});
+      await res.delete().catch(() => {});
+      console.log(`[AgentManager] ${hostRes.slug}: dropped ${subtype} service ${name} -- no longer in the agent's services list`);
     }
   }
 
