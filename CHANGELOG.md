@@ -1,3 +1,8 @@
+## [2.38.2] - 2026-09-14
+
+### Added
+- **`tests/fresh_install_onboarding.test.js`** — the convergence a fresh master install depends on and nothing covered: `bootstrap.js` seeds the stack host, `setup.sh` then installs theta-agent on that same machine, and the agent's first discovery must ADOPT the seeded row rather than add a second one. Covers a matching MAC, a seeded row with no MAC, and an IP that moved between setup and enrolment. A fourth test pins the case that is *not* recoverable — a seeded MAC that disagrees with the agent's — and records why loosening the matcher is the wrong fix for it (see theta-suite v3.40.0: the producers are aligned instead).
+
 ## [2.38.1] - 2026-09-13
 
 ### Changed
