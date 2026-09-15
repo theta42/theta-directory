@@ -514,6 +514,17 @@ Proxy/TLS material (v2.21.8):
 - **Agent-pulled configuration beyond Proxy/TLS material** — a true
   independent poll loop, generic config types, and automatic rollback are
   still open; see above.
+- **`views/directory.ejs` is one file doing everything.** 5,043 lines /
+  253KB of inline HTML + CSS + JS: tree rendering, the resource modal, the
+  subtype template editor and access logic all in a single EJS template —
+  6.6× the next-largest view (`conf.ejs`, 761 lines). This is a risk, not a
+  style complaint: the worst regression in this project's history was a
+  nested `<script>` tag in exactly this file, which made the Directory page
+  silently not run at all for three releases (`bbc6537`, "the directory page
+  did not run at all"). Every feature added here carries that same failure
+  mode, and the page is large enough that a reviewer cannot hold it in view.
+  Decomposition has started (`756d976`, v2.36.21, first slice) and is not
+  finished.
 
 Closed since the list above was written:
 

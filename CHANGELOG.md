@@ -1,3 +1,8 @@
+## [2.38.3] - 2026-09-14
+
+### Documentation
+- **`docs/resources-reimagined.md` records `views/directory.ejs` as a standing risk.** 5,043 lines / 253KB of inline HTML + CSS + JS in one EJS template — tree rendering, the resource modal, the subtype template editor and access logic — 6.6x the next-largest view (`conf.ejs`, 761 lines). Not a style note: the worst regression in this project's history was a nested `<script>` tag in this exact file, which made the Directory page silently not run at all for three releases (`bbc6537`). Decomposition started in v2.36.21 and is unfinished, so the risk is live. The gaps list had no entry for it.
+
 ## [2.38.2] - 2026-09-14
 
 ### Added
