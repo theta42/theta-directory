@@ -1,3 +1,42 @@
+## [2.39.0] - 2026-09-16
+
+### Fixed
+- **OpenLDAP and OpenResty never showed a status, on any install.**
+  `services/scheduler.js` only evaluates a resource whose subType has a
+  SubtypeTemplate, and `openldap` and `openresty` -- two of the most important
+  services in the stack, seeded by theta-suite's own installer -- were missing
+  from the shipped vocabulary. So they sat permanently blank while
+  `sso-manager` (`web`) and the jump host (`ssh`) beside them reported
+  normally. They also got no schema fields in the edit modal and never appeared
+  in the subtype picker. `jump-host` (emitted by `routes/api_site.js` when
+  pre-registering a spoke) had the same gap.
+
+  All three are now shipped templates, with icons, status rules and schemas.
+  Deliberately their own entries rather than aliases of `ldap`/`nginx`: every
+  existing install already has resources carrying these exact subType strings,
+  so adding the templates fixes them in place with no migration.
+
+- **The Font Awesome SVG-with-JS build is no longer loaded.** `views/top.ejs`
+  pulled both the webfont stylesheet *and* `js/all.min.js`. The JS build runs a
+  MutationObserver over the whole document, rewriting every `<i>` into an
+  `<svg>` and keeping the original source. On a page that re-renders a list
+  often it cannot keep up: measured in Chrome, 150 rows x 6 rebuilds froze the
+  renderer at 776MB having converted **zero** icons, while the same run without
+  it was untroubled. The stylesheet alone renders the same `fa-solid fa-*`
+  classes with no scripting, and nothing in any of the three apps uses an
+  SVG-only feature (`fa-layers`, power transforms, masks).
+
+  Separate from the `app.notify` leak fixed in 2.38.4 -- that one was the 4GB;
+  this one is why the Directory also janked.
+
+### Added
+- **`tests/subtype_vocabulary.test.js` now asserts every subType theta-suite's
+  bootstrap seeds has a template.** The suite already guarded what a discovery
+  plugin or the agent emits; nothing guarded what the installer emits, which is
+  exactly how `openldap` and `openresty` shipped without one for several
+  releases. A missing template is silent -- no error anywhere, just a resource
+  that never gets a status.
+
 ## [2.38.4] - 2026-09-16
 
 ### Fixed

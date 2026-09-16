@@ -414,6 +414,37 @@ class SubtypeTemplate extends Model {
         { properties: { port: portField('Port', 25) } }, 'Network services'),
       app('ldap', 'LDAP', 'A directory server.', 'fa-solid fa-address-book',
         { properties: { port: portField('Port', 389) } }, 'Network services'),
+
+      // ── The suite's own components ──────────────────────────────────────
+      // theta-suite's bootstrap seeds these subtypes for the services it
+      // deploys (bootstrap/bootstrap.js, and routes/api_site.js for a spoke).
+      // They were missing from this table, and a subtype with no template is
+      // not a cosmetic gap: services/scheduler.js only evaluates subtypes it
+      // finds here, so OpenLDAP and OpenResty -- two of the most important
+      // services in the stack -- carried no status dot at all, permanently,
+      // while `sso-manager` (web) and `jump-host` (ssh) beside them did. They
+      // also got no schema fields and never appeared in the subtype picker.
+      //
+      // Deliberately their own entries rather than reusing `ldap`/`nginx`:
+      // every install already has resources carrying these exact subType
+      // strings, so adding the templates fixes them in place with no
+      // migration, where switching what bootstrap emits would strand them.
+      app('openldap', 'OpenLDAP Directory', 'The LDAP directory backing this site\'s identity.', 'fa-solid fa-book-open',
+        { properties: {
+            port: portField('LDAP port', 389),
+            externalPort: portField('LDAPS port', 636),
+            address: { type: 'string', description: 'LDAPS URL (ldaps://host:636)' }
+          } }, 'Network services'),
+      app('openresty', 'OpenResty Edge', 'The data plane every hostname in the site flows through.', 'fa-solid fa-network-wired',
+        { properties: {
+            port: portField('HTTPS port', 443),
+            address: { type: 'string', description: 'Base / wildcard URL (https://*.example.com)' }
+          } }, 'Web'),
+      app('jump-host', 'SSH Jump Host', 'The SSH entry point to every managed host in the site.', 'fa-solid fa-terminal',
+        { properties: {
+            port: portField('SSH port', 2222),
+            address: { type: 'string', description: 'SSH URL (ssh://host:2222)' }
+          } }, 'Remote access'),
       app('radius', 'RADIUS', 'A RADIUS authentication server.', 'fa-solid fa-key',
         { properties: { port: portField('Port', 1812) } }, 'Network services'),
       app('syslog', 'Syslog', 'A syslog collector.', 'fa-solid fa-file-lines',
