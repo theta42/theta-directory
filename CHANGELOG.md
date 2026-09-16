@@ -1,3 +1,30 @@
+## [2.38.4] - 2026-09-16
+
+### Fixed
+- **The Directory page grew until the browser killed the tab (observed at 4GB).**
+  Not the tree renderer and not the catalog size -- the install this was
+  reproduced on has 74 resources, which render in about 20ms. The growth was in
+  `app.notify` (`@simpleworkjs/frontend`), which subscribes to every model event
+  for the life of the tab and appended each one to an array nothing ever
+  trimmed, then re-collapsed that entire array on **every** new event to render
+  30 rows. One arriving event therefore cost O(history), on a history that only
+  grew.
+
+  The Directory is the page that dies because it is the highest-event-rate page
+  in the stack: a Proxmox discovery poll rewrites `last_seen` on every
+  discovered guest (here 41 LXC + 12 VM + 3 hypervisors), and each write
+  publishes `model:Resource:update` to every open Directory tab
+  (`utils/socket_pubsub.js`).
+
+  Fixed upstream in `@simpleworkjs/frontend` v0.4.3, picked up here. The event
+  history is now capped and collapsing stops once it has enough rows; rendered
+  output is unchanged.
+
+### Changed
+- `@simpleworkjs/frontend` `^0.4.0` -> `^0.4.3`. The lockfile had been pinned at
+  0.4.1, so this also picks up 0.4.2 (notification model icons, foreground
+  toasts, `app.notify.clear()`) and 0.4.1's `app.messages.confirm()` fix.
+
 ## [2.38.3] - 2026-09-14
 
 ### Documentation
