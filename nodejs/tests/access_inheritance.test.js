@@ -109,7 +109,7 @@ const svc = (id, slug, metadata = {}) => ({ id, kind: 'service', slug, metadata:
 describe('accessibleResources honours inherited grants', () => {
   const web = host('h1', 'web01', { subType: 'linux' });
   const db = host('h2', 'db01', { subType: 'linux' });
-  const app = svc('s1', 'sso-manager-718it', { subType: 'web' });
+  const app = svc('s1', 'sso-manager-718it', { subType: 'http' });
   const all = [SITE, web, db, app];
   const edges = [edge('site1', 'h1'), edge('site1', 'h2'), edge('h1', 's1')];
 

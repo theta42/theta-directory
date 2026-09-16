@@ -37,21 +37,19 @@
     word-break: break-all;
 }
 .empty-note { color: var(--bs-secondary-color, #6c757d); font-style: italic; }
+/* The status dot sits on the title line, optically centred against the text
+   rather than the line box -- a raw fa-circle at this size reads as sitting
+   too high next to a heading. */
+.status-dot { font-size: .55rem; line-height: 1; padding-top: .45rem; flex: 0 0 auto; }
+.howto code { display: block; }
+.howto code:first-child { font-weight: 600; }
 </style>
 
 <div class="container mt-4">
     <div class="row mb-4">
-        <div class="col-md-8">
+        <div class="col-12">
             <input type="text" id="catalog-search" class="form-control shadow-sm"
-                   placeholder="Search services and hosts..." onkeyup="renderAll()">
-        </div>
-        <div class="col-md-4 mt-2 mt-md-0">
-            <select id="catalog-kind" class="form-select shadow-sm" onchange="renderAll()">
-                <option value="">All kinds</option>
-                <option value="service">Services &amp; apps</option>
-                <option value="host">Hosts</option>
-                <option value="site">Sites</option>
-            </select>
+                   placeholder="Search for a service..." onkeyup="renderAll()">
         </div>
     </div>
 
@@ -65,40 +63,27 @@
         <ul class="list-group mb-5 shadow-sm" id="approvals"></ul>
     </div>
 
-    <!-- My Access section with tabs -->
+    <!-- One grid. The Services/Hosts tabs are gone with hosts themselves:
+         browsing machines is a different job for a different audience, and it
+         lives in the directory. -->
     <div class="card shadow mb-4">
         <div class="card-header d-flex justify-content-between align-items-center">
-            <span><i class="fa-solid fa-layer-group text-success"></i> My Access</span>
-        </div>
-        <div class="px-3 pt-3 border-bottom">
-            <ul class="nav nav-tabs border-bottom-0" role="tablist">
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#my-services-tab" type="button" role="tab">
-                        <i class="fa-solid fa-cube"></i> Services
-                    </button>
-                </li>
-                <li class="nav-item" role="presentation">
-                    <button class="nav-link" data-bs-toggle="tab" data-bs-target="#my-hosts-tab" type="button" role="tab">
-                        <i class="fa-solid fa-server"></i> Hosts
-                    </button>
-                </li>
-            </ul>
+            <span><i class="fa-solid fa-layer-group text-success"></i> Yours</span>
         </div>
         <div class="card-body">
-            <div class="tab-content">
-                <div class="tab-pane fade show active" id="my-services-tab" role="tabpanel">
-                    <div class="catalog-grid" id="my-services"></div>
-                </div>
-                <div class="tab-pane fade" id="my-hosts-tab" role="tabpanel">
-                    <div class="catalog-grid" id="my-hosts"></div>
-                </div>
-            </div>
+            <div class="catalog-grid" id="my-services"></div>
         </div>
     </div>
 
-    <h3 class="mb-3"><i class="fa-solid fa-compass text-secondary"></i> Discover More</h3>
+    <h3 class="mb-3"><i class="fa-solid fa-compass text-secondary"></i> Available to request</h3>
     <p class="text-muted small">Things you don't have access to yet. Request what you need.</p>
     <div class="catalog-grid mb-5" id="other-services"></div>
+
+    <p class="text-muted small" id="catalog-admin-note" style="display:none;">
+        <i class="fa-solid fa-circle-info"></i>
+        Only services an admin has marked <strong>Show in catalog</strong> appear here.
+        Everything else lives in the <a href="/directory">directory</a>.
+    </p>
 </div>
 
 <script type="text/javascript">
@@ -109,7 +94,29 @@
     // works in this deployment rather than a guess.
     var DIRECTORY_CONF = <%- JSON.stringify(directoryConf) %>;
 
-    var state = { mine: [], others: [], requests: [], approvals: [], uid: null };
+    var state = { mine: [], others: [], requests: [], approvals: [], uid: null, isAdmin: false };
+
+    // Same groups directory.ejs gates itself on. Used only to decide whether a
+    // card offers a link into the directory -- sending someone who cannot open
+    // that page to it is a dead end, and for the audience this page is built
+    // for a 79-row graph view is a dead end even when it does open.
+    var DIRECTORY_ADMIN_GROUPS = ['app_sso_admin', 'app_sso_directory_admin', 'admin'];
+
+    // What belongs on this page. A catalog entry is an `http` service an admin
+    // has explicitly marked -- never a host, never everything that happens to
+    // be in the directory.
+    //
+    // Before this, the page rendered every managed resource it could see. On a
+    // directory with a Proxmox cluster in it that meant a user with no access
+    // at all was shown 76 cards -- 41 LXC containers, 12 VMs, 3 hypervisors --
+    // 27 of which had no address to reach them by. That is not discovery, and
+    // it published the shape of the estate to anyone with an account.
+    function isCatalogEntry(r) {
+        if (!r || r.kind !== 'service') return false;
+        var md = r.metadata || {};
+        if (isOAuthSubtype(md.subType)) return false;
+        return md.catalog === true;
+    }
 
     var KIND_ICONS = {
         site:    'fa-solid fa-city',
@@ -151,42 +158,104 @@
     // "How do I actually use this?" — the question the directory exists to
     // answer and the one the old portal never did. Everything here is derived
     // from directory metadata; nothing is hardcoded per-service.
+    // Build a URL from the `http` subtype's two halves. External wins when it
+    // has an FQDN -- that is the name a person off the LAN can actually use --
+    // and the internal address (which may be blank, and resolved from the
+    // parent host server-side) is the fallback.
+    function urlFor(r) {
+        var md = r.metadata || {};
+
+        if (md.fqdn) {
+            var ePort = md.externalPort;
+            var eScheme = md.externalIsHTTPS === false ? 'http' : 'https';
+            var eDefault = eScheme === 'https' ? 443 : 80;
+            return eScheme + '://' + md.fqdn + (ePort && Number(ePort) !== eDefault ? ':' + ePort : '');
+        }
+
+        var addr = r.resolvedAddress || md.address || md.ip;
+        if (!addr) return null;
+        // An address that is already a URL is used as-is, whatever its scheme.
+        // This is also what stops an `ssh://` address being rewritten into
+        // `https://ssh://host:2222:2222`, which is what the old code produced
+        // for every ssh service on the page.
+        if (/^[a-z][a-z0-9+.-]*:\/\//i.test(addr)) return addr;
+
+        var scheme = md.isHTTPS === false ? 'http' : (md.isHTTPS ? 'https' : 'https');
+        var port = md.port;
+        var dflt = scheme === 'https' ? 443 : 80;
+        return scheme + '://' + addr + (port && Number(port) !== dflt ? ':' + port : '');
+    }
+
+    // "How do I actually use this?" — the question the directory exists to
+    // answer and the one the old portal never did. Everything here is derived
+    // from directory metadata; nothing is hardcoded per-service.
     function howTo(r) {
         var md = r.metadata || {};
         var addr = r.resolvedAddress || md.address || md.ip;
         var lines = [];
 
-        if (r.kind === 'host') {
-            var sshPort = md.sshPort || DIRECTORY_CONF.defaultSshPort;
-            var portArg = String(sshPort) === '22' ? '' : ' -p ' + sshPort;
-            if (DIRECTORY_CONF.jumpHost) {
-                // The jump-host username grammar: one string, no interactive
-                // menu, so it works in WinSCP/FileZilla as well as a terminal.
-                lines.push('ssh ' + state.uid + '_-_' + r.slug + '@' + DIRECTORY_CONF.jumpHost + portArg);
-            } else if (addr) {
-                lines.push('ssh ' + state.uid + '@' + addr + portArg);
+        var sshMatch = /^ssh:\/\/([^:/]+)(?::(\d+))?/i.exec(addr || '');
+        var isJump = md.subType === 'jump-host' || md.subType === 'ssh';
+
+        if (isJump || sshMatch) {
+            // The jump host is the one card that answers a host question, and
+            // it has to: hosts are no longer on this page, and the jump-host
+            // username grammar existed nowhere else in the product. One string,
+            // no interactive menu, so it works in WinSCP and FileZilla as well
+            // as a terminal.
+            var jumpHost = (sshMatch && sshMatch[1]) || DIRECTORY_CONF.jumpHost || md.fqdn || addr;
+            var jumpPort = (sshMatch && sshMatch[2]) || md.port || DIRECTORY_CONF.defaultSshPort;
+            var portArg = String(jumpPort) === '22' ? '' : ' -p ' + jumpPort;
+            if (jumpHost) {
+                lines.push('ssh ' + state.uid + '_-_MACHINE@' + jumpHost + portArg);
+                lines.push('# replace MACHINE with the name of the host you want');
             }
-        } else if (addr) {
-            var isUrl = /^https?:\/\//i.test(addr);
-            if (isUrl) {
-                lines.push(addr);
-            } else {
-                var port = md.externalPort || md.port;
-                lines.push(port ? 'https://' + addr + ':' + port : 'https://' + addr);
-            }
+            // A jump host usually has a web UI too; show it when it is not the
+            // ssh:// address we just parsed.
+            var webUrl = md.fqdn ? urlFor(r) : null;
+            if (webUrl) lines.unshift(webUrl);
+            return lines;
         }
 
-        if (md.gitRepo) lines.push('Source: ' + md.gitRepo);
+        var url = urlFor(r);
+        if (url) lines.push(url);
         return lines;
     }
 
+    // The "Open" button. Only ever an http(s) URL -- an ssh:// address is an
+    // instruction, not something a browser can follow, and rendering it as a
+    // link produced a button that silently did nothing.
     function linkFor(r) {
-        var md = r.metadata || {};
-        var addr = r.resolvedAddress || md.address || md.ip;
-        if (!addr || r.kind === 'host') return null;
-        if (/^https?:\/\//i.test(addr)) return addr;
-        var port = md.externalPort || md.port;
-        return port ? 'https://' + addr + ':' + port : 'https://' + addr;
+        var url = urlFor(r);
+        if (!url || !/^https?:\/\//i.test(url)) return null;
+        return url;
+    }
+
+    // The status dot. `catalogStatus` is resolved server-side
+    // (Resource.withCatalogStatus): the entry's own status if it has one,
+    // otherwise the nearest ancestor host's, climbing while the trouble
+    // continues so a dead hypervisor is named rather than the service on it.
+    //
+    // `unknown` is drawn hollow rather than grey-filled, and says "no health
+    // check" on hover. Nothing probes HTTP endpoints yet, so on a fresh
+    // install that is the honest answer for most entries -- and a dot that
+    // admits it knows nothing is worth more than one that implies trouble.
+    var STATUS_UI = {
+        ok:       { cls: 'text-success',   icon: 'fa-solid fa-circle',       label: 'Reachable' },
+        warning:  { cls: 'text-warning',   icon: 'fa-solid fa-circle',       label: 'Degraded' },
+        critical: { cls: 'text-danger',    icon: 'fa-solid fa-circle',       label: 'Down' },
+        error:    { cls: 'text-danger',    icon: 'fa-solid fa-circle',       label: 'Down' },
+        unknown:  { cls: 'text-secondary', icon: 'fa-regular fa-circle',     label: 'No health check' }
+    };
+
+    function statusHtml(r) {
+        var cs = r.catalogStatus || {};
+        var ui = STATUS_UI[cs.state] || STATUS_UI.unknown;
+        var title = ui.label;
+        if (cs.from) title += ' — ' + cs.from;
+        else if (cs.via === 'ancestor') title += ' (from its host)';
+        return '<span class="status-dot ' + ui.cls + '" title="' + esc(title) + '">'
+             + '<i class="' + ui.icon + '"></i></span>';
     }
 
     function cardHtml(r, accessible) {
@@ -196,9 +265,8 @@
         var lines = accessible ? howTo(r) : [];
 
         var badges = '';
-        if (md.environment) badges += '<span class="badge bg-danger ms-1">' + esc(md.environment) + '</span>';
-        if (md.isExternalReachable) badges += '<span class="badge bg-info ms-1">External</span>';
-        if (md.os) badges += '<span class="badge bg-light text-dark border ms-1">' + esc(md.os) + '</span>';
+        if (md.isPublic) badges += '<span class="badge bg-success-subtle text-success-emphasis border border-success-subtle ms-1">No login needed</span>';
+        if (md.fqdn) badges += '<span class="badge bg-info ms-1">External</span>';
 
         var footer;
         if (accessible) {
@@ -219,11 +287,21 @@
         return '<div class="card shadow-sm service-card ' + (accessible ? 'border-success' : '') + '">'
             + '<div class="card-body">'
             +   '<h5 class="card-title d-flex align-items-start gap-2">'
-            +     '<span>' + esc(r.name) + '</span>'
+            +     statusHtml(r)
+            +     '<span class="flex-grow-1">' + esc(r.name) + '</span>'
             +     iconHtml
             +   '</h5>'
-            +   '<div class="mb-2"><span class="badge bg-secondary">' + esc(r.kind)
-            +     (md.subType ? ' · ' + esc(md.subType) : '') + '</span>' + badges + '</div>'
+            +   '<div class="mb-2">' + badges
+            +     (state.isAdmin
+                    ? '<a class="badge bg-light text-dark border ms-1 text-decoration-none"'
+                      // /directory/<slug>, the form app.modal.deepLinkSlug
+                      // reads (it parses location.pathname, not the hash).
+                      // routes/index.js already serves it.
+                      + ' href="/directory/' + encodeURIComponent(r.slug) + '"'
+                      + ' title="Open this entry in the directory">'
+                      + '<i class="fa-solid fa-diagram-project"></i> Directory</a>'
+                    : '')
+            +   '</div>'
             +   '<p class="card-text small text-muted">' + esc(blurb) + '</p>'
             +   (lines.length
                   ? '<div class="howto small"><div class="text-muted mb-1">How to reach it</div>'
@@ -237,19 +315,17 @@
 
     function matchesFilter(r) {
         var q = ($('#catalog-search').val() || '').toLowerCase();
-        var kind = $('#catalog-kind').val() || '';
-        if (kind && r.kind !== kind) return false;
         if (!q) return true;
         var md = r.metadata || {};
-        return [r.name, r.slug, r.description, md.tagline, md.subType, md.ip, md.address]
+        return [r.name, r.slug, r.description, md.tagline, md.fqdn, md.address]
             .filter(Boolean).join(' ').toLowerCase().indexOf(q) !== -1;
     }
 
-    function renderGrid(elId, list, accessible) {
+    function renderGrid(elId, list, accessible, emptyNote) {
         var items = list.filter(matchesFilter);
         var el = document.getElementById(elId);
         if (!items.length) {
-            el.innerHTML = '<p class="empty-note">Nothing to show here.</p>';
+            el.innerHTML = '<p class="empty-note">' + esc(emptyNote || 'Nothing to show here.') + '</p>';
             return;
         }
         el.innerHTML = items.map(function(r){ return cardHtml(r, accessible); }).join('');
@@ -285,20 +361,21 @@
     }
 
     function renderAll() {
-        // Split mine into services and hosts
-        var myServices = state.mine.filter(function(r) { return r.kind === 'service'; });
-        var myHosts = state.mine.filter(function(r) { return r.kind === 'host'; });
-
-        renderGrid('my-services', myServices, true);
-        renderGrid('my-hosts', myHosts, true);
-        renderGrid('other-services', state.others, false);
+        renderGrid('my-services', state.mine, true,
+            'Nothing yet. Anything you can request is below.');
+        renderGrid('other-services', state.others, false,
+            'Nothing left to request — you have access to everything in the catalog.');
         renderRequests();
         renderApprovals();
+        var note = document.getElementById('catalog-admin-note');
+        if (note) note.style.display = state.isAdmin ? '' : 'none';
     }
 
     async function load() {
         var me = await app.auth.asyncUser;
         state.uid = me.uid;
+        var myGroups = me.groups || [];
+        state.isAdmin = DIRECTORY_ADMIN_GROUPS.some(function(g){ return myGroups.indexOf(g) !== -1; });
 
         // Both endpoints are the *discovery* API, not directory-admin. The old
         // portal called directory-admin/resources and swallowed the 403, so
@@ -307,15 +384,24 @@
         var mineRes = await app.api.get('discovery/me');
         var allRes  = await app.api.get('discovery/resources');
 
-        state.mine = (mineRes.results || []).filter(function(r){ return r.kind !== 'site'; });
+        // isCatalogEntry is applied to BOTH lists. The OAuth exclusion used to
+        // be applied only to `others`, so a credential registration you held
+        // access to -- which every operator does for the proxy and jump host
+        // OAuth clients -- was offered as a service card despite the comment
+        // above saying those are filtered out. `catalog === true` subsumes it.
+        state.mine = (mineRes.results || []).filter(isCatalogEntry);
+
         var mineIds = {};
         state.mine.forEach(function(r){ mineIds[r.id] = true; });
+
+        // "Available to request" is three predicates, not one. It used to be
+        // `everything minus mine`, which on a directory with a Proxmox cluster
+        // meant 76 cards of machines the viewer had never heard of.
         state.others = (allRes.results || []).filter(function(r){
-            // OAuth clients are services with subType 'oauth' now, not a kind: they
-            // are a credential registration, not something to browse to.
-            return !mineIds[r.id] && r.kind !== 'site'
-              && !isOAuthSubtype(r.metadata && r.metadata.subType)
-              && (r.metadata && r.metadata.managed);
+            if (mineIds[r.id] || !isCatalogEntry(r)) return false;
+            // A card you cannot act on is worse than no card: the old page
+            // rendered a dead "Not requestable" badge and offered nothing else.
+            return (r.metadata || {}).requestable !== false;
         });
 
         // Requests are best-effort: a failure here must not blank the catalog.

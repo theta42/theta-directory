@@ -354,19 +354,38 @@ class SubtypeTemplate extends Model {
         // sprawl with no decision behind it -- the same reason a systemd unit
         // gets none. It follows the service it authenticates for.
         inherits_host_access: true },
-      app('http', 'HTTP Service', 'An HTTP endpoint on this host.', 'fa-solid fa-globe',
-        { properties: { port: portField('HTTP port', 80), address: { type: 'string', description: 'Base URL' } } }),
-      app('web', 'Web Application', 'A web application in the catalog.', 'fa-solid fa-globe',
+      // There is ONE way to describe something reachable over HTTP.
+      //
+      // `http` and `web` were two subtypes for the same thing and the suite
+      // seeded both for the same services -- `sso-manager-<site>` (web) and
+      // `http-sso-<site>` (http) carried the identical URL, which is half of
+      // why a fresh install put 18 cards on a catalog that wanted three. `web`
+      // is gone; `http` carries the whole shape.
+      //
+      // Internal and external are separate groups because a service is
+      // commonly reachable both ways on different schemes and ports: inside
+      // the LAN as http://192.168.1.206:8096, outside as
+      // https://emby.example.com. `address` is optional -- left blank, the
+      // directory resolves it from the first parent host that has one
+      // (Resource.withResolvedAddress), which is already how a service
+      // inherits its host's IP.
+      //
+      // Dropped with `web`: gitRepo, installPath and systemdService. The first
+      // two are facts about a deployment rather than an endpoint, and
+      // systemdService named a unit as a bare string -- a relationship the
+      // graph already models as an edge, and an edge can carry status where a
+      // string cannot.
+      app('http', 'HTTP Service', 'Something reachable over HTTP. The unit the catalog is built from.', 'fa-solid fa-globe',
         { properties: {
-            port: portField('Internal Port (e.g. 8080)'),
-            externalPort: portField('External Port (optional)'),
-            address: { type: 'string', description: 'Base / Public URL (https://...)' },
-            isExternalReachable: { type: 'boolean', description: 'Reachable Externally' },
-            isPublic: { type: 'boolean', description: 'Public (No Auth)' },
-            gitRepo: { type: 'string', description: 'Git Repository URL (optional)' },
-            installPath: { type: 'string', description: 'Install Path (e.g. /opt/app)' },
-            systemdService: { type: 'string', description: 'Systemd Unit Name (optional)' }
-          } }, 'Web'),
+            isHTTPS: { type: 'boolean', description: 'Internal: HTTPS' },
+            address: { type: 'string', description: 'Internal: address (blank = use the parent host)' },
+            port: portField('Internal: port', 80),
+            externalIsHTTPS: { type: 'boolean', description: 'External: HTTPS' },
+            fqdn: { type: 'string', description: 'External: FQDN' },
+            externalPort: portField('External: port', 80),
+            healthPath: { type: 'string', description: 'Health check path, relative to / (optional)' },
+            isPublic: { type: 'boolean', description: 'Public (no login required)' }
+          } }),
       app('wireguard', 'WireGuard Tunnel', 'A WireGuard tunnel endpoint.', 'fa-solid fa-shield-halved',
         { properties: { port: portField('Listen port', 51820) } }),
       app('postgresql', 'PostgreSQL', 'A PostgreSQL database server.', 'fa-solid fa-database',

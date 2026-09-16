@@ -60,6 +60,10 @@
                             <input class="form-check-input" type="checkbox" id="toggle-secrets-only" onchange="renderTable()">
                             <label class="form-check-label small text-muted" for="toggle-secrets-only" title="Filter tree to show only resources with stored secrets"><i class="fa-solid fa-key text-warning me-1"></i>With Secrets</label>
                         </div>
+                        <div class="form-check form-switch form-check-inline ms-1 me-1">
+                            <input class="form-check-input" type="checkbox" id="toggle-catalog-only" onchange="renderTable()">
+                            <label class="form-check-label small text-muted" for="toggle-catalog-only" title="Filter tree to show only resources featured on the catalog at /"><i class="fa-solid fa-store text-primary me-1"></i>In Catalog</label>
+                        </div>
                         <input type="text" id="search-filter" class="form-control form-control-sm shadow-sm" placeholder="Search resources or keys..." oninput="scheduleRenderTable(200)" style="width: 210px;">
                         <select id="sort-by" class="form-select form-select-sm shadow-sm" onchange="renderTable()" style="width: 150px;">
                           <option value="name">Name (A-Z)</option>
@@ -411,6 +415,18 @@
     <h6 class="text-muted">Catalog appearance</h6>
     <p class="text-muted small">How this resource is presented on the user-facing catalog at <code>/</code>.</p>
 
+    <div class="form-check form-switch mb-3">
+      <input class="form-check-input" type="checkbox" id="res-in-catalog">
+      <label class="form-check-label" for="res-in-catalog">
+        <strong>Show in catalog</strong>
+      </label>
+      <small class="field-help text-muted d-block">
+        Off by default. The catalog is a short, curated list of things people
+        browse to &mdash; not an inventory. Everything stays in the directory
+        either way.
+      </small>
+    </div>
+
     <div class="row mb-3">
       <div class="col-4">
         <label class="form-label">Icon</label>
@@ -419,7 +435,9 @@
           <input type="text" id="res-icon" class="form-control font-monospace" placeholder="fa-solid fa-film">
         </div>
         <small class="field-help text-muted d-block">
-          A Font Awesome class. Blank falls back to a per-kind default.
+          A Font Awesome class (<code>fa-solid fa-film</code>) <em>or</em> an
+          image URL &mdash; <code>https://…/logo.png</code> renders as the
+          card's picture. Blank falls back to a per-kind default.
         </small>
       </div>
       <div class="col-8">
@@ -1859,10 +1877,14 @@
     const filter = $('#search-filter').val().toLowerCase();
     const sort = $('#sort-by').val();
     const secretsOnly = $('#toggle-secrets-only').is(':checked');
+    const catalogOnly = $('#toggle-catalog-only').is(':checked');
 
     let filtered = rawResources.filter(r => {
       const hasSec = !!(r.hasSecret || r.metadata?.hasSecret || (r.secretKeys && r.secretKeys.length > 0) || (r.metadata?.secretKeys && r.metadata.secretKeys.length > 0));
       if (secretsOnly && !hasSec) {
+        return false;
+      }
+      if (catalogOnly && r.metadata?.catalog !== true) {
         return false;
       }
       if (!filter) return true;
@@ -2198,6 +2220,7 @@
     $('#res-systemd').val('');
     $('#res-icon').val('');
     $('#res-tagline').val('');
+    $('#res-in-catalog').prop('checked', false);
     updateIconPreview();
     $('#res-environment').val('');
     $('#res-is-external').prop('checked', false);
@@ -3735,6 +3758,7 @@
     $('#res-systemd').val(r.metadata.systemdService || '');
     $('#res-icon').val(r.metadata.icon || '');
     $('#res-tagline').val(r.metadata.tagline || '');
+    $('#res-in-catalog').prop('checked', r.metadata.catalog === true);
     updateIconPreview();
     $('#res-environment').val(r.metadata.environment || '');
     $('#res-is-external').prop('checked', !!r.metadata.isExternalReachable);
@@ -4008,6 +4032,7 @@
         subType: $('#res-subtype').val() || undefined,
         icon: ($('#res-icon').val() || '').trim(),
         tagline: ($('#res-tagline').val() || '').trim(),
+        catalog: $('#res-in-catalog').is(':checked'),
         environment: $('#res-environment').val() || undefined,
         isCurrentSite: $('#res-is-current-site').is(':checked')
       }

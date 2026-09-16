@@ -414,11 +414,19 @@ router.post('/spokes', async (req, res, next) => {
         // Auto-create spoke bootstrap services parented to the spoke host
         const spokeHost = cleanEndpoint.replace(/^https?:\/\//, '').replace(/\/+$/, '');
         const services = [
-          { name: `SSO Manager (${cleanName})`, slug: `sso-manager-${cleanSlug}`, subType: 'web', port: 3001, address: `https://${spokeHost}` },
-          { name: `Proxy (${cleanName})`, slug: `proxy-${cleanSlug}`, subType: 'web', port: 3000, address: spoke.publicHost ? `https://${spoke.publicHost}` : `https://${spokeHost.replace(/^sso\./, 'proxy.')}` },
+          // subType 'http', not the retired 'web': one way to describe an HTTP
+          // endpoint. `catalog: true` on these two and the jump host makes a
+          // spoke's launchpad match the master's without an admin curating it
+          // by hand -- they are the three addresses a person at that site
+          // actually types.
+          { name: `Directory (${cleanName})`, slug: `sso-manager-${cleanSlug}`, subType: 'http', port: 3001, address: `https://${spokeHost}`, catalog: true,
+            tagline: 'Sign in, find what you have access to, and ask for more.' },
+          { name: `Proxy (${cleanName})`, slug: `proxy-${cleanSlug}`, subType: 'http', port: 3000, address: spoke.publicHost ? `https://${spoke.publicHost}` : `https://${spokeHost.replace(/^sso\./, 'proxy.')}`, catalog: true,
+            tagline: 'Publish and route web services.' },
           { name: `OpenLDAP (${cleanName})`, slug: `openldap-${cleanSlug}`, subType: 'openldap', port: 389, address: `ldaps://${spokeHost}:636` },
           { name: `OpenResty (${cleanName})`, slug: `openresty-${cleanSlug}`, subType: 'openresty', port: 443, address: `https://${spokeHost}` },
-          { name: `Jump Host (${cleanName})`, slug: `jump-host-${cleanSlug}`, subType: 'jump-host', port: 2222, address: `ssh://${spokeHost.replace(/^sso\./, 'jump.')}:2222` }
+          { name: `Jump Host (${cleanName})`, slug: `jump-host-${cleanSlug}`, subType: 'jump-host', port: 2222, address: `ssh://${spokeHost.replace(/^sso\./, 'jump.')}:2222`, catalog: true,
+            tagline: 'SSH to every machine you can reach.' }
         ];
 
         for (const s of services) {
@@ -429,7 +437,17 @@ router.post('/spokes', async (req, res, next) => {
               kind: 'service',
               name: s.name,
               slug: s.slug,
-              metadata: { subType: s.subType, port: s.port, address: s.address, requestable: false },
+              // `requestable` is NOT false for catalog entries any more. A card
+              // on the launchpad that a user cannot ask for access to is a
+              // dead end -- it renders a "Not requestable" badge and offers
+              // nothing else. These are exactly the things a new person at a
+              // site needs to ask for.
+              metadata: {
+                subType: s.subType, port: s.port, address: s.address,
+                requestable: s.catalog ? true : false,
+                ...(s.catalog ? { catalog: true } : {}),
+                ...(s.tagline ? { tagline: s.tagline } : {})
+              },
               created_on: now
             });
           }

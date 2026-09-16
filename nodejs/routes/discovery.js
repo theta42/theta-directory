@@ -98,7 +98,14 @@ router.get('/port-forwards', async (req, res, next) => {
 router.get('/resources', async (req, res, next) => {
 	try {
 		const { fullMetadata } = await callerView(req);
-		const resources = await Resource.search(req.query);
+		let resources = await Resource.search(req.query);
+		// The catalog's "things you could ask for" half reads this endpoint, so
+		// it needs the same address + status resolution /me does. Without it a
+		// card a user cannot yet reach renders with no address and a grey dot,
+		// which is the half of the catalog that is supposed to sell them on
+		// asking for it.
+		resources = await Resource.withResolvedAddress(resources);
+		resources = await Resource.withCatalogStatus(resources, { nameCulprit: false });
 		res.json(envelope(projectResources(resources, { fullMetadata })));
 	} catch (err) { next(err); }
 });
@@ -148,6 +155,10 @@ router.get('/me', async (req, res, next) => {
 		// service inherits it from its host, so it must be computed here rather
 		// than left to each caller to guess at address || ip.
 		accessible = await Resource.withResolvedAddress(accessible);
+		// Same argument as resolvedAddress: the catalog card's status needs the
+		// edge list to resolve, so it is computed here rather than by shipping
+		// the graph to every visitor.
+		accessible = await Resource.withCatalogStatus(accessible);
 		res.json(envelope(projectResources(accessible, { fullMetadata })));
 	} catch (err) { next(err); }
 });

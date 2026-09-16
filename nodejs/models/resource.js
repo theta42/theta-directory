@@ -240,6 +240,111 @@ class Resource extends Model {
     });
   }
 
+  // The status a CATALOG card shows, which is a different read of the same
+  // graph than the tree view's `bubbled_status`.
+  //
+  // Bubbling rolls the worst state UP to a parent, which is right for "how is
+  // this site doing at a glance" and useless here: a catalog entry is a leaf
+  // sitting beside its own backing services, not above them. `app_emby_http`
+  // has no children, so it bubbles nothing, while the LXC it lives on knows
+  // perfectly well that emby-server is running.
+  //
+  // So: the entry's own status if it has one, otherwise walk UP to the nearest
+  // host and take that. If the answer is negative, keep climbing -- an entry
+  // that is down because its hypervisor is down should say so, rather than
+  // blame the service. `from` names whatever is actually responsible.
+  //
+  // Reads each ancestor's OWN `status`, never `bubbled_status`. The entry is
+  // itself a child of that host, so its own `unknown` is already folded into
+  // the host's bubbled value -- reading that back would be the card consuming
+  // its own ignorance and never going green.
+  //
+  // Computed here rather than in the browser for the same reason
+  // resolvedAddress is: the answer needs the edge list, and shipping the whole
+  // graph to every catalog visitor would hand out the shape of the estate to
+  // people the projection is busy hiding it from.
+  static CATALOG_STATUS_NEGATIVE = new Set(['critical', 'error', 'warning']);
+
+  // `nameCulprit: false` keeps the state but drops the name. The "things you
+  // could request" half of the catalog covers resources the caller has NO
+  // access to, and naming the hypervisor behind one of them discloses the
+  // shape of the estate to someone the projection is otherwise hiding it from.
+  // A grey or red dot with no explanation is the correct amount to tell them.
+  static async withCatalogStatus(resources, { nameCulprit = true } = {}) {
+    if (!resources || !resources.length) return [];
+    const graph = await this.getGraph();
+    const byId = new Map(graph.resources.map((r) => [r.id, r]));
+    const parentIndex = new Map();
+    for (const e of graph.edges) {
+      if (!parentIndex.has(e.childId)) parentIndex.set(e.childId, []);
+      parentIndex.get(e.childId).push(e.parentId);
+    }
+
+    // Ancestors that can carry a status, nearest first. Breadth-first so a
+    // resource with two parents reports the closer one.
+    const ancestry = (id) => {
+      const seen = new Set([id]);
+      const out = [];
+      let frontier = parentIndex.get(id) || [];
+      while (frontier.length) {
+        const next = [];
+        for (const pid of frontier) {
+          if (seen.has(pid)) continue;
+          seen.add(pid);
+          const p = byId.get(pid);
+          if (!p) continue;
+          if (p.kind === 'host' || p.kind === 'site') out.push(p);
+          next.push(...(parentIndex.get(pid) || []));
+        }
+        frontier = next;
+      }
+      return out;
+    };
+
+    const known = (v) => v && v !== 'unknown';
+
+    return resources.map((r) => {
+      const data = r.toJSON ? r.toJSON() : { ...r };
+      data.metadata = data.metadata || {};
+
+      const own = data.metadata.status;
+      if (known(own)) {
+        data.catalogStatus = { state: own, from: null, via: 'self' };
+        return data;
+      }
+
+      const chain = ancestry(data.id);
+      const nearest = chain.find((p) => known(p.metadata && p.metadata.status));
+      if (!nearest) {
+        data.catalogStatus = { state: 'unknown', from: null, via: 'none' };
+        return data;
+      }
+
+      let state = nearest.metadata.status;
+      let culprit = nearest;
+      if (Resource.CATALOG_STATUS_NEGATIVE.has(state)) {
+        // Climb while the trouble continues: the furthest ancestor still in a
+        // bad state is the one worth naming. A dead hypervisor explains every
+        // guest on it, and saying "emby is down" there is actively misleading.
+        for (const p of chain) {
+          if (p === nearest) continue;
+          const st = p.metadata && p.metadata.status;
+          if (known(st) && Resource.CATALOG_STATUS_NEGATIVE.has(st)) {
+            state = st;
+            culprit = p;
+          }
+        }
+      }
+
+      data.catalogStatus = {
+        state,
+        from: (nameCulprit && culprit.id !== data.id) ? (culprit.name || culprit.slug) : null,
+        via: 'ancestor'
+      };
+      return data;
+    });
+  }
+
   static async getMyAccess(userDn) {
     const userGroups = await Group.list(userDn);
     if (!userGroups || userGroups.length === 0) return [];
