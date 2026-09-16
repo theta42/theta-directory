@@ -56,6 +56,27 @@ describe('the shipped vocabulary', () => {
     expect(emitted.filter(s => !bySlug.has(s))).toEqual([]);
   });
 
+  // The gap that let `openldap` and `openresty` ship with no template for
+  // several releases: the two tests above cover what a PLUGIN or the AGENT
+  // emits, and nothing covered what the suite's own installer emits. A service
+  // whose subtype has no template is never evaluated by services/scheduler.js,
+  // so it carries no status dot -- permanently, and silently.
+  test('every subType theta-suite bootstrap seeds has a template', () => {
+    // Kept in step with theta-suite's bootstrap/bootstrap.js seedDirectory()
+    // and routes/api_site.js's spoke pre-registration.
+    const seeded = [
+      'suite',                                   // the site
+      'linux',                                   // the stack host
+      'web',                                     // sso-manager, proxy
+      'openldap', 'openresty', 'openbao_vault',  // the stack's own services
+      'ssh', 'jump-host',                        // the jump host, both spellings
+      'http',                                    // the published endpoints
+      'oauth',                                   // the proxy/jump OAuth clients
+      'theta-agent'                              // the agent's own service row
+    ];
+    expect(seeded.filter(s => !bySlug.has(s))).toEqual([]);
+  });
+
   test('guest subtypes are confined to something that can host them', () => {
     for (const slug of ['lxc', 'vm', 'proxmox-lxc', 'proxmox-kvm']) {
       const t = bySlug.get(slug);
