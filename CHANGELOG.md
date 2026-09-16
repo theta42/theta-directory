@@ -1,3 +1,23 @@
+## [2.39.1] - 2026-09-16
+
+### Changed
+- **Served `install.sh` synced to theta-agent v2.22.3.** The copy under
+  `nodejs/public/resources/theta-agent/` is the fallback baked into the image
+  for a directory that has never run `setup.sh` (which otherwise stages the
+  submodule's copy over it). It is only useful while it is byte-identical to
+  the real one, and it has silently drifted before — to less than half the
+  real file's length — which meant the Install Agent page handed out a broken
+  installer. Re-synced here in the same change that alters the upstream file,
+  rather than left to be noticed later. Picks up: a failed install no longer
+  leaves the host with no agent running, and `agent.yml` is written 0600
+  instead of 0644 (it holds a fleet-wide join key).
+
+### Fixed
+- **Root `package.json` was three patch versions behind.** It read `2.38.2` on
+  a tree released as `v2.39.0`; `nodejs/package.json` and the tag were correct.
+  Both now read the same version. Nothing consumes the root manifest's version
+  field, which is exactly why it drifted unnoticed.
+
 ## [2.39.0] - 2026-09-16
 
 ### Fixed
