@@ -1,3 +1,95 @@
+## [2.40.0] - 2026-09-16
+
+The catalog at `/` becomes a curated launchpad instead of a render of the whole
+directory. Service discovery and host discovery are different jobs for
+different audiences: the catalog serves someone who wants to find a service and
+does not want to read a graph, and the directory serves someone who can.
+
+### Fixed
+- **The catalog showed every managed resource it could see.** On a directory
+  with a Proxmox cluster in it, a user with **no access at all** was shown 76
+  cards -- 41 LXC containers, 12 VMs, 3 hypervisors, docker sidecars -- 27 of
+  which had no address to reach them by. That is not discovery, and it
+  published the shape of the estate to anyone with an account. A fresh install
+  showed 18 cards, because three producers each described the same six
+  containers: a seeded component, a docker container registered by the agent,
+  and a seeded endpoint, all carrying the same URL.
+
+  A catalog entry is now an `http` service an admin has marked. Hosts never
+  appear. "Available to request" is three predicates -- in the catalog, you do
+  not have it, and it is requestable -- where it used to be one: not yours.
+- **Credential registrations were offered as service cards.** `isOAuthSubtype`
+  was applied to the "discover more" list but **not** to the list of things you
+  already have -- and every operator holds access to the proxy and jump-host
+  OAuth clients, so they appeared as browsable services despite a comment
+  directly above saying they were filtered out.
+- **An `ssh://` address rendered as `https://ssh://host:2222:2222`,** and as an
+  "Open" button a browser could not follow. Any `ssh://` service on the page
+  did this.
+- **The jump-host username grammar existed in exactly one place** --
+  `uid_-_machine@jump`, generated only on host cards on this page, and shown
+  nowhere else in the product. With hosts off the catalog it would have
+  vanished entirely; it moves to the Jump Host card, which is now the one card
+  that answers a host question.
+- **`jump-host` was subType `ssh` while carrying an `https://` address** -- the
+  admin web UI on an SSH-typed resource, wrong in the vocabulary and wrong for
+  anything reading the subtype to decide how to reach it.
+- **The icon field has accepted an image URL since it was written and said so
+  nowhere.** `renderIcon()` emits an `<img>` for an `http(s)` value, but the
+  field is labelled "Icon" with a Font Awesome placeholder and help text naming
+  only Font Awesome. The capability was real and undiscoverable.
+
+### Changed
+- **`web` is merged into `http`.** They described the same thing and the suite
+  seeded both, which is why every component had two rows with the same URL.
+  `http` now carries the whole shape: internal (`isHTTPS`/`address`/`port`) and
+  external (`externalIsHTTPS`/`fqdn`/`externalPort`) separately, because a
+  service is commonly reachable both ways on different schemes and ports, plus
+  an optional `healthPath`. `address` may be left blank -- the directory
+  already resolves it from the first parent host that has one.
+
+  Dropped with `web`: `gitRepo`, `installPath`, `systemdService`. The first two
+  are facts about a deployment rather than an endpoint. The third named a unit
+  as a bare string, which is a relationship the graph already models as an
+  edge -- and an edge can carry status where a string cannot.
+- **Admin curation lives where it already belonged.** The resource editor has
+  had a block titled "Catalog appearance" (icon, tagline) since it was written;
+  membership is a **Show in catalog** switch at the top of it, off by default.
+  The directory tree gains an **In Catalog** filter beside the existing "With
+  Secrets" toggle.
+- **Requires `@simpleworkjs/directory-schema` >= 1.3.0.** `catalog` and
+  `status` must be declared public or non-admins never receive the fields this
+  page filters and renders on -- it would work for the admin who built it and
+  be blank for everyone else.
+
+### Added
+- **A status indicator on catalog cards**, resolved by
+  `Resource.withCatalogStatus`. Bubbling rolls the worst state **up** to a
+  parent, which is right for "how is this site doing at a glance" and useless
+  for a catalog entry: the entry is a leaf sitting **beside** its own backing
+  services, not above them. `app_emby_http` has no children and bubbles
+  nothing, while the LXC it lives on knows perfectly well that `emby-server` is
+  running.
+
+  So: the entry's own status if it has one, else the nearest ancestor host's,
+  climbing while the trouble continues -- an entry that is down because its
+  hypervisor is down says so rather than blaming the service. It reads each
+  ancestor's **own** `status`, never `bubbled_status`: the entry is itself a
+  child of that host, so its own `unknown` is already folded into the bubbled
+  value, and reading it back would be a card consuming its own ignorance and
+  never going green. Computed server-side for the same reason `resolvedAddress`
+  is -- it needs the edge list, and shipping the graph to every catalog visitor
+  would hand out the shape of the estate to the people the projection is
+  hiding it from. The "things you could request" half drops the culprit's name
+  for the same reason.
+- **A discovery plugin that points at a web UI gets a catalog entry for it.**
+  The signal is already in every manifest: a `configSchema` field of
+  `type: 'url'`. No per-plugin special-casing -- proxmox, unifi and ilo each
+  have one, and nmap, which scans a CIDR, correctly produces nothing. Created
+  on the first successful run so the host it hangs under already exists, and
+  **create-once**: discovery re-runs on a schedule, and an admin who renames
+  the entry or unticks it must not have that undone on the next tick.
+
 ## [2.39.1] - 2026-09-16
 
 ### Changed
