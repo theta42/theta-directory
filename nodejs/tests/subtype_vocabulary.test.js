@@ -67,10 +67,11 @@ describe('the shipped vocabulary', () => {
     const seeded = [
       'suite',                                   // the site
       'linux',                                   // the stack host
-      'web',                                     // sso-manager, proxy
+      // 'web' is retired: it and 'http' described the same thing, and seeding
+      // both gave every component two rows with the same URL.
+      'http',                                    // directory, proxy -- the catalog entries
       'openldap', 'openresty', 'openbao_vault',  // the stack's own services
-      'ssh', 'jump-host',                        // the jump host, both spellings
-      'http',                                    // the published endpoints
+      'jump-host',                               // the jump host
       'oauth',                                   // the proxy/jump OAuth clients
       'theta-agent'                              // the agent's own service row
     ];
@@ -183,7 +184,7 @@ describe('templateFor reads the cache, and fails safe without it', () => {
     expect(templateFor(host('linux')).sshCapable).toBe(true);
     expect(templateFor(host('ilo')).sshCapable).toBe(false);
     expect(templateFor(service('systemd')).inheritsHost).toBe(true);
-    expect(templateFor(service('web')).inheritsHost).toBe(false);
+    expect(templateFor(service('http')).inheritsHost).toBe(false);
   });
 
   test('a cached template decides for a subtype the bootstrap tables never knew', () => {

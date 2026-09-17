@@ -532,6 +532,11 @@ async function runPluginJob(instanceId) {
       if (!check.ok) throw new Error(`plugin returned an unusable payload: ${check.error}`);
       for (const problem of check.dropped) cfg.log(`dropped ${problem}`);
       await DiscoveryReconciler.reconcile(instance.slug, check.payload, cfg);
+
+      // After the reconcile, so the host this entry hangs under already
+      // exists. Create-once and never throws -- see services/plugin_catalog_entry.js.
+      const { ensurePluginCatalogEntry } = require('./plugin_catalog_entry');
+      await ensurePluginCatalogEntry(instance, mod, cfg);
     }
     await instance.update({ lastStatus: STATUS.OK, lastError: null, lastLog: logs.join('\n') });
   } catch (err) {

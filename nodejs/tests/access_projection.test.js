@@ -99,7 +99,7 @@ describe('agent-registered services inherit access from their host', () => {
   });
 
   test('a hand-created service is NOT an inheritor and keeps needing its grant', () => {
-    const stackSvc = svc('s3', 'sso-manager-718it', { subType: 'web' });
+    const stackSvc = svc('s3', 'sso-manager-718it', { subType: 'http' });
     expect(templateFor(stackSvc).inheritsHost).toBe(false);
     const out = project([SITE, agentHost, agentService, stackSvc], [edge('site1', 'h1'), edge('h1', 'a1-svc'), edge('h1', 's3')], ['god_admin']);
     expect(out).not.toContain('sso-manager-718it');
@@ -114,7 +114,7 @@ describe('the catalog rule is unchanged', () => {
   });
 
   test('isPublic still grants without any group', () => {
-    const pub = svc('s9', 'status-page', { subType: 'web', isPublic: true });
+    const pub = svc('s9', 'status-page', { subType: 'http', isPublic: true });
     expect(project([SITE, pub], [edge('site1', 's9')], [])).toEqual(['status-page']);
   });
 });

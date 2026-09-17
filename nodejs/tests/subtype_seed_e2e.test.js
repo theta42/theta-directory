@@ -51,7 +51,7 @@ describe('seedDefaults', () => {
     expect(templateFor({ kind: 'host', metadata: { subType: 'printer' } }).sshCapable).toBe(false);
     expect(templateFor({ kind: 'service', metadata: { subType: 'systemd' } }).inheritsHost).toBe(true);
     expect(templateFor({ kind: 'service', metadata: { subType: 'theta-agent' } }).ownGroups).toBe(false);
-    expect(templateFor({ kind: 'service', metadata: { subType: 'web' } }).ownGroups).toBe(true);
+    expect(templateFor({ kind: 'service', metadata: { subType: 'http' } }).ownGroups).toBe(true);
   });
 
   test('an operator turning off ssh_capable takes effect after a refresh', async () => {
