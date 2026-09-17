@@ -59,6 +59,11 @@ models.initORM().then(() => {
   server.on('error', onError);
   server.on('listening', onListening);
 
+  // A broadcast interrupted by a restart cannot resume -- the row does not
+  // record who was already reached -- so mark it rather than leave the history
+  // panel showing a send permanently in flight.
+  require('../models/notification').Notification.markInterrupted().catch(() => {});
+
   // Initialize scheduler
   const { initScheduler } = require('../services/scheduler');
   initScheduler(conf.discovery).catch(err => {
