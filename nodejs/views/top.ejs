@@ -56,6 +56,20 @@
 				Notification:   function(){ return '/overview'; },
 				ApiToken:       function(){ return '/profile'; },
 			},
+			// What to CALL an event whose primary key is a UUID. Without this the
+			// feed reads "access request added" -- no who, no what -- because a UUID
+			// in a sentence is noise and readableTarget() suppresses it. These are
+			// the models where the pk is the least interesting thing about the row.
+			titles: {
+				AccessRequest:  function(r){ return r ? [r.uid, r.groupCn].filter(Boolean).join(' \u2192 ') : ''; },
+				Resource:       function(r){ return r && (r.name || r.slug); },
+				ResourceGroup:  function(r){ return r && r.groupCn; },
+				MeshClient:     function(r){ return r && (r.name || r.hostname); },
+				MeshSite:       function(r){ return r && (r.name || r.slug); },
+				Notification:   function(r){ return r && r.subject; },
+				PluginInstance: function(r){ return r && (r.slug || r.pluginType); },
+				Agent:          function(r){ return r && r.name; },
+			},
 			});
 		</script>
 		<script type="text/javascript" src="/static/js/app.js"></script>
@@ -111,6 +125,12 @@
 								</div>
 							</div>
 							<ul id="notify-list" class="list-unstyled mb-0 py-1"></ul>
+							<!-- app.notify renders mute controls here, built from the
+							     models actually present in the feed. Without this
+							     element muting still works via configure({mutes}),
+							     it just has no UI -- and a filter nobody can reach
+							     is not a filter. -->
+							<div id="notify-filters" class="bg-light"></div>
 							<div class="px-3 py-2 border-top bg-light text-center">
 								<a href="#" id="notify-desktop-toggle" class="small text-decoration-none"></a>
 							</div>

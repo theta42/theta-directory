@@ -123,6 +123,38 @@ const READERS = {
 	Agent(ctx){
 		return isDirectoryAdmin(ctx);
 	},
+
+	// The three below all render as tabs/panels on the Directory page, and all
+	// three were publishing into a gate that did not exist -- so `attach()`
+	// took the fail-closed branch, logged "no read gate" once, and dropped
+	// every event. Editing a subtype template or adding a spoke changed
+	// nothing on screen until the page was reloaded, which is exactly the
+	// symptom "it needs a refresh" describes.
+	//
+	// Fail-closed is the right default and it did its job; these are the
+	// models that should have been declared and were not.
+
+	// GET /api/subtype-templates — routes/api_subtype_template.js admin-gates
+	// the whole router.
+	SubtypeTemplate(ctx){
+		return isDirectoryAdmin(ctx);
+	},
+
+	// SiteSpoke and SiteJoinKey are deliberately NOT here, and neither may be
+	// added without dealing with its credential field first.
+	//
+	// Both redact in `toPublic()`, which is what their REST routes call. This
+	// bus does not: it publishes through `toJSON()`, which keeps everything.
+	// So declaring a gate for either would start broadcasting
+	// `SiteSpoke.pushToken` -- a shared secret stored in PLAINTEXT, by design,
+	// because the master re-presents it on every push -- and the sha256 of
+	// every live `SiteJoinKey` to every admin socket.
+	//
+	// `toPublic()` being the redaction point rather than `toJSON()` is the trap
+	// here: a model can look safe because every route that returns it is safe,
+	// while the event bus reaches straight past that. If live updates for these
+	// are ever wanted, mark the field `isPrivate` so the ORM strips it on the
+	// way out, and only then add the gate.
 };
 
 // Models whose events are forwarded onto the bus at all. Derived from READERS

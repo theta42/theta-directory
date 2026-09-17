@@ -851,8 +851,15 @@
     };
     // Only these carry a socket read gate server-side
     // (utils/socket_pubsub.js); anything else never arrives.
+    //
+    // ResourceEdge was gated server-side and subscribed to by nobody, so a
+    // change that touched ONLY the graph -- re-parenting a service, adopting a
+    // discovered host -- published an event that arrived and was discarded.
+    // The tree is derived from the edges, so that is precisely the change most
+    // in need of a redraw, and the one that needed a manual refresh.
     app.subscribe(/^model:Resource:/, reload);
     app.subscribe(/^model:ResourceGroup:/, reload);
+    app.subscribe(/^model:ResourceEdge:/, reload);
     app.subscribe(/^agent:telemetry:/, function(){
       if (currentServiceResourceId) {
         clearTimeout(serviceStatusTimer);
@@ -869,6 +876,15 @@
     app.subscribe(/^model:PluginInstance:/, function(){
       clearTimeout(pluginTimer);
       pluginTimer = setTimeout(function(){ loadDiscoveryPlugins(); }, 400);
+    });
+
+    // The Subtype Templates tab, same shape. Its events had no server-side read
+    // gate until now, so editing a template changed nothing on screen until the
+    // page was reloaded.
+    let subtypeTimer = null;
+    app.subscribe(/^model:SubtypeTemplate:/, function(){
+      clearTimeout(subtypeTimer);
+      subtypeTimer = setTimeout(function(){ loadSubtypeTemplates(); }, 400);
     });
   }
   

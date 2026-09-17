@@ -51,6 +51,11 @@ async function resolveGroupCn(resourceId, requested) {
   return (member || links[0]).groupCn;
 }
 
+// Escaping for everything interpolated into a notification body: the email
+// template renders with a triple mustache, so each caller owns its own. See
+// utils/html_escape.js for what went wrong without it.
+const { escapeHtml: esc } = require('../utils/html_escape');
+
 // Best-effort notification. A mail failure must never fail the request itself --
 // the row is the source of truth and the approver can find it in the UI.
 async function notify(uid, subject, message) {
@@ -150,8 +155,8 @@ router.post('/', async (req, res, next) => {
       await notify(
         resource.owner,
         `Access request: ${resource.name}`,
-        `<p><strong>${req.user.uid}</strong> has requested access to <strong>${resource.name}</strong> (group <code>${groupCn}</code>).</p>` +
-        (req.body.note ? `<p>Their note: ${req.body.note}</p>` : '') +
+        `<p><strong>${esc(req.user.uid)}</strong> has requested access to <strong>${esc(resource.name)}</strong> (group <code>${esc(groupCn)}</code>).</p>` +
+        (req.body.note ? `<p>Their note: ${esc(req.body.note)}</p>` : '') +
         `<p>Review it on the Directory page.</p>`
       );
     }
@@ -245,7 +250,7 @@ router.post('/:id/approve', async (req, res, next) => {
     await notify(
       request.uid,
       `Access approved: ${resource ? resource.name : request.groupCn}`,
-      `<p>Your request for <strong>${resource ? resource.name : request.groupCn}</strong> was approved by ${req.user.uid}.</p>` +
+      `<p>Your request for <strong>${esc(resource ? resource.name : request.groupCn)}</strong> was approved by ${esc(req.user.uid)}.</p>` +
       `<p>You may need to sign out and back in for the change to take effect everywhere.</p>`
     );
 
@@ -278,8 +283,8 @@ router.post('/:id/deny', async (req, res, next) => {
     await notify(
       request.uid,
       `Access request declined: ${resource ? resource.name : request.groupCn}`,
-      `<p>Your request for <strong>${resource ? resource.name : request.groupCn}</strong> was declined.</p>` +
-      (req.body.decisionNote ? `<p>Reason: ${req.body.decisionNote}</p>` : '')
+      `<p>Your request for <strong>${esc(resource ? resource.name : request.groupCn)}</strong> was declined.</p>` +
+      (req.body.decisionNote ? `<p>Reason: ${esc(req.body.decisionNote)}</p>` : '')
     );
 
     res.json(envelope(updated));

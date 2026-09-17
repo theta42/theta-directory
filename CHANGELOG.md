@@ -1,3 +1,75 @@
+## [2.41.0] - 2026-09-17
+
+Notifications. The bones were fine and nothing could be turned down or trusted.
+
+### Security
+- **Any authenticated user could inject HTML into an email sent to a resource
+  owner.** `views/email_templates/notification.js` renders its body with a
+  TRIPLE mustache (`{{{message}}}`) -- deliberate, since callers compose markup
+  -- which puts the escaping obligation on every caller. `routes/access_request.js`
+  did not escape, and the string it did not escape is the one an attacker
+  controls: `req.body.note`, written by whoever is asking for access and sent to
+  the resource OWNER. A note of
+
+      <a href="https://evil.example/approve">Click here to approve</a><p style="color:#fff">
+
+  rendered as a working link to someone else's domain inside a mail the owner
+  trusts, with the real "Review it on the Directory page" line hidden after it
+  by the unclosed tag. `decisionNote` did the same in the other direction, to
+  the requester. Escaping now happens at every interpolation, via
+  `utils/html_escape.js`, which records why.
+
+  This mattered more after v2.40.0 than before it: the catalog made "Request
+  access" the primary call to action, so the road to this got wider.
+
+### Fixed
+- **A burst of model events raised a burst of toasts.** The in-app feed popped
+  one toast and one desktop notification per event, while its own list
+  collapsed correctly -- so a status sweep produced one tidy "42 resources
+  updated" row and 42 stacked toasts beside it. Fixed in
+  `@simpleworkjs/frontend` 0.5.0; see below.
+- **`ResourceEdge` events were published, gated, and subscribed to by nobody.**
+  The Directory tree is derived from the edges, so a change that touched only
+  the graph -- re-parenting a service, adopting a discovered host -- arrived and
+  was discarded, and the page needed a manual refresh. That is precisely the
+  change most in need of a redraw.
+- **`SubtypeTemplate` had no socket read gate,** so `attach()` took its
+  fail-closed branch and dropped every event. Editing a subtype template changed
+  nothing on screen until reload. Gated and subscribed.
+- **A notification subject was HTML-escaped though a subject is plain text.** A
+  resource named `R&D Wiki` arrived in the inbox as `Access request: R&amp;D
+  Wiki`.
+- **`JSON.parse(filter_value)` was unguarded,** returning a 500 for what is
+  plainly a bad request. Now a 400.
+
+### Changed
+- **A broadcast no longer blocks the request that started it.** The send loop
+  was awaited inside the handler, one SMTP round-trip per recipient, in series:
+  a few hundred users is a few hundred serial conversations before the browser
+  hears anything, and OpenResty gives up long before that. The send then carried
+  on server-side with nobody to report to and -- because the status only flipped
+  to `sent` after the loop -- the row sat at `sending` with `sent_count: 0` for
+  good.
+
+  The record is the receipt, so it is returned immediately. Progress is written
+  to the row as the send runs (every 25 recipients), and `Notification`
+  publishes model events, so the history panel follows along live. A new
+  `recipient_count` makes progress mean something: `sent_count: 40` could
+  otherwise be finished or barely begun.
+- **An interrupted send says so.** A restart mid-broadcast left the row claiming
+  to still be sending, forever. `Notification.markInterrupted()` runs at boot and
+  marks them. Deliberately not a resume: re-sending would re-deliver to everyone
+  the first run reached, and the row does not record who those were.
+- **The in-app feed can be filtered, and names what changed.** `top.ejs` gains
+  the `#notify-filters` container and a `titles` map. Without titles an access
+  request rendered as a bare "access request added" -- no who, no what -- because
+  its pk is a UUID and a UUID in a sentence is correctly suppressed.
+
+### Submodule / dependency
+- **`@simpleworkjs/frontend` 0.4.3 → 0.5.0**: muting (`'Resource:update'`,
+  `'Resource'`, `'*:update'`), a filter UI built from the models actually in the
+  feed, coalesced toasts, and `config.titles`.
+
 ## [2.40.0] - 2026-09-16
 
 The catalog at `/` becomes a curated launchpad instead of a render of the whole
