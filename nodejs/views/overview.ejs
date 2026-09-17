@@ -85,15 +85,45 @@
 		try {
 			const data = await app.api.get('notification');
 			const list = data.results || [];
-			list.forEach(function(n) {
-				n.created_on_fmt = moment(n.created_on).fromNow();
-				n.filter_label = formatFilterLabel(n.filter_type, n.filter_value, n.active_only);
-			});
+			list.forEach(decorateNotification);
 			$.scope.notificationHistory.push(...list);
 		} catch(e) {
 			if (e && e.status === 401) location.replace('/');
 			else console.error('Failed to load notification history:', e);
 		}
+	}
+
+	// A send runs in the background, so a row is not necessarily finished when
+	// you first see it. Without a status column a row that is still sending, one
+	// that failed outright, and one interrupted by a restart all render the same
+	// `0 / 0` -- which reads as "sent to nobody" in every case.
+	function decorateNotification(n) {
+		n.created_on_fmt = moment(n.created_on).fromNow();
+		n.filter_label = formatFilterLabel(n.filter_type, n.filter_value, n.active_only);
+
+		const done = Number(n.sent_count || 0) + Number(n.failed_count || 0);
+		const total = Number(n.recipient_count || 0);
+		switch (n.status) {
+			case 'sending':
+				n.status_label = total ? `sending ${done}/${total}` : 'sending';
+				n.status_class = 'text-info';
+				break;
+			case 'failed':
+				n.status_label = 'failed';
+				n.status_class = 'text-danger';
+				break;
+			case 'interrupted':
+				// A restart mid-send. Deliberately not resumed -- the row does
+				// not record who was already reached, so re-sending would
+				// re-deliver to them.
+				n.status_label = 'interrupted';
+				n.status_class = 'text-warning';
+				break;
+			default:
+				n.status_label = 'sent';
+				n.status_class = 'text-success';
+		}
+		return n;
 	}
 
 	function formatFilterLabel(type, value, active_only) {
@@ -154,12 +184,17 @@
 				filter_value,
 				active_only: activeOnly,
 			});
+			// The send runs in the background now, so the response is a receipt
+			// rather than a result: it always carries sent_count 0. Reporting it
+			// as "Sent to 0 recipient(s)" would be worse than saying nothing.
+			// The history row below follows Notification model events, so it
+			// fills in as the send progresses and settles on sent/failed.
 			msgEl.className = 'alert alert-success mt-2';
-			msgEl.textContent = `Sent to ${result.results.sent_count} recipient(s). ${result.results.failed_count} failed.`;
+			msgEl.textContent = `Queued for ${result.results.recipient_count} recipient(s). `
+				+ `Progress appears in the history below.`;
 
-			const n = result.results;
+			const n = decorateNotification(result.results);
 			n.created_on_fmt = 'just now';
-			n.filter_label   = formatFilterLabel(n.filter_type, n.filter_value, n.active_only);
 			$.scope.notificationHistory.unshift([n]);
 
 			// Reset form
@@ -358,6 +393,7 @@
 								<th class="ps-3">Sent</th>
 								<th>Subject</th>
 								<th>Filter</th>
+								<th class="text-center">Status</th>
 								<th class="text-center">✓</th>
 								<th class="text-center pe-3">✗</th>
 							</tr>
@@ -367,6 +403,7 @@
 								<td class="ps-3"><small class="text-muted">{{created_on_fmt}}</small></td>
 								<td><small>{{subject}}</small></td>
 								<td><small class="text-muted">{{filter_label}}</small></td>
+								<td class="text-center {{status_class}}"><small>{{status_label}}</small></td>
 								<td class="text-center text-success"><small>{{sent_count}}</small></td>
 								<td class="text-center text-danger pe-3"><small>{{failed_count}}</small></td>
 							</tr>
