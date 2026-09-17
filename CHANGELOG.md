@@ -1,3 +1,18 @@
+## [2.41.1] - 2026-09-17
+
+### Fixed
+- **The compose form reported every broadcast as "Sent to 0 recipient(s)".**
+  v2.41.0 moved the send into the background, which makes the POST response a
+  *receipt* rather than a result -- it always carries `sent_count: 0`, because
+  nothing has been sent yet when it returns. The form was still reading those
+  counters off the response. It now says how many the send was queued for and
+  points at the history, which follows the row live.
+- **The history table had no status column,** so a send still in flight, one
+  that failed outright, and one interrupted by a restart all rendered the same
+  `0 / 0` -- indistinguishable from "delivered to nobody". Rows now show
+  `sending 40/200`, `sent`, `failed` or `interrupted`, and update as the send
+  progresses.
+
 ## [2.41.0] - 2026-09-17
 
 Notifications. The bones were fine and nothing could be turned down or trusted.
